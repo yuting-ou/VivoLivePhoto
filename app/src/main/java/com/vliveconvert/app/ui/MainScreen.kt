@@ -93,7 +93,7 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("VLiveConvert", style = MaterialTheme.typography.titleLarge,
+                    Text("Vivo Live Photo", style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface)
                     Text("vivo 双文件实况 → 单文件实况",

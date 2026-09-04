@@ -1,8 +1,8 @@
-# Vivo Live Photo（xiaoyu改进版）
+# Vivo Live Photo（yuting改进版）
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.0.4），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.0.5），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 
 ## 背景
@@ -97,9 +97,15 @@ app/src/main/java/com/vliveconvert/app/
 └── ui/                      # Compose 界面：主列表 / 权限引导 / 共享组件
 ```
 
-## 改进版变更记录（v1.0.4）
+## 改进版变更记录
 
-### 修复闪退
+### v1.0.5
+
+- 品牌统一更名「Vivo Live Photo yuting改进版」：启动器名称、应用内标题同步更新
+
+### v1.0.4
+
+#### 修复闪退
 
 - **转换管线 OOM 闪退（根因修复）**：原版 4 路并发 + 全量 `readBytes` + 层层数组复制，
   批量转换人像实况时内存峰值可达数百 MB，`OutOfMemoryError` 不被 `catch (Exception)` 捕获直接闪退。现改为：
@@ -109,13 +115,13 @@ app/src/main/java/com/vliveconvert/app/
 - **删除原图 / 恢复原图的主线程磁盘 IO（ANR）**：批次结束后的媒体库查询与删除、回收站恢复的过滤查询全部移至 IO 线程
 - **启动时清理 MediaStore 残留**：上次异常退出遗留的 `IS_PENDING=1` 半成品记录（相册不可见却占存储）启动时自动清理
 
-### 修复 Bug
+#### 修复 Bug
 
 - **XMP 截取越界（`sniffXmp`）**：终点坐标多叠加了一个起始偏移，小文件时 `IndexOutOfBoundsException` 被吞导致 Google/小米/OPPO 内嵌单文件的排除判定失效。已修正终点计算
 - **权限误报**：用户选择「选择照片」部分授权时误报「已获得视频权限」。现仅 `READ_MEDIA_VIDEO` 完整授权视为成功，否则明确提示
 - **扫描期间选择器卡顿**：网格排序 + 分组快照改为按列表长度缓存，扫描进度轮询（200ms 重组）不再触发全量重排
 
-### 其他
+#### 其他
 
 - 应用更名「Vivo Live Photo xiaoyu改进版」，release 产物命名 `VivoLivePhoto.apk`
 - 移除误提交的 GKE 部署 CI 模板（与 Android 项目无关）
