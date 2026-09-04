@@ -102,6 +102,8 @@ class MainActivity : ComponentActivity() {
 
     // 转换后删除原图（持久化开关）
     private var deleteOriginal by mutableStateOf(false)
+    // 转换后移到相机相册（持久化开关，默认开启）：导出文件直接写入 DCIM/Camera
+    private var moveToCamera by mutableStateOf(true)
     /** 本批次成功后待删除的原图 URI（jpg + 伴生 mp4） */
     private val pendingDeleteUris = java.util.Collections.synchronizedList(mutableListOf<Uri>())
     private var deleteBaseStatus = ""
@@ -232,6 +234,9 @@ class MainActivity : ComponentActivity() {
         // 恢复删除原图开关 + 刷新可恢复记录数
         deleteOriginal = getSharedPreferences("vliveconvert", MODE_PRIVATE)
             .getBoolean("delete_original", false)
+        // 恢复「转换后移到相机相册」开关（默认开启）
+        moveToCamera = getSharedPreferences("vliveconvert", MODE_PRIVATE)
+            .getBoolean("move_to_camera", true)
         refreshRestoreCount()
         // 恢复自定义输出目录
         outputRelPath = getSharedPreferences("vliveconvert", MODE_PRIVATE)
@@ -314,7 +319,7 @@ class MainActivity : ComponentActivity() {
                                     outputPathInput = outputRelPath
                                     showOutputPathDialog = true
                                 },
-                                onMoveToCamera = { moveOutputsToCamera() },
+                                onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onOpenFixTime = { openFixTime() },
                                 deleteOriginal = deleteOriginal,
                                 onToggleDeleteOriginal = { on ->
@@ -325,6 +330,12 @@ class MainActivity : ComponentActivity() {
                                     deleteOriginal = on
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("delete_original", on).apply()
+                                },
+                                moveToCamera = moveToCamera,
+                                onToggleMoveToCamera = { on ->
+                                    moveToCamera = on
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("move_to_camera", on).apply()
                                 },
                                 onAddMore = { openBuiltInPicker() },
                                 onStartConvert = { startConvert() },
@@ -592,8 +603,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             jobs.joinAll()
+            val finalDest = if (moveToCamera) "DCIM/Camera" else outputRelPath
             val finalStatus = "转换完成：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-                "（输出目录：$outputRelPath）"
+                "（输出目录：$finalDest）"
             withContext(Dispatchers.Main) {
                 isConverting = false
                 progress = 0f
@@ -694,7 +706,10 @@ class MainActivity : ComponentActivity() {
     // ---------- 导出 ----------
 
     /**
-     * 导出到系统相册（Pictures/VLiveConvert）。
+     * 导出到系统相册。
+     * 「转换后移到相机相册」开启时直接写入 DCIM/Camera（与相机拍摄照片同目录，
+     * 重名时追加序号避免覆盖原文件——源双文件通常也在 DCIM/Camera）；
+     * 否则写入自定义输出目录（默认 Pictures/VLiveConvert）。
      * MediaStore 标准写入（IS_PENDING，写完才出现在相册）；
      * 输出为单个 .jpg（vivo 单文件实况）。
      */
@@ -703,10 +718,12 @@ class MainActivity : ComponentActivity() {
         if (!src.exists() || src.length() == 0L) {
             throw IOException("转换产物缺失或为空")
         }
+        val relPath = if (moveToCamera) "DCIM/Camera" else outputRelPath
+        val displayName = if (moveToCamera) uniqueCameraName(src.name) else src.name
         val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, src.name)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, outputRelPath)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
             put(MediaStore.MediaColumns.DATE_MODIFIED, timestamp / 1000)
             put(MediaStore.MediaColumns.DATE_TAKEN, timestamp)

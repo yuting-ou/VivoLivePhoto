@@ -67,9 +67,11 @@ fun MainScreen(
     outputRelPath: String,
     isMovingOutputs: Boolean,
     onEditOutputPath: () -> Unit,
-    onMoveToCamera: () -> Unit,
+    onMoveOutputsToCamera: () -> Unit,
     deleteOriginal: Boolean,
     onToggleDeleteOriginal: (Boolean) -> Unit,
+    moveToCamera: Boolean,
+    onToggleMoveToCamera: (Boolean) -> Unit,
     onAddMore: () -> Unit,
     onStartConvert: () -> Unit,
     onClearAll: () -> Unit,
@@ -119,7 +121,7 @@ fun MainScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onMoveToCamera)
+                                .clickableNoRipple(onMoveOutputsToCamera)
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -216,30 +218,52 @@ fun MainScreen(
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                 }
-                // ── 输出目录（点击修改） ──
+                // ── 输出目录（点击修改；「转换后移到相机相册」开启时由其接管，不再单独展示） ──
+                if (!moveToCamera) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "输出目录：$outputRelPath",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickableNoRipple(onEditOutputPath)
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                        Text(
+                            "修改",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickableNoRipple(onEditOutputPath)
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                // ── 转换后移到相机相册开关（处理中禁用，保证批次语义确定） ──
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "输出目录：$outputRelPath",
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickableNoRipple(onEditOutputPath)
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-                    Text(
-                        "修改",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickableNoRipple(onEditOutputPath)
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text("转换后移到相机相册",
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "导出文件直接写入 DCIM/Camera（与相机拍摄的照片同目录，重名自动追加序号）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = moveToCamera,
+                        onCheckedChange = onToggleMoveToCamera,
+                        enabled = !isConverting
                     )
                 }
                 // ── 转换后删除原图开关（处理中禁用，保证批次语义确定） ──
