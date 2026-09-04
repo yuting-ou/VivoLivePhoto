@@ -224,7 +224,7 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 ConvertCenter.statusText = baseStatus +
                     (if (moved > 0) "；$moved 个转换结果已以原名移入相机相册" else "")
-                ConvertCenter.persistQueue(applicationContext)
+                ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
             }
         }
     }
@@ -410,7 +410,8 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRemove = { ci ->
                                     ConvertCenter.items.removeAll { it.item.key == ci.item.key }
-                                    ConvertCenter.persistQueue(applicationContext)
+                                    ConvertCenter.persistQueue(
+                                        applicationContext, ConvertCenter.itemsSnapshot())
                                 }
                             )
                         }
@@ -599,7 +600,7 @@ class MainActivity : ComponentActivity() {
             ConvertCenter.items.add(ConvertItem(item = item))
             added++
         }
-        ConvertCenter.persistQueue(applicationContext)
+        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
         ConvertCenter.statusText = if (added > 0)
             "已添加 $added 张，共 ${ConvertCenter.items.size} 张待转换"
         else "所选照片已在列表中"

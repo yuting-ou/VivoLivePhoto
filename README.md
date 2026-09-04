@@ -2,7 +2,7 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.0.5），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.0.9），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 
 ## 背景
@@ -99,6 +99,14 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.0.9
+
+- **修复转换中闪退（严重）**：v1.0.7 引入的队列持久化在 IO 线程直接遍历 Compose 状态列表，
+  与主线程的条目状态更新并发触发 `ConcurrentModificationException`——批量转换时几乎必崩。
+  全面收口线程纪律：所有队列遍历只允许使用主线程取出的不可变快照（`itemsSnapshot()`），
+  JSON 编解码抽为纯函数 `QueueJson`（普通 List 进出），并新增 5 组队列序列化回归测试锁定行为
+- 测试基建：JVM 单测引入真实 `org.json`（替换 android.jar 的 stub 实现，共 16 测试全过）
 
 ### v1.0.8
 

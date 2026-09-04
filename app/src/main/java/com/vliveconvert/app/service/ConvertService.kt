@@ -76,7 +76,11 @@ class ConvertService : Service() {
             prefs.getString("output_rel_path", "Pictures/VLiveConvert") ?: "Pictures/VLiveConvert"
         val tempDir = File(app.cacheDir, "output").apply { mkdirs() }
 
-        val targets = ConvertCenter.items.filter { !it.done && !it.failed }
+        // 快照纪律：遍历队列必须在主线程取不可变快照（IO 直接迭代 Compose 列表
+        // 会与主线程写并发 → ConcurrentModificationException）
+        val targets = withContext(Dispatchers.Main) {
+            ConvertCenter.itemsSnapshot().filter { !it.done && !it.failed }
+        }
         val total = targets.size
         val done = AtomicInteger(0)
         val ok = AtomicInteger(0)
@@ -98,7 +102,7 @@ class ConvertService : Service() {
                         ConvertCenter.progress = d.toFloat() / total
                         ConvertCenter.progressDetail = "已处理 $d/$total"
                     }
-                    ConvertCenter.persistQueue(app) // 当前已在 IO 线程，落盘不占主线程
+                    persistQueueSnapshot()
                     notifyProgress(d, total)
                 }
             }
@@ -114,7 +118,7 @@ class ConvertService : Service() {
             ConvertCenter.progressDetail = ""
             ConvertCenter.statusText = finalStatus
         }
-        ConvertCenter.persistQueue(app)
+        persistQueueSnapshot()
         notifyDone(ok.get(), fail.get(), deleteOriginal)
 
         // 删除原图（已授权所有文件访问 → 服务内直接删；否则交由 Activity 弹系统确认）
@@ -308,8 +312,14 @@ class ConvertService : Service() {
                 }
             }
         }
-        ConvertCenter.persistQueue(applicationContext)
+        persistQueueSnapshot()
         return moved
+    }
+
+    /** 主线程取队列快照 → IO 写文件（绝不直接迭代 Compose 列表） */
+    private suspend fun persistQueueSnapshot() {
+        val snap = withContext(Dispatchers.Main) { ConvertCenter.itemsSnapshot() }
+        ConvertCenter.persistQueue(applicationContext, snap)
     }
 
     // ---------- 通知 ----------

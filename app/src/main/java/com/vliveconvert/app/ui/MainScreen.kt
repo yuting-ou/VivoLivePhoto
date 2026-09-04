@@ -44,14 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.vliveconvert.app.picker.MediaItem
 
-/** 转换列表中的一项（源照片 + 当前状态） */
-data class ConvertItem(
-    val item: MediaItem,
-    val status: String = "待转换",
-    val failed: Boolean = false,
-    val done: Boolean = false,
-)
-
 /**
  * 主界面：待转换列表 + 开始转换。
  */
