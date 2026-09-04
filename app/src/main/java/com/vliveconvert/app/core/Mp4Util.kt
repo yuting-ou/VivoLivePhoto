@@ -123,16 +123,16 @@ internal object Mp4Util {
         System.arraycopy(payload, 0, newBox, 8, payload.size)
         val delta = newBox.size
 
-        val buf = data.copyOf()
-        fixChunkOffsets(data, buf, moovOff, moovSize, insertAt, delta)
-
+        // 单次分配完成拼装（较原先 copyOf 全量副本 + 再拼接少一份大数组，降低内存峰值）：
+        // stco/co64 全部位于 moov 内（insertAt 之前），而 result 的 [0, insertAt) 段
+        // 与 data 逐字节一致，可安全在其上原地修复偏移
+        val result = ByteArray(data.size + delta)
+        System.arraycopy(data, insertAt, result, insertAt + delta, data.size - insertAt)
+        System.arraycopy(data, 0, result, 0, insertAt)
+        fixChunkOffsets(result, result, moovOff, moovSize, insertAt, delta)
         // 更新 moov size
-        BinaryUtils.writeU32BE(buf, moovOff, (moovSize + delta).toLong())
-
-        val result = ByteArray(buf.size + delta)
-        System.arraycopy(buf, 0, result, 0, insertAt)
+        BinaryUtils.writeU32BE(result, moovOff, (moovSize + delta).toLong())
         System.arraycopy(newBox, 0, result, insertAt, delta)
-        System.arraycopy(buf, insertAt, result, insertAt + delta, buf.size - insertAt)
         return result
     }
 

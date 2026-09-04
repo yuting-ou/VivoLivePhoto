@@ -126,6 +126,11 @@ fun FixTimeScreen(
     val displayOrder = remember(results, n) {
         results.orEmpty().sortedByDescending { it.sortTime }
     }
+    // 排序+分组快照缓存：仅列表长度变化时重算（扫描期间避免重复全量排序）。
+    // 必须在 @Composable 上下文中计算——LazyGrid 内容 lambda 非同类上下文
+    val gridGroups = remember(results, n) {
+        results.orEmpty().sortedByDescending { it.sortTime }.groupBy { dateKey(it.sortTime) }
+    }
 
     val toggleItem: (MediaItem) -> Unit = { item ->
         val idx = selected.indexOfFirst { it.id == item.id }
@@ -255,9 +260,7 @@ fun FixTimeScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    val sorted = results.sortedByDescending { it.sortTime }
-                    val groups = sorted.groupBy { dateKey(it.sortTime) }
-                    for ((dk, groupItems) in groups) {
+                    for ((dk, groupItems) in gridGroups) {
                         stickyHeader(key = "hdr_$dk") {
                             val allSel = groupItems.all { g -> selected.any { it.id == g.id } }
                             val someSel = groupItems.any { g -> selected.any { it.id == g.id } }

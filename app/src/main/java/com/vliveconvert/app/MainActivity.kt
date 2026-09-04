@@ -1,6 +1,7 @@
 package com.vliveconvert.app
 
 import android.Manifest
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -59,6 +60,7 @@ import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -148,14 +150,12 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         val granted = result.values.any { it }
         if (granted) {
-            val videoGranted = result.entries
-                .filter { it.key == Manifest.permission.READ_MEDIA_VIDEO }
-                .all { it.value } ||
-                result.entries
-                    .filter { it.key == Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED }
-                    .all { it.value }
+            // 伴生 MP4 依赖完整视频读取权限；「选择照片」部分授权（VISUAL_USER_SELECTED）
+            // 并不包含视频访问，此时会找不到伴生视频，须明确提示而非误报成功
+            val videoGranted = result[Manifest.permission.READ_MEDIA_VIDEO] == true
             statusText = if (videoGranted) "已获得读取照片和视频权限"
-                         else "已授权，但视频权限缺失：无法找到双文件实况的伴生视频"
+                         else "已授权照片，但缺少完整视频权限：无法找到双文件实况的伴生视频，" +
+                              "请到系统设置的权限页改为「允许所有照片和视频」"
             val action = pendingPermissionAction
             pendingPermissionAction = null
             (action ?: { openBuiltInPicker() })()
@@ -219,9 +219,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         tempOutDir = File(cacheDir, "output").apply { mkdirs() }
-        // 启动时清理上次残留的暂存产物
+        // 启动时清理上次残留的暂存产物 + MediaStore 半成品记录
         lifecycleScope.launch(Dispatchers.IO) {
             try { tempOutDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
+            cleanupPendingMediaStore()
         }
 
         mediaRepo = MediaRepo(contentResolver)
@@ -523,8 +524,11 @@ class MainActivity : ComponentActivity() {
         progressDetail = "已处理 0/${targets.size}"
 
         lifecycleScope.launch(Dispatchers.IO) {
-            // 4 路并发转换（Semaphore 限流），单文件异常隔离不中断
-            val sem = Semaphore(4)
+            // 并发度按应用堆大小动态决定：字节级转换的内存峰值约为源文件的 3~5 倍，
+            // 大堆设备最多 2 路、小堆设备串行；配合 largeHeap 与 Throwable 兜底防 OOM 闪退
+            val parallelism =
+                if (Runtime.getRuntime().maxMemory() >= 384L * 1024 * 1024) 2 else 1
+            val sem = Semaphore(parallelism)
             val total = targets.size
             val done = AtomicInteger(0)
             val ok = AtomicInteger(0)
@@ -565,13 +569,15 @@ class MainActivity : ComponentActivity() {
                                     done = true
                                 ))
                             }
-                        } catch (e: Exception) {
+                        } catch (e: CancellationException) {
+                            throw e // 协程取消必须继续传播（Activity 销毁等场景）
+                        } catch (e: Throwable) {
+                            // 兜底捕获 OutOfMemoryError 等 Error：单张标记失败，不再闪退整个应用
+                            val reason = if (e is OutOfMemoryError)
+                                "内存不足（文件过大），请减少单批数量后重试" else (e.message ?: "未知错误")
                             fail.incrementAndGet()
                             withContext(Dispatchers.Main) {
-                                replaceItem(ci, ci.copy(
-                                    status = "失败：${e.message ?: "未知错误"}",
-                                    failed = true
-                                ))
+                                replaceItem(ci, ci.copy(status = "失败：$reason", failed = true))
                             }
                         } finally {
                             // 清理本地暂存产物（已导出 / 失败均清理）
@@ -586,18 +592,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
             jobs.joinAll()
+            val finalStatus = "转换完成：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
+                "（输出目录：$outputRelPath）"
             withContext(Dispatchers.Main) {
                 isConverting = false
                 progress = 0f
                 progressDetail = ""
-                statusText = "转换完成：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-                    "（输出目录：$outputRelPath）"
-                // 删除原图开关：批次完成后一次性请求把成功项的原图移入回收站
-                if (deleteOriginal) requestDeleteOriginals(statusText)
-                // 清理暂存目录
-                lifecycleScope.launch(Dispatchers.IO) {
-                    try { tempOutDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
-                }
+                statusText = finalStatus
+            }
+            // 删除原图开关：批次完成后统一处理（媒体库查询/删除均在 IO 线程，避免主线程卡顿）
+            if (deleteOriginal) {
+                lifecycleScope.launch(Dispatchers.IO) { requestDeleteOriginals(finalStatus) }
+            }
+            // 清理暂存目录
+            lifecycleScope.launch(Dispatchers.IO) {
+                try { tempOutDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
             }
         }
     }
@@ -784,15 +793,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 批次结束后一次性请求删除原图（含伴生视频）：
+     * 批次结束后统一处理删除原图（含伴生视频），在 IO 线程调用：
      * - 已授予「所有文件访问权限」→ 直接删除，无需确认
      * - 否则 createTrashRequest 整批一次系统确认弹窗，确认后移入回收站
      */
-    private fun requestDeleteOriginals(baseStatus: String) {
+    private suspend fun requestDeleteOriginals(baseStatus: String) {
         val all = synchronized(pendingDeleteUris) { pendingDeleteUris.distinct().toList() }
         pendingDeleteUris.clear()
         if (all.isEmpty()) return
-        // 过滤已失效条目，避免请求抛异常
+        // 过滤已失效条目，避免请求抛异常（媒体库查询保持在 IO 线程）
         val valid = all.filter { uri ->
             try {
                 contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
@@ -802,7 +811,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (valid.isEmpty()) {
-            statusText = "$baseStatus；原图删除失败（无法访问原文件）"
+            withContext(Dispatchers.Main) {
+                statusText = "$baseStatus；原图删除失败（无法访问原文件）"
+            }
             return
         }
         deleteBaseStatus = baseStatus
@@ -811,18 +822,24 @@ class MainActivity : ComponentActivity() {
             for (uri in valid) {
                 try { if (contentResolver.delete(uri, null, null) > 0) deleted++ } catch (_: Exception) {}
             }
-            statusText = "$baseStatus；已直接删除 $deleted 个原文件" +
-                "（vivo 相册「第三方删除拦截」中可查看/恢复）"
+            withContext(Dispatchers.Main) {
+                statusText = "$baseStatus；已直接删除 $deleted 个原文件" +
+                    "（vivo 相册「第三方删除拦截」中可查看/恢复）"
+            }
             return
         }
         try {
             val sender = MediaStore.createTrashRequest(contentResolver, valid, true).intentSender
             pendingDeleteCount = valid.size
             lastTrashUris = valid.map { it.toString() }
-            deleteRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            withContext(Dispatchers.Main) {
+                deleteRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }
         } catch (e: Exception) {
-            statusText = "$baseStatus；原图移入回收站失败（${e.message}）"
             lastTrashUris = emptyList()
+            withContext(Dispatchers.Main) {
+                statusText = "$baseStatus；原图移入回收站失败（${e.message}）"
+            }
         }
     }
 
@@ -881,30 +898,63 @@ class MainActivity : ComponentActivity() {
     /**
      * 应用内恢复原图：把回收站中的记录（含伴生视频）通过系统确认弹窗恢复到原位置。
      * 仅覆盖「未授权所有文件访问」的回收站删除路径；已授权的直接删除由
-     * vivo 相册「第三方删除拦截」负责恢复。
+     * vivo 相册「第三方删除拦截」负责恢复。媒体库查询在 IO 线程，避免主线程卡顿。
      */
     private fun restoreTrashedOriginals() {
-        val uris = loadTrashedRecords()
-            .mapNotNull { r -> try { Uri.parse(r.uri) } catch (_: Exception) { null } }
-            .filter { uri ->
-                try {
-                    contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
-                        ?.use { it.moveToFirst() } == true
-                } catch (_: Exception) {
-                    false
+        lifecycleScope.launch(Dispatchers.IO) {
+            val uris = loadTrashedRecords()
+                .mapNotNull { r -> try { Uri.parse(r.uri) } catch (_: Exception) { null } }
+                .filter { uri ->
+                    try {
+                        contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+                            ?.use { it.moveToFirst() } == true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+            if (uris.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    clearTrashedRecords()
+                    statusText = "没有可恢复的原图（记录已过期或文件已被系统清理）"
+                }
+                return@launch
+            }
+            try {
+                val sender = MediaStore.createTrashRequest(contentResolver, uris, false).intentSender
+                withContext(Dispatchers.Main) {
+                    restoreRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    statusText = "恢复原图失败（${e.message}）"
                 }
             }
-        if (uris.isEmpty()) {
-            clearTrashedRecords()
-            statusText = "没有可恢复的原图（记录已过期或文件已被系统清理）"
-            return
         }
+    }
+
+    /**
+     * 清理上次异常退出残留的半成品导出记录（IS_PENDING=1）：
+     * MediaStore 仅向所有者暴露 pending 项，故查到的都是本应用的残留；
+     * 不清理会永久占用存储（相册不可见、不可访问）。
+     */
+    private fun cleanupPendingMediaStore() {
         try {
-            val sender = MediaStore.createTrashRequest(contentResolver, uris, false).intentSender
-            restoreRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
-        } catch (e: Exception) {
-            statusText = "恢复原图失败（${e.message}）"
-        }
+            val collection =
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val ids = mutableListOf<Long>()
+            contentResolver.query(
+                collection, arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns.IS_PENDING}=1",
+                null, null
+            )?.use { c ->
+                while (c.moveToNext()) ids.add(c.getLong(0))
+            }
+            for (id in ids) {
+                try {
+                    contentResolver.delete(ContentUris.withAppendedId(collection, id), null, null)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
     }
 
     // ---------- 输出目录与移动 ----------

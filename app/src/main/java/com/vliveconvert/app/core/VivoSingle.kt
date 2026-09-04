@@ -78,22 +78,17 @@ internal object VivoSingle {
         // ── 5. 拼装输出：[JPEG+XMP][GainMap][streamdata][video(含 lpex)][convert footer] ──
         // streamdata 附加块紧跟图像数据（与双文件中的位置一致）：普通实况为流信息，
         // 人像实况为深度/虚化数据流，相册靠它保留人像徽标与光圈/虚化后编辑。
+        // 顺序流式写出（不拼装全量 output 数组），降低大文件的内存峰值
         val streamData = asset.extras["vivo_streamdata"] as? ByteArray ?: ByteArray(0)
-        val gainmapLen = asset.gainmapJpeg?.size ?: 0
-        val output = ByteArray(primary.size + gainmapLen + streamData.size + video.size + footer.size)
-        var pos = 0
-        System.arraycopy(primary, 0, output, pos, primary.size); pos += primary.size
-        asset.gainmapJpeg?.let { System.arraycopy(it, 0, output, pos, it.size); pos += it.size }
-        if (streamData.isNotEmpty()) {
-            System.arraycopy(streamData, 0, output, pos, streamData.size); pos += streamData.size
-        }
-        System.arraycopy(video, 0, output, pos, video.size); pos += video.size
-        System.arraycopy(footer, 0, output, pos, footer.size)
-
-        // vivo 相册自己的合并文件不带 _MP 后缀，保持一致
         val outPath = File(outDir, "$stem.jpg").path
         File(outDir).mkdirs()
-        File(outPath).writeBytes(output)
+        File(outPath).outputStream().use { out ->
+            out.write(primary)
+            asset.gainmapJpeg?.let { out.write(it) }
+            if (streamData.isNotEmpty()) out.write(streamData)
+            out.write(video)
+            out.write(footer)
+        }
         log("info", "写出 vivo 单文件实况：${File(outPath).name}" +
             "（图像 ${primary.size}B + 视频 ${video.size}B（含 lpex）" +
             (if (streamData.isNotEmpty()) " + streamdata ${streamData.size}B" else "") +

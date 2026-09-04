@@ -142,8 +142,10 @@ internal object XmpTemplate {
                 val tail = head.copyOfRange(idx, head.size)
                 val end = BinaryUtils.indexOf(tail, endMarker)
                 if (end == -1) return@use ""
-                val length = idx + end + 12
-                return@use String(head.copyOfRange(idx, idx + length), Charsets.UTF_8)
+                // XMP 终点 = 起始位置 + endMarker 在 tail 中的偏移 + endMarker 长度
+                // （tail 从 idx 起算，终点换算回 head 坐标时不再叠加 idx）
+                val xmpEnd = idx + end + endMarker.size
+                return@use String(head.copyOfRange(idx, xmpEnd), Charsets.UTF_8)
             }
         } catch (e: Exception) {
             ""

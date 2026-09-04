@@ -302,6 +302,13 @@ private fun AlbumGridPage(
 
     if (results == null) return
 
+    // 排序+分组快照缓存：仅列表长度变化时重算。
+    // 扫描期间进度轮询每 200ms 触发重组，不缓存会导致每次都全量排序（千张列表卡顿）。
+    // 注意必须提到 LazyGrid 内容 lambda 之外：该 lambda 非 @Composable 上下文
+    val groups = remember(results, results.size) {
+        results.sortedByDescending { it.sortTime }.groupBy { dateKey(it.sortTime) }
+    }
+
     LazyVerticalGrid(
         state = rememberLazyGridState(),
         columns = GridCells.Fixed(3),
@@ -311,8 +318,6 @@ private fun AlbumGridPage(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        val sorted = results.sortedByDescending { it.sortTime }
-        val groups = sorted.groupBy { dateKey(it.sortTime) }
         for ((dk, groupItems) in groups) {
             stickyHeader(key = "hdr_$dk") {
                 val allSel = groupItems.all { g -> selected.any { it.id == g.id } }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.vliveconvert.app"
         minSdk = 34
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -47,12 +47,12 @@ android {
     }
 }
 
-// release 产物直接命名为 VLiveConvert.apk（输出到 app/build/outputs/apk/release/）
+// release 产物直接命名为 VivoLivePhoto.apk（输出到 app/build/outputs/apk/release/）
 androidComponents {
     onVariants { variant ->
         if (variant.buildType == "release") {
             variant.outputs.forEach { output ->
-                output.outputFileName.set("VLiveConvert.apk")
+                output.outputFileName.set("VivoLivePhoto.apk")
             }
         }
     }
