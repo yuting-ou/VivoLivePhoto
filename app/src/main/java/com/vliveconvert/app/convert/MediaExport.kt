@@ -103,7 +103,7 @@ internal object MediaExport {
         } catch (_: Exception) {}
     }
 
-    /** DCIM/Camera 内的唯一名（与现有文件重名时追加 (n)） */
+    /** DCIM/Camera 内的唯一名（与现有文件重名时追加 (n)；无冲突返回原名） */
     fun uniqueCameraName(
         resolver: android.content.ContentResolver,
         displayName: String
@@ -129,6 +129,50 @@ internal object MediaExport {
             val cand = if (ext.isEmpty()) "$stem($i)" else "$stem($i).$ext"
             if (cand !in taken) return cand
             i++
+        }
+    }
+
+    /**
+     * 把已入库的导出文件移动到 DCIM/Camera（拍摄/修改时间不变）：
+     * 应用是文件所有者，直接更新 RELATIVE_PATH + DISPLAY_NAME（MediaStore 原生移动，
+     * 不复制数据）；失败回退：在 DCIM/Camera 插入新条目并流式复制内容，再删除原条目。
+     *
+     * @param preferredName 期望的文件名：无同名冲突时直接用（原名落地）；
+     *        DCIM/Camera 已有同名文件（真实冲突）时自动追加序号兜底
+     */
+    fun moveUriToCamera(context: Context, uri: Uri, preferredName: String): Boolean {
+        val resolver = context.contentResolver
+        val newName = uniqueCameraName(resolver, preferredName)
+        try {
+            val rows = resolver.update(
+                uri,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                },
+                null, null
+            )
+            if (rows > 0) return true
+        } catch (_: Exception) {}
+        var newUri: Uri? = null
+        return try {
+            // 目标名查询与移动之间无并发写入（应用内串行），此处仍以唯一名兜底
+            newUri = resolver.insert(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+                }
+            ) ?: return false
+            resolver.openOutputStream(newUri, "w")?.use { out ->
+                resolver.openInputStream(uri)?.use { input -> input.copyTo(out) }
+            } ?: return false
+            resolver.delete(uri, null, null)
+            true
+        } catch (_: Exception) {
+            newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
+            false
         }
     }
 }

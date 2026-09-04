@@ -269,7 +269,7 @@ fun MainScreen(
                         Text("转换后移到相机相册",
                             style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "导出文件直接写入 DCIM/Camera（与相机拍摄的照片同目录，重名自动追加序号）",
+                            "写入 DCIM/Camera；配合「删除原图」时先删原图再以原名移入，不产生 (1) 序号",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

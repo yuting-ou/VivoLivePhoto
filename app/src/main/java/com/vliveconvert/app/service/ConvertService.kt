@@ -139,6 +139,10 @@ class ConvertService : Service() {
         fail: AtomicInteger
     ) {
         val app = applicationContext
+        // 「移到相机相册 + 转换后删除原图」同时开启：
+        // 产物先导出到输出目录（中转），原图删除确认完成后以原名 move 进 DCIM/Camera——
+        // 先删原图腾出文件名，转换结果保持原名、无 "(1)" 序号
+        val deferToCamera = moveToCamera && deleteOriginal
         withContext(Dispatchers.Main) {
             ConvertCenter.replaceItem(ci, ci.copy(status = "转换中…"))
         }
@@ -163,16 +167,23 @@ class ConvertService : Service() {
                         else System.currentTimeMillis())
             }
             // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）
-            MediaExport.exportAndVerify(app, result, ts, outputRelPath, moveToCamera)
+            val exportUri = MediaExport.exportAndVerify(
+                app, result, ts, outputRelPath, moveToCamera && !deferToCamera)
             ok.incrementAndGet()
+            if (deferToCamera) {
+                // 中转条目：删除原图确认完成后由 finalize 以原名移入相机相册
+                ConvertCenter.pendingFinalize.add(
+                    ConvertCenter.FinalizeEntry(exportUri, ci.item.name, ci.item.key))
+            }
             // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除
             if (deleteOriginal) collectOriginalUris(ci)
-            val destLabel = if (moveToCamera) "DCIM/Camera" else outputRelPath
+            val statusText = when {
+                deferToCamera -> "完成：待原图删除后以原名移入相机相册"
+                moveToCamera -> "完成：已导出到相册 DCIM/Camera"
+                else -> "完成：已导出到相册 $outputRelPath"
+            }
             withContext(Dispatchers.Main) {
-                ConvertCenter.replaceItem(ci, ci.copy(
-                    status = "完成：已导出到相册 $destLabel",
-                    done = true
-                ))
+                ConvertCenter.replaceItem(ci, ci.copy(status = statusText, done = true))
             }
         } catch (e: CancellationException) {
             throw e // 协程取消必须继续传播（服务销毁等场景）
@@ -219,8 +230,9 @@ class ConvertService : Service() {
 
     /**
      * 批次结束后的原图删除：
-     * 已授权所有文件访问 → 直接删除；否则把有效 URI 留在 ConvertCenter.pendingTrashUris，
-     * 等 Activity 在前台时拉起系统回收站确认弹窗。
+     * 已授权所有文件访问 → 直接删除，随后把中转的转换产物以原名移入 DCIM/Camera；
+     * 未授权 → 把有效 URI 留在 ConvertCenter.pendingTrashUris，等 Activity 在前台时
+     * 拉起系统回收站确认弹窗（确认删除后再落地原名）。
      */
     private suspend fun handleDeleteOriginals(baseStatus: String) {
         val all = synchronized(ConvertCenter.pendingTrashUris) {
@@ -250,8 +262,11 @@ class ConvertService : Service() {
                     if (contentResolver.delete(uri, null, null) > 0) deleted++
                 } catch (_: Exception) {}
             }
+            // 原图已删 → 名字已腾空，中转产物立即以原名移入相机相册
+            val moved = finalizePendingMoves()
             val msg = "$baseStatus；已直接删除 $deleted 个原文件" +
-                "（vivo 相册「第三方删除拦截」中可查看/恢复）"
+                "（vivo 相册「第三方删除拦截」中可查看/恢复）" +
+                (if (moved > 0) "；$moved 个转换结果已以原名移入相机相册" else "")
             withContext(Dispatchers.Main) { ConvertCenter.statusText = msg }
             return
         }
@@ -260,8 +275,41 @@ class ConvertService : Service() {
             ConvertCenter.pendingTrashUris.addAll(valid)
         }
         withContext(Dispatchers.Main) {
+            // 可观察计数：Activity 在前台时（onStart 不会再触发）据此拉起确认弹窗
+            ConvertCenter.pendingTrashCount = valid.size
             ConvertCenter.statusText = "$baseStatus；回到本应用确认删除原图（共 ${valid.size} 项）"
         }
+    }
+
+    /**
+     * 把中转目录中的转换产物以原名移入 DCIM/Camera（原名落地）：
+     * 原图已删除时无同名冲突，文件保持原名、无序号；
+     * 若仍有同名（真实冲突，如用户手动复制过），uniqueCameraName 兜底加序号。
+     * @return 成功移入的条数
+     */
+    private suspend fun finalizePendingMoves(): Int {
+        val entries = synchronized(ConvertCenter.pendingFinalize) {
+            ConvertCenter.pendingFinalize.toList()
+        }
+        ConvertCenter.pendingFinalize.clear()
+        var moved = 0
+        for (e in entries) {
+            val okMove = MediaExport.moveUriToCamera(this, e.uri, e.originalName)
+            if (okMove) moved++
+            // 回写单项状态（无论成败都给用户明确结果）
+            withContext(Dispatchers.Main) {
+                val idx = ConvertCenter.items.indexOfFirst { it.item.key == e.itemKey }
+                if (idx >= 0) {
+                    val ci = ConvertCenter.items[idx]
+                    ConvertCenter.items[idx] = ci.copy(
+                        status = if (okMove) "完成：已以原名移入相机相册"
+                                 else "完成：原名移入失败，文件保留在输出目录"
+                    )
+                }
+            }
+        }
+        ConvertCenter.persistQueue(applicationContext)
+        return moved
     }
 
     // ---------- 通知 ----------

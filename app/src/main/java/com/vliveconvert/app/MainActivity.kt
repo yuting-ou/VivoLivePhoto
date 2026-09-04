@@ -179,12 +179,54 @@ class MainActivity : ComponentActivity() {
                 lastTrashUris = emptyList()
                 refreshRestoreCount()
             }
-            ConvertCenter.statusText = "$deleteBaseStatus；原图已移入系统回收站（$pendingDeleteCount 项，" +
+            val base = "$deleteBaseStatus；原图已移入系统回收站（$pendingDeleteCount 项，" +
                 "以隐藏形式保留 30 天，可在本应用「恢复原图」）"
+            // 原图已删 → 名字已腾空，把中转的转换产物以原名移入相机相册（无序号）
+            finalizePendingMoves(base)
         } else {
-            ConvertCenter.statusText = "$deleteBaseStatus；已取消删除原图"
+            // 用户取消删除：原图保留，同名冲突成为真实冲突——中转产物不再自动落地，
+            // 保留在输出目录，由用户决定（后续可用顶栏「移到相机」移动，会带序号）
+            synchronized(ConvertCenter.pendingFinalize) { ConvertCenter.pendingFinalize.clear() }
+            ConvertCenter.statusText = "$deleteBaseStatus；已取消删除原图，转换结果保留在输出目录 $outputRelPath"
         }
         ConvertCenter.pendingTrashUris.clear()
+    }
+
+    /**
+     * 把中转目录中的转换产物以原名移入 DCIM/Camera（回收站确认删除后的落地）。
+     * 原图已删时无同名冲突，文件保持原名；仍有同名则自动序号兜底。
+     */
+    private fun finalizePendingMoves(baseStatus: String) {
+        val entries = synchronized(ConvertCenter.pendingFinalize) {
+            ConvertCenter.pendingFinalize.toList()
+        }
+        ConvertCenter.pendingFinalize.clear()
+        if (entries.isEmpty()) {
+            ConvertCenter.statusText = baseStatus
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            var moved = 0
+            for (e in entries) {
+                val okMove = MediaExport.moveUriToCamera(this@MainActivity, e.uri, e.originalName)
+                if (okMove) moved++
+                withContext(Dispatchers.Main) {
+                    val idx = ConvertCenter.items.indexOfFirst { it.item.key == e.itemKey }
+                    if (idx >= 0) {
+                        val ci = ConvertCenter.items[idx]
+                        ConvertCenter.items[idx] = ci.copy(
+                            status = if (okMove) "完成：已以原名移入相机相册"
+                                     else "完成：原名移入失败，文件保留在输出目录"
+                        )
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                ConvertCenter.statusText = baseStatus +
+                    (if (moved > 0) "；$moved 个转换结果已以原名移入相机相册" else "")
+                ConvertCenter.persistQueue(applicationContext)
+            }
+        }
     }
 
     // 恢复原图：系统确认弹窗（createTrashRequest(uris, false)）结果回调
@@ -247,6 +289,23 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VLiveConvertTheme {
+                // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
+                // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
+                //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
+                androidx.compose.runtime.LaunchedEffect(ConvertCenter.pendingTrashCount) {
+                    // 仅前台（当前生命周期 ≥ RESUMED）拉起：后台拉系统弹窗可能失败、被误判取消
+                    if (ConvertCenter.pendingTrashCount > 0 &&
+                        !ConvertCenter.isConverting && !trashRequestInFlight &&
+                        lifecycle.currentState.isAtLeast(
+                            androidx.lifecycle.Lifecycle.State.RESUMED)
+                    ) {
+                        trashRequestInFlight = true
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            requestDeleteOriginals(ConvertCenter.statusText)
+                        }
+                    }
+                }
+
                 // 系统返回键/侧滑返回：选择器与修复时间界面返回主页，主页保持默认退出行为；
                 // 转换中吞掉返回，防止误退
                 BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
@@ -638,6 +697,7 @@ class MainActivity : ComponentActivity() {
             ConvertCenter.pendingTrashUris.distinct().toList()
         }
         ConvertCenter.pendingTrashUris.clear()
+        withContext(Dispatchers.Main) { ConvertCenter.pendingTrashCount = 0 }
         if (all.isEmpty()) {
             trashRequestInFlight = false
             return
@@ -858,44 +918,10 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 把单个输出文件移动到 DCIM/Camera（拍摄/修改时间不变）：
-     * ① 应用是文件所有者，直接更新 RELATIVE_PATH（MediaStore 原生移动，不复制数据）；
-     * ② 失败回退：在 DCIM/Camera 插入新条目并流式复制内容，再删除原条目。
+     * 实现在 MediaExport.moveUriToCamera（owner 原生 move 优先，失败回退流式复制）。
      */
-    private fun moveOneToCamera(item: MediaItem): Boolean {
-        val newName = MediaExport.uniqueCameraName(contentResolver, item.name)
-        try {
-            val rows = contentResolver.update(
-                item.uri,
-                ContentValues().apply {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
-                },
-                null, null
-            )
-            if (rows > 0) return true
-        } catch (_: Exception) {}
-        var newUri: Uri? = null
-        try {
-            newUri = contentResolver.insert(
-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-                ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
-                    if (item.dateTaken > 0) put(MediaStore.MediaColumns.DATE_TAKEN, item.dateTaken)
-                    put(MediaStore.MediaColumns.DATE_MODIFIED, item.dateModified)
-                }
-            ) ?: return false
-            contentResolver.openOutputStream(newUri, "w")?.use { out ->
-                contentResolver.openInputStream(item.uri)?.use { input -> input.copyTo(out) }
-            } ?: throw IOException("输出流不可用")
-            contentResolver.delete(item.uri, null, null)
-            return true
-        } catch (e: Exception) {
-            newUri?.let { u -> try { contentResolver.delete(u, null, null) } catch (_: Exception) {} }
-            return false
-        }
-    }
+    private fun moveOneToCamera(item: MediaItem): Boolean =
+        MediaExport.moveUriToCamera(this, item.uri, item.name)
 
     /** 把输出目录中的全部已转换文件移动到 DCIM/Camera */
     private fun moveOutputsToCamera() {

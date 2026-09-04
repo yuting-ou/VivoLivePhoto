@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -39,6 +40,24 @@ object ConvertCenter {
      */
     val pendingTrashUris: MutableList<Uri> =
         Collections.synchronizedList(mutableListOf<Uri>())
+
+    /**
+     * 待确认删除的原图数（pendingTrashUris 快照）。
+     * 独立成 Compose 状态：批次结束、用户仍停留前台时（onStart 不会再次触发），
+     * Activity 通过观察此值变化拉起回收站确认弹窗。
+     */
+    var pendingTrashCount by mutableIntStateOf(0)
+
+    /**
+     * 待落地条目：「移到相机相册 + 转换后删除原图」同时开启时，
+     * 转换产物先导出到输出目录（中转），待原图删除确认完成后
+     * 以原名 move 进 DCIM/Camera——原图先删腾名，避免 MediaStore 自动加 "(1)" 序号
+     * （安全语义不变：原图删除发生在新文件完整落盘并自检通过之后）。
+     */
+    class FinalizeEntry(val uri: Uri, val originalName: String, val itemKey: String)
+
+    val pendingFinalize: MutableList<FinalizeEntry> =
+        Collections.synchronizedList(mutableListOf())
 
     private const val QUEUE_FILE = "convert_queue.json"
 
@@ -112,6 +131,10 @@ object ConvertCenter {
                 if (!done && !failed) {
                     pending++
                     if (status == "转换中…") status = "待转换"
+                } else if (status.contains("待原图删除后")) {
+                    // 进程中断导致落地未完成：文件已在中转目录（输出目录），
+                    // 可用顶栏「移到相机」手动移入（与原图同名时会带序号）
+                    status = "完成：已导出到输出目录，可用「移到相机」移入相册"
                 }
                 items.add(ConvertItem(item = item, status = status, failed = failed, done = done))
             }
