@@ -117,6 +117,7 @@ fun FixTimeScreen(
     val scanProgress by produceState(0 to false, state) {
         while (true) {
             value = (state?.doneCount?.get() ?: 0) to (state?.running ?: false)
+            if (state?.completed == true) break // 扫描完成即终止轮询，避免空转耗电
             delay(200)
         }
     }

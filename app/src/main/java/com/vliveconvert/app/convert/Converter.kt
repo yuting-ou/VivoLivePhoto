@@ -1,5 +1,6 @@
 package com.vliveconvert.app.convert
 
+import com.vliveconvert.app.core.SingleWriteResult
 import com.vliveconvert.app.core.VivoDual
 import com.vliveconvert.app.core.VivoSingle
 import java.io.File
@@ -13,16 +14,17 @@ internal class ConvertException(message: String) : Exception(message)
 internal object Converter {
 
     /**
-     * 把一个 vivo 双文件实况转换为单文件实况，返回输出文件路径。
+     * 把一个 vivo 双文件实况转换为单文件实况。
      *
      * @param path 源 JPG 路径（同目录须存在同名 .mp4 伴生视频）
      * @param outDir 输出目录
      * @param log 日志回调 (level, message, tag)
+     * @return 写出结果（输出路径 + 分段摘要，供导出后做写后自检）
      */
     fun convertToVivoSingle(
         path: String, outDir: String,
         log: (String, String, String) -> Unit
-    ): String {
+    ): SingleWriteResult {
         val src = File(path)
         if (!src.exists()) throw ConvertException("源文件不存在：$path")
 
@@ -35,14 +37,14 @@ internal object Converter {
         val asset = VivoDual.read(path, log)
 
         val stem = src.nameWithoutExtension
-        val outPath = VivoSingle.write(asset, outDir, stem, log)
+        val result = VivoSingle.write(asset, outDir, stem, log)
 
         // 保留源文件的修改时间（原文件名中的时间信息不丢失）
         try {
-            File(outPath).setLastModified(src.lastModified())
+            File(result.path).setLastModified(src.lastModified())
         } catch (e: Exception) {
             /* 时间戳复制失败不阻塞转换 */
         }
-        return outPath
+        return result
     }
 }

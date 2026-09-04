@@ -68,6 +68,8 @@ fun MainScreen(
     isMovingOutputs: Boolean,
     onEditOutputPath: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
+    crashLogCount: Int,
+    onExportCrashLogs: () -> Unit,
     deleteOriginal: Boolean,
     onToggleDeleteOriginal: (Boolean) -> Unit,
     moveToCamera: Boolean,
@@ -103,6 +105,18 @@ fun MainScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // 本地崩溃日志导出入口（有崩溃记录时才显示）
+                    if (crashLogCount > 0 && !isConverting) {
+                        Text(
+                            "日志",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickableNoRipple(onExportCrashLogs)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                     if (!isConverting) {
                         Text(
                             "修复时间",

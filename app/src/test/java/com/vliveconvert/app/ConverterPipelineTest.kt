@@ -4,7 +4,9 @@ import com.vliveconvert.app.convert.Converter
 import com.vliveconvert.app.core.BinaryUtils
 import com.vliveconvert.app.core.FooterUtil
 import com.vliveconvert.app.core.JpegUtil
+import com.vliveconvert.app.core.OutputVerifier
 import com.vliveconvert.app.core.VivoDual
+import com.vliveconvert.app.core.XmpTemplate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -229,7 +231,8 @@ class ConverterPipelineTest {
         val (jpg, _) = makePair(dir, "IMG_3001")
         val outDir = Files.createTempDirectory("vlc_out").toFile()
 
-        val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val outPath = result.path
         val out = File(outPath)
         assertTrue("输出文件应存在", out.exists())
         assertEquals("输出名应与源同名（vivo 相册合并产物不带后缀）",
@@ -288,7 +291,7 @@ class ConverterPipelineTest {
         assertTrue("人像实况应被识别为双文件", VivoDual.isVivoDualFile(jpg.absolutePath))
 
         val outDir = Files.createTempDirectory("vlc_portrait_out").toFile()
-        val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log).path
         val data = File(outPath).readBytes()
 
         val footer = FooterUtil.parseFooter(data)
@@ -333,6 +336,77 @@ class ConverterPipelineTest {
         val rebuilt = FooterUtil.buildFooterJson(parsed!!)
         val reparsed = com.vliveconvert.app.core.JsonMin.parse(rebuilt)
         assertEquals("嵌套 JSON 往返应无损", parsed, reparsed)
+    }
+
+    // ------------------------------------------------ 写后自检（分段 MD5） ----------
+
+    @Test
+    fun outputVerifierPassesOnFreshConversion() {
+        val dir = Files.createTempDirectory("vlc_verify").toFile()
+        val (jpg, _) = makePair(dir, "IMG_6001")
+        val outDir = Files.createTempDirectory("vlc_verify_out").toFile()
+
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        File(result.path).inputStream().use { ins ->
+            assertTrue("完好输出的分段校验应通过",
+                OutputVerifier.verify(ins, result.segments))
+        }
+    }
+
+    @Test
+    fun outputVerifierDetectsCorruption() {
+        val dir = Files.createTempDirectory("vlc_corrupt").toFile()
+        val (jpg, _) = makePair(dir, "IMG_6002")
+        val outDir = Files.createTempDirectory("vlc_corrupt_out").toFile()
+
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val out = File(result.path)
+
+        // ① 篡改视频段中部一个字节 → 校验必须失败
+        val videoSeg = result.segments.first { it.name == "video" }
+        val corrupted = out.readBytes()
+        corrupted[videoSeg.offset + videoSeg.length / 2] =
+            (corrupted[videoSeg.offset + videoSeg.length / 2] + 1).toByte()
+        File(out.path + ".bad1").writeBytes(corrupted)
+        File(out.path + ".bad1").inputStream().use { ins ->
+            assertFalse("视频段损坏应被自检发现", OutputVerifier.verify(ins, result.segments))
+        }
+
+        // ② 截断（去掉最后 10 字节）→ 校验必须失败
+        val truncated = out.readBytes().copyOfRange(0, out.length().toInt() - 10)
+        File(out.path + ".bad2").writeBytes(truncated)
+        File(out.path + ".bad2").inputStream().use { ins ->
+            assertFalse("文件截断应被自检发现", OutputVerifier.verify(ins, result.segments))
+        }
+
+        // ③ 尾部追加多余字节 → 校验必须失败
+        val padded = out.readBytes() + ByteArray(8) { 0x55 }
+        File(out.path + ".bad3").writeBytes(padded)
+        File(out.path + ".bad3").inputStream().use { ins ->
+            assertFalse("尾部多余字节应被自检发现", OutputVerifier.verify(ins, result.segments))
+        }
+    }
+
+    // ------------------------------------------------ sniffXmp 回归（off-by-idx 修复） ----------
+
+    @Test
+    fun sniffXmpDetectsEmbeddedMotionOnTinyFile() {
+        // 构造「SOI + XMP APP1 + EOI」的极小文件：XMP 起始偏移 idx=4，
+        // 结束标记后仅剩 2 字节 EOI（< idx）。旧实现的终点 = idx+end+12+idx，
+        // 会越界 2 字节 → IndexOutOfBoundsException 被 catch 吞掉 → 返回空串
+        // → 内嵌动态照片标记漏检。修复后应正确检出 MotionPhoto="1"
+        val dir = Files.createTempDirectory("vlc_sniff").toFile()
+        val xmp = """<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:GCamera="http://ns.google.com/photos/1.0/camera/" GCamera:MotionPhoto="1" GCamera:MotionPhotoVersion="1"/></rdf:RDF></x:xmpmeta>"""
+        val tiny = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) +
+            JpegUtil.buildXmpApp1(xmp) +
+            byteArrayOf(0xFF.toByte(), 0xD9.toByte())
+        val f = File(dir, "IMG_7001.jpg").apply { writeBytes(tiny) }
+
+        val sniffed = XmpTemplate.sniffXmp(f.absolutePath)
+        assertTrue("极小文件的 XMP 应被完整截取（含结束标记）",
+            sniffed.contains("</x:xmpmeta>"))
+        assertTrue("内嵌 MotionPhoto 标记应被检出",
+            XmpTemplate.parseMotionXmp(sniffed).isMotion)
     }
 
     companion object {

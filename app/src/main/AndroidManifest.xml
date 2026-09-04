@@ -17,6 +17,7 @@
     <!-- largeHeap：字节级无损转换需同时持有 JPG/MP4 多份副本，
          大照片（4K 人像实况可达 50MB+）在默认堆下易 OOM 闪退 -->
     <application
+        android:name=".VliveApp"
         android:largeHeap="true"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
@@ -39,6 +40,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 批量转换前台服务：转换不随界面销毁/切后台而中断 -->
+        <service
+            android:name=".service.ConvertService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

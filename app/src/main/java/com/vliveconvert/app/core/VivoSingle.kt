@@ -18,12 +18,12 @@ import java.io.File
 internal object VivoSingle {
 
     /**
-     * 写出 vivo 单文件实况（MotionPhoto="1"），返回输出文件路径（$stem.jpg）。
+     * 写出 vivo 单文件实况（MotionPhoto="1"），返回写出结果（路径 + 分段摘要）。
      */
     fun write(
         asset: LivePhotoAsset, outDir: String, stem: String,
         log: (String, String, String) -> Unit
-    ): String {
+    ): SingleWriteResult {
         // ── 1. 处理源视频：剥 vivoMediaExtInfo（源 footer 包装），保留 vivoMediaEStream ──
         // vivo 双文件 mp4 尾部布局：
         //   [ftyp…mdat][vivoMediaEStream uuid 138B][vivoMediaExtInfo uuid 2691B(内嵌源 cameralbum footer)]
@@ -78,22 +78,30 @@ internal object VivoSingle {
         // ── 5. 拼装输出：[JPEG+XMP][GainMap][streamdata][video(含 lpex)][convert footer] ──
         // streamdata 附加块紧跟图像数据（与双文件中的位置一致）：普通实况为流信息，
         // 人像实况为深度/虚化数据流，相册靠它保留人像徽标与光圈/虚化后编辑。
-        // 顺序流式写出（不拼装全量 output 数组），降低大文件的内存峰值
+        // 顺序流式写出（不拼装全量 output 数组），降低大文件的内存峰值；
+        // 同时记录每段的偏移与 MD5（导出后据此做写后自检，防静默损坏）
         val streamData = asset.extras["vivo_streamdata"] as? ByteArray ?: ByteArray(0)
         val outPath = File(outDir, "$stem.jpg").path
         File(outDir).mkdirs()
+        val segments = mutableListOf<SegmentDigest>()
+        var pos = 0
         File(outPath).outputStream().use { out ->
-            out.write(primary)
-            asset.gainmapJpeg?.let { out.write(it) }
-            if (streamData.isNotEmpty()) out.write(streamData)
-            out.write(video)
-            out.write(footer)
+            fun writeSegment(name: String, bytes: ByteArray) {
+                out.write(bytes)
+                segments.add(SegmentDigest(name, pos, bytes.size, OutputVerifier.md5Of(bytes)))
+                pos += bytes.size
+            }
+            writeSegment("primary", primary)
+            asset.gainmapJpeg?.let { writeSegment("gainmap", it) }
+            if (streamData.isNotEmpty()) writeSegment("streamdata", streamData)
+            writeSegment("video", video)
+            writeSegment("footer", footer)
         }
         log("info", "写出 vivo 单文件实况：${File(outPath).name}" +
             "（图像 ${primary.size}B + 视频 ${video.size}B（含 lpex）" +
             (if (streamData.isNotEmpty()) " + streamdata ${streamData.size}B" else "") +
             " + footer ${footer.size}B）", "vivo")
-        return outPath
+        return SingleWriteResult(outPath, segments)
     }
 
     /**

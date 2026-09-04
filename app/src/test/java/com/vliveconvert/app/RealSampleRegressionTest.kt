@@ -48,7 +48,7 @@ class RealSampleRegressionTest {
         assertTrue("$stem 应识别为双文件实况", VivoDual.isVivoDualFile(jpg.absolutePath))
 
         val outDir = Files.createTempDirectory("vlc_real_$stem").toFile()
-        val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log).path
         val data = File(outPath).readBytes()
         println("REAL_OUTPUT: $outPath (${data.size}B)")
 
@@ -122,7 +122,7 @@ class RealSampleRegressionTest {
 
             // ── 转换 ──
             val outDir = Files.createTempDirectory("vlc_audit_$stem").toFile()
-            val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+            val outPath = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log).path
             val data = File(outPath).readBytes()
 
             // ── 2) 视频段预期结果（write 会对无 lpex 的源插入 lpex box，moov 尺寸字段随之变化）──

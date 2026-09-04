@@ -112,10 +112,12 @@ fun PickerScreen(
     val state = remember(bucketId) { if (bucketId != null) scanner.stateOf(bucketId) else null }
     val results = state?.results
     val total = state?.total ?: 0
-    // 进度轮询（done/running 为普通并发变量，需轮询驱动重组）
+    // 进度轮询（done/running 为普通并发变量，需轮询驱动重组）；
+    // 扫描完成后终止轮询，避免空转耗电（重新进入扫描会生成新 state 自动重启轮询）
     val progress by produceState(0 to false, state) {
         while (true) {
             value = (state?.doneCount?.get() ?: 0) to (state?.running ?: false)
+            if (state?.completed == true) break
             delay(200)
         }
     }
