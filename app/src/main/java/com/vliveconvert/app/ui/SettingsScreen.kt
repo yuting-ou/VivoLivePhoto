@@ -55,7 +55,8 @@ fun SettingsScreen(
     onToggleDeleteOriginal: (Boolean) -> Unit,
     onOpenFixTime: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
-    onExportCrashLogs: () -> Unit
+    onExportCrashLogs: () -> Unit,
+    onOpenAbout: () -> Unit
 ) {
     Column(
         Modifier
@@ -153,6 +154,14 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── 关于 ──（GPL-3.0 合规：许可证文本随包内置，可在应用内查看）
+            SectionLabel("关于")
+            SettingsCard {
+                ActionRow("关于与开源许可", onOpenAbout)
             }
 
             Spacer(Modifier.height(24.dp))

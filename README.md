@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.3.2），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.4.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.3.2.apk`](./VivoLivePhoto-v1.3.2.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.4.0.apk`](./VivoLivePhoto-v1.4.0.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,45 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.4.0
+
+本轮为「代码审查 + 加固」，不新增功能，重点修正确性缺陷与降低内存峰值。
+
+- **修复：取消转换后仍会多写一张照片（正确性）**。`Converter.convertToVivoSingle` 是阻塞式
+  JVM 调用，协程取消对它无效——用户点「取消转换」后，正在跑的那张仍会跑完并**照样写进相册**；
+  而条目被复位成「待转换」，产物却已存在，再次转换会产生 `IMG_x(1).jpg` 重复文件。
+  现于阻塞转换返回后、导出前显式做取消检查；并把导出后的状态写入改为 `NonCancellable`，
+  确保「产物已存在」时状态如实记为完成
+- **修复：伴生 MP4 名字匹配大小写敏感（正确性）**。JPG 侧扩展名判定用 `ignoreCase`，
+  MP4 侧却只硬拼小写 `.mp4`——相机若写出 `.MP4`，该照片会被判为「非双文件」而在选择器里
+  **静默消失**。现同时尝试 `.mp4` / `.MP4`；「转换后删除原图」也改为复用同一套解析，杜绝两处规则分叉
+  （未采用「遍历目录做全匹配」：该函数对每张 JPG 调用一次，全匹配会让千张相册退化成 O(n²)）
+- **内存优化：峰值降低约一份整图**。原先管道存在多处「整份拷贝」：
+  - 解析前先 `copyOfRange` 出整份 JPG 正文 → 改为在整份文件上按**区间**解析
+    （`splitJpegs`/`iterateSegments`/`findEoiEnd` 增加区间上界，上界失效会越界解析尾部数据，已有测试覆盖）
+  - XMP 替换再生成一份与主图等长的新数组 → 改为 `[主图前段][新 XMP][主图后段]` **分三段流式写出**，
+    摘要也按切片计算（`OutputVerifier.md5Of` 新增切片重载）
+  大照片（人像实况单张可达数十 MB）此前 2 路并发逼近 largeHeap 上限、易成片「内存不足」失败，现明显缓解
+- **新增 UI / Activity 层测试（Robolectric）**。此前 33 个单测只覆盖 `core/` 的字节转换管道，
+  **不实例化 Activity、不构建 Compose 树**——v1.3.1 的闪退与「空状态 + 点不动」都出在这一层，
+  单测全绿也发现不了。现补 4 组：Activity 启动、授权后渲染主界面、内置许可证资源可读、品牌资源一致。
+  该测试已用「注入渲染期崩溃」反向验证过确实会失败
+- **新增「关于与开源许可」页（GPL-3.0 合规）**。以 GPL-3.0 分发二进制应随附许可证文本与源码获取方式，
+  此前 APK 内没有任何许可入口。现完整 GPL-3.0 文本随包内置（`res/raw`），并在设置页提供入口
+- 品牌名统一取自 `R.string.app_display_name`（原先顶栏/权限页/通知栏 3 处硬编码 + 资源共 4 个来源）
+- 清理遗留的 `ExampleUnitTest` 模板测试
+- 验证：**37 组 JVM 单测全绿**（含内存改动 5 组等价性回归：区间解析与旧路径逐字节一致、
+  区间上界生效、大写扩展名识别、流式写出的主图非 XMP 段逐字节不变、源无 XMP 的回退路径），
+  Android Lint 零 error/warning，release 构建通过、签名校验通过、打包后 APK 权限与内置许可文本实查通过
+
+#### 本地验证流程
+
+```bash
+./gradlew :app:testDebugUnitTest :app:lintDebug
+# 受限网络（企业代理 / CI）下 Robolectric 首次运行需下载 android-all 运行时：
+./gradlew :app:testDebugUnitTest -PtestProxyHost=<proxy> -PtestProxyPort=<port>
+```
 
 ### v1.3.2
 

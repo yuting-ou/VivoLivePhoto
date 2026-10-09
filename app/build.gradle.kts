@@ -13,8 +13,8 @@ android {
         applicationId = "com.vliveconvert.app"
         minSdk = 34
         targetSdk = 37
-        versionCode = 16
-        versionName = "1.3.2"
+        versionCode = 17
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -45,6 +45,28 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests {
+            // Robolectric 需要访问 res/ 资源与合并后的清单
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+// 受限网络环境（企业代理 / CI 沙箱）下，Robolectric 首次运行需下载 android-all 运行时，
+// 直连会失败。仅在显式传入 -PtestProxyHost=... -PtestProxyPort=... 时才把代理透传给
+// 测试 JVM——常规本地构建不受任何影响。
+tasks.withType<Test>().configureEach {
+    val proxyHost = providers.gradleProperty("testProxyHost").orNull
+    val proxyPort = providers.gradleProperty("testProxyPort").orNull
+    if (!proxyHost.isNullOrBlank() && !proxyPort.isNullOrBlank()) {
+        listOf(
+            "http.proxyHost", "https.proxyHost", "robolectric.dependency.proxy.host"
+        ).forEach { systemProperty(it, proxyHost) }
+        listOf(
+            "http.proxyPort", "https.proxyPort", "robolectric.dependency.proxy.port"
+        ).forEach { systemProperty(it, proxyPort) }
+    }
 }
 
 // release 产物直接命名为 VivoLivePhoto.apk（输出到 app/build/outputs/apk/release/）
@@ -71,6 +93,10 @@ dependencies {
     testImplementation(libs.junit)
     // JVM 单测替换 android.jar 的 org.json stub（stub 全部方法抛异常）为真实实现
     testImplementation("org.json:json:20240303")
+    // UI / Activity 层测试：在 JVM 上跑真实 Android 框架（此前该层完全无测试，
+    // v1.3.1「点击开始转换闪退」正是发生在这层；单测只覆盖 core/ 转换管道）
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test:core:1.6.1")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

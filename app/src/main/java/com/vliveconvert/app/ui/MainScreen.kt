@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun MainScreen(
     items: List<ConvertItem>,
+    /** 应用内品牌名（统一取自 R.string.app_display_name，避免多处硬编码） */
+    appName: String,
     statusText: String,
     isConverting: Boolean,
     progress: Float,
@@ -101,7 +103,7 @@ fun MainScreen(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Vivo Live Photo",
+                    appName,
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )

@@ -20,12 +20,16 @@ import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.Converter
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
+import com.vliveconvert.app.core.VivoDual
 import com.vliveconvert.app.ui.ConvertItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -196,6 +200,11 @@ class ConvertService : Service() {
                 }
             )
             staged = result.path
+            // 取消检查：Converter.convertToVivoSingle 是阻塞式 JVM 调用（读取/写出文件），
+            // 协程取消对它无效——用户点「取消转换」后它仍会跑完。若此处不显式检查，
+            // 取消后依然会执行下面的导出，导致「用户已取消，相册却多出一张」，
+            // 且该条目被复位成「待转换」、产物却已存在，重转时还会产生 (1) 重复文件。
+            currentCoroutineContext().ensureActive()
             // 拍摄时间优先；缺失回退文件名解析，再回退修改时间
             val ts = when {
                 ci.item.dateTaken > 0 -> ci.item.dateTaken
@@ -232,7 +241,10 @@ class ConvertService : Service() {
                 moveToCamera -> "完成：已导出到相册 DCIM/Camera"
                 else -> "完成：已导出到相册 $outputRelPath"
             } + (if (!isReconvert && !result.sourceHasGps) "（源文件无 GPS 位置数据）" else "")
-            withContext(Dispatchers.Main) {
+            // 状态写入用 NonCancellable：若取消恰好发生在导出过程中（产物已入库），
+            // 这一笔必须如实记成「完成」——否则条目显示「待转换」而文件已存在，
+            // 用户再转一次就会得到 (1) 重复文件。
+            withContext(NonCancellable + Dispatchers.Main) {
                 ConvertCenter.replaceItem(ci, ci.copy(
                     status = statusText, done = true,
                     // 重转已获权限，结果即最终结论：找到位置或源本身无位置，均不再标记丢失
@@ -261,10 +273,11 @@ class ConvertService : Service() {
     /** 收集待删除原图 URI：jpg 用媒体 URI；伴生 mp4 按 DATA 路径回查视频集合 */
     private fun collectOriginalUris(ci: ConvertItem) {
         try { ConvertCenter.pendingTrashUris.add(ci.item.uri) } catch (_: Exception) {}
-        val stem = ci.item.path.substringBeforeLast('.')
-        val mp4Path = "$stem.mp4"
+        // 复用 VivoDual 的伴生视频解析（含大小写兼容），避免两处逻辑分叉：
+        // 原先这里独立硬拼 ".mp4"，与识别链路的规则不一致
+        val mp4Path = VivoDual.siblingMp4(ci.item.path) ?: return
         val mp4 = File(mp4Path)
-        if (mp4.exists() && mp4.length() > 8L) {
+        if (mp4.length() > 8L) {
             resolveVideoUriByPath(mp4Path)?.let { ConvertCenter.pendingTrashUris.add(it) }
         }
     }
@@ -385,7 +398,7 @@ class ConvertService : Service() {
         ensureChannel()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_convert)
-            .setContentTitle("Vivo Live Photo")
+            .setContentTitle(getString(R.string.app_display_name))
             .setContentText(
                 if (total > 0) "正在转换实况照片 $done/$total" else "正在准备转换…")
             .setProgress(total, done, indeterminate)

@@ -14,13 +14,27 @@ import kotlin.math.round
  */
 internal object VivoDual {
 
-    /** 同目录同名 .mp4 伴生视频路径；不存在返回 null。 */
+    /**
+     * 同目录同名 .mp4 伴生视频路径；不存在返回 null。
+     *
+     * 大小写策略：JPG 侧用 `ignoreCase` 判定扩展名，MP4 侧原先却只硬拼小写 `.mp4`
+     * 再 `exists()`——标准不一致。在区分大小写的文件系统（Android 的 ext4/F2FS）上，
+     * 相机若写出 `IMG_001.MP4`，这张照片会被判为「非双文件」而在选择器里静默消失。
+     * 故这里额外尝试大写扩展名。
+     *
+     * 为什么不做「遍历目录做不区分大小写的全匹配」：本函数在扫描相册时对**每张 JPG**
+     * 调用一次，而对没有伴生视频的普通照片，全匹配要把整个 DCIM/Camera 列一遍，
+     * 千张相册会退化成 O(n²)。大写变体已覆盖现实中的全部情形，代价只是多一次 stat。
+     */
     fun siblingMp4(path: String): String? {
         val file = File(path)
         val parent = file.parentFile
-        val mp4 = if (parent != null) File(parent, "${file.nameWithoutExtension}.mp4").path
-                  else "${file.nameWithoutExtension}.mp4"
-        return if (File(mp4).exists()) mp4 else null
+        val stem = file.nameWithoutExtension
+        for (ext in listOf("mp4", "MP4")) {
+            val candidate = if (parent != null) File(parent, "$stem.$ext") else File("$stem.$ext")
+            if (candidate.exists()) return candidate.path
+        }
+        return null
     }
 
     /**
@@ -69,16 +83,18 @@ internal object VivoDual {
         val mp4Path = siblingMp4(path)
             ?: throw VivoDualException("缺少伴生视频文件：${File(path).nameWithoutExtension}.mp4")
 
-        // JPG 主体（去除 footer）→ 拆 Primary / GainMap / streamdata 附加块
-        val body = data.copyOfRange(0, footer.footerStart)
-        val (jpegs, consumed) = JpegUtil.splitJpegs(body)
+        // JPG 主体（footer 之前）→ 拆 Primary / GainMap / streamdata 附加块。
+        // 直接在整份文件上按区间解析（[0, footerStart)），不先 copyOfRange 出等长副本：
+        // 大照片这一份副本就与整图等大，省掉它可显著降低内存峰值。
+        val bodyEnd = footer.footerStart
+        val (jpegs, consumed) = JpegUtil.splitJpegs(data, 0, bodyEnd)
         if (jpegs.isEmpty()) throw VivoDualException("JPG 主体解析失败")
         val primary = jpegs[0]
         val gainmap = if (jpegs.size > 1) jpegs[1] else null
         // JPEG 之后的附加数据块（"streamdata" 魔数开头的 vivo 私有流）：
         // 普通实况约 114B（DEGS 流信息）；人像实况约 4MB（IAC 深度/虚化数据，
         // 丢失会导致相册不再显示人像徽标、无法后编辑光圈/虚化）。必须原样透传。
-        val streamData = if (consumed < body.size) body.copyOfRange(consumed, body.size) else ByteArray(0)
+        val streamData = if (consumed < bodyEnd) data.copyOfRange(consumed, bodyEnd) else ByteArray(0)
 
         // MP4：剥离末尾 vivoMediaExtInfo uuid box（内嵌源 footer 包装）
         val mp4Raw = File(mp4Path).readBytes()

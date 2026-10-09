@@ -10,6 +10,7 @@ import com.vliveconvert.app.core.XmpTemplate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -619,6 +620,128 @@ class ConverterPipelineTest {
         assertTrue("输出 XMP 应声明 exif 命名空间", outXmp.xmpText.contains("xmlns:exif="))
         // vivo 实况识别字段完整保留
         assertTrue(outXmp.xmpText.contains("GCamera:MotionPhoto=\"1\""))
+    }
+
+    // ------------------------------------------------ 内存优化的等价性回归 ----------
+
+    @Test
+    fun splitJpegsRangeEqualsLegacyWholeArrayParsing() {
+        // 内存优化把「先 copyOfRange 出 JPG 正文再解析」改为「整数组 + 区间解析」。
+        // 必须证明两条路径结果完全一致，否则会静默改变解析边界（数据安全事故）。
+        val data = vivoDualJpeg()
+        val footer = FooterUtil.parseFooter(data)!!
+        val bodyEnd = footer.footerStart
+
+        val legacyBody = data.copyOfRange(0, bodyEnd)
+        val legacy = JpegUtil.splitJpegs(legacyBody)
+        val ranged = JpegUtil.splitJpegs(data, 0, bodyEnd)
+
+        assertEquals("JPEG 数量应一致", legacy.first.size, ranged.first.size)
+        for (i in legacy.first.indices) {
+            assertTrue("第 $i 个 JPEG 应与旧路径逐字节一致",
+                legacy.first[i].contentEquals(ranged.first[i]))
+        }
+        assertEquals("consumed 应为绝对偏移且与旧路径一致", legacy.second, ranged.second)
+
+        // 尾部附加数据块（streamdata）取法必须一致
+        val legacyStream = legacyBody.copyOfRange(legacy.second, bodyEnd)
+        val newStream = data.copyOfRange(ranged.second, bodyEnd)
+        assertTrue("streamdata 附加块应一致", legacyStream.contentEquals(newStream))
+        assertTrue("streamdata 附加块应非空", newStream.isNotEmpty())
+    }
+
+    @Test
+    fun splitJpegsRangeStopsAtRegionEndNotArrayEnd() {
+        // 区间上界必须真正生效：把 EOI 之后塞入「看起来像 JPEG 头」的字节，
+        // 若上界失效就会越界解析尾部数据。
+        val base = minimalJpeg()
+        val trailing = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) + ByteArray(32) { 0x41 }
+        val data = base + trailing
+        val (jpegs, consumed) = JpegUtil.splitJpegs(data, 0, base.size)
+        assertEquals("只应解析出 1 个 JPEG", 1, jpegs.size)
+        assertTrue("第一个 JPEG 应与原文一致", jpegs[0].contentEquals(base))
+        assertEquals("consumed 应停在区间终点", base.size, consumed)
+    }
+
+    @Test
+    fun siblingMp4MatchesUppercaseExtension() {
+        // JPG 侧扩展名判定用 ignoreCase，MP4 侧原先只硬拼小写——
+        // 相机若写出 .MP4，该照片会被判为「非双文件」在选择器里静默消失
+        val dir = Files.createTempDirectory("vlc_case").toFile()
+        val jpg = File(dir, "IMG_9201.jpg").apply { writeBytes(vivoDualJpeg()) }
+        File(dir, "IMG_9201.MP4").writeBytes(vivoDualMp4())
+
+        assertEquals("大写扩展名的伴生视频应能解析到",
+            "IMG_9201.MP4", File(VivoDual.siblingMp4(jpg.absolutePath)!!).name)
+        assertTrue("大写扩展名也应识别为 vivo 双文件",
+            VivoDual.isVivoDualFile(jpg.absolutePath))
+    }
+
+    @Test
+    fun streamingXmpWriteKeepsPrimaryBytesOutsideXmpIntact() {
+        // XMP 改为 [前段][新 XMP][后段] 流式写出（不再生成整图副本）。
+        // 关键不变量：主图除 XMP 段以外必须逐字节原样，否则图像数据被破坏。
+        // 注意样本必须**自带 XMP 段**——否则走的是「源无 XMP」的回退路径，覆盖不到本次改动
+        val dir = Files.createTempDirectory("vlc_stream").toFile()
+        val sourceXmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF " +
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+            "<rdf:Description rdf:about=\"\"/></rdf:RDF></x:xmpmeta>"
+        val srcPrimary = JpegUtil.replaceOrInsertXmp(minimalJpeg(), sourceXmp)
+        val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        ))
+        val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "IMG_9301.jpg").apply {
+            writeBytes(srcPrimary + fakeStreamData("DEGS", 64, 11) + jpgFooter)
+        }
+        File(dir, "IMG_9301.mp4").apply { writeBytes(vivoDualMp4()) }
+
+        // 前置断言：样本确实带 XMP 且能被识别（否则测试无意义）
+        assertNotNull("样本主图应带 XMP 段", JpegUtil.findXmpSegment(srcPrimary))
+        assertTrue("样本应被识别为双文件", VivoDual.isVivoDualFile(jpg.absolutePath))
+
+        val outDir = Files.createTempDirectory("vlc_stream_out").toFile()
+        val outPath = Converter.convertToVivoSingle(
+            jpg.absolutePath, outDir.absolutePath, ::log).path
+        val out = File(outPath).readBytes()
+
+        val srcXmp = JpegUtil.findXmpSegment(srcPrimary)!!
+        val outXmp = JpegUtil.findXmpSegment(out)!!
+
+        // ① XMP 之前逐字节一致
+        assertTrue("主图 XMP 前段应逐字节保留",
+            srcPrimary.copyOfRange(0, srcXmp.segStart)
+                .contentEquals(out.copyOfRange(0, outXmp.segStart)))
+        // ② XMP 之后（至源主图结尾）逐字节一致
+        val srcAfter = srcPrimary.copyOfRange(srcXmp.segStart + srcXmp.totalLen, srcPrimary.size)
+        val outAfterStart = outXmp.segStart + outXmp.totalLen
+        assertTrue("主图 XMP 后段应逐字节保留",
+            srcAfter.contentEquals(
+                out.copyOfRange(outAfterStart, outAfterStart + srcAfter.size)))
+        // ③ 新 XMP 确实是 vivo 单文件实况标记
+        assertTrue(outXmp.xmpText.contains("""GCamera:MotionPhoto="1""""))
+        assertTrue(outXmp.xmpText.contains("ns.vivo.com/photos"))
+    }
+
+    /** 源无 XMP 时的回退路径同样必须产出合法结果（插入而非替换） */
+    @Test
+    fun sourceWithoutXmpStillConvertsViaInsertPath() {
+        val dir = Files.createTempDirectory("vlc_noxmp").toFile()
+        val (jpg, _) = makePair(dir, "IMG_9302")
+        // 前置断言：样本主图确实没有 XMP
+        val src = jpg.readBytes()
+        val srcFooter = FooterUtil.parseFooter(src)!!
+        val (srcJpegs, _) = JpegUtil.splitJpegs(src, 0, srcFooter.footerStart)
+        assertNull("该样本主图应无 XMP 段", JpegUtil.findXmpSegment(srcJpegs[0]))
+
+        val outDir = Files.createTempDirectory("vlc_noxmp_out").toFile()
+        val outPath = Converter.convertToVivoSingle(
+            jpg.absolutePath, outDir.absolutePath, ::log).path
+        val outXmp = JpegUtil.findXmpSegment(File(outPath).readBytes())
+        assertNotNull("回退路径也应插入 vivo 单文件实况 XMP", outXmp)
+        assertTrue(outXmp!!.xmpText.contains("""GCamera:MotionPhoto="1""""))
     }
 
     companion object {

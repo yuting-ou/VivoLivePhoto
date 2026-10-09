@@ -25,7 +25,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun PermissionScreen(
     onRequest: () -> Unit,
-    statusText: String
+    statusText: String,
+    /** 应用内品牌名（统一取自 R.string.app_display_name） */
+    appName: String
 ) {
     Column(
         Modifier
@@ -36,7 +38,7 @@ fun PermissionScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Vivo Live Photo", style = MaterialTheme.typography.headlineSmall,
+        Text(appName, style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(8.dp))
         Text("vivo 双文件实况 → 单文件实况",

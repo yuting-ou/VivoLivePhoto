@@ -70,4 +70,18 @@ internal object OutputVerifier {
     /** 计算字节数组的 MD5 十六进制串（写端生成分段摘要用） */
     fun md5Of(bytes: ByteArray): String =
         MessageDigest.getInstance("MD5").digest(bytes).toHexString()
+
+    /**
+     * 计算字节数组**切片** [offset, offset+length) 的 MD5。
+     * 供流式写出使用：主图按 [前段][新 XMP][后段] 分别写出时，
+     * 无需为取摘要而先把整图复制成一个新数组（正是内存优化要消除的开销）。
+     */
+    fun md5Of(bytes: ByteArray, offset: Int, length: Int): String {
+        require(offset >= 0 && length >= 0 && offset + length <= bytes.size) {
+            "切片越界：offset=$offset length=$length size=${bytes.size}"
+        }
+        val md = MessageDigest.getInstance("MD5")
+        md.update(bytes, offset, length)
+        return md.digest().toHexString()
+    }
 }

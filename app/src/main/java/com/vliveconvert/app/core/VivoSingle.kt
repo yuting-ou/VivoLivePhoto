@@ -81,7 +81,13 @@ internal object VivoSingle {
         }
         val xmp = XmpTemplate.buildVivoSingleXmp(
             pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps)
-        val primary = JpegUtil.replaceOrInsertXmp(asset.primaryJpeg, xmp)
+        val primary = asset.primaryJpeg
+        // 主图 XMP 段位置：命中时按 [前段][新 XMP][后段] 流式写出，
+        // 不再调用 replaceOrInsertXmp 生成一份与主图等长的新数组（内存优化）
+        val oldXmpSeg = JpegUtil.findXmpSegment(primary)
+        val primaryOutLen = if (oldXmpSeg != null)
+            primary.size - oldXmpSeg.totalLen + JpegUtil.buildXmpApp1(xmp).size
+        else primary.size + JpegUtil.buildXmpApp1(xmp).size
 
         // ── 5. 拼装输出：[JPEG+XMP][GainMap][streamdata][video(含 lpex)][convert footer] ──
         // streamdata 附加块紧跟图像数据（与双文件中的位置一致）：普通实况为流信息，
@@ -94,19 +100,30 @@ internal object VivoSingle {
         val segments = mutableListOf<SegmentDigest>()
         var pos = 0
         File(outPath).outputStream().use { out ->
-            fun writeSegment(name: String, bytes: ByteArray) {
-                out.write(bytes)
-                segments.add(SegmentDigest(name, pos, bytes.size, OutputVerifier.md5Of(bytes)))
-                pos += bytes.size
+            // 只写切片、不做数组复制（out.write 带 offset/len 直接落盘，摘要也按切片算）
+            fun writeSegment(name: String, bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
+                out.write(bytes, offset, length)
+                segments.add(SegmentDigest(
+                    name, pos, length, OutputVerifier.md5Of(bytes, offset, length)))
+                pos += length
             }
-            writeSegment("primary", primary)
+            if (oldXmpSeg != null) {
+                // 已有 XMP：按 [主图前段][新 XMP][主图后段] 三段写出
+                writeSegment("primary-pre", primary, 0, oldXmpSeg.segStart)
+                writeSegment("xmp", JpegUtil.buildXmpApp1(xmp))
+                val after = oldXmpSeg.segStart + oldXmpSeg.totalLen
+                writeSegment("primary-post", primary, after, primary.size - after)
+            } else {
+                // 源无 XMP（vivo 双文件极罕见）：插入会改变整体布局，回退整数组路径
+                writeSegment("primary", JpegUtil.replaceOrInsertXmp(primary, xmp))
+            }
             asset.gainmapJpeg?.let { writeSegment("gainmap", it) }
             if (streamData.isNotEmpty()) writeSegment("streamdata", streamData)
             writeSegment("video", video)
             writeSegment("footer", footer)
         }
         log("info", "写出 vivo 单文件实况：${File(outPath).name}" +
-            "（图像 ${primary.size}B + 视频 ${video.size}B（含 lpex）" +
+            "（图像 ${primaryOutLen}B + 视频 ${video.size}B（含 lpex）" +
             (if (streamData.isNotEmpty()) " + streamdata ${streamData.size}B" else "") +
             " + footer ${footer.size}B）", "vivo")
         return SingleWriteResult(

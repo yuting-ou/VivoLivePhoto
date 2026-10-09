@@ -55,6 +55,7 @@ import com.vliveconvert.app.picker.PickerScreen
 import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.ConvertService
+import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.MainScreen
@@ -69,8 +70,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
-/** 主界面栈：权限页 → 主页 → 选择器 / 修复时间 / 设置（用于转场方向判定） */
-private enum class Screen { Permission, Main, Picker, FixTime, Settings }
+/** 主界面栈：权限页 → 主页 → 选择器 / 修复时间 / 设置 / 关于（用于转场方向判定） */
+private enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
 
 /**
  * 主界面：转换队列与进度的真实状态在 [ConvertCenter]（进程级单例），
@@ -124,6 +125,8 @@ class MainActivity : ComponentActivity() {
     // 设置页（收纳低频项）与状态详情弹窗
     private var showSettings by mutableStateOf(false)
     private var showStatusDetail by mutableStateOf(false)
+    // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
+    private var showAbout by mutableStateOf(false)
 
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
@@ -383,6 +386,7 @@ class MainActivity : ComponentActivity() {
                 // 转换中吞掉返回，防止误退
                 BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
                 BackHandler(enabled = showStatusDetail) { showStatusDetail = false }
+                BackHandler(enabled = showAbout) { showAbout = false }
                 BackHandler(enabled = showSettings) { showSettings = false }
                 BackHandler(enabled = showFixTime) { showFixTime = false }
                 BackHandler(enabled = showPicker) { showPicker = false }
@@ -394,6 +398,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // 目标界面：授权后带权限状态一起参与重组，权限授予时也有过渡动画
                     val targetScreen = if (!hasReadPermission()) Screen.Permission
+                    else if (showAbout) Screen.About
                     else if (showSettings) Screen.Settings
                     else if (showPicker) Screen.Picker
                     else if (showFixTime) Screen.FixTime
@@ -420,7 +425,8 @@ class MainActivity : ComponentActivity() {
                         when (screen) {
                             Screen.Permission -> PermissionScreen(
                                 onRequest = { requestReadPermissions(null) },
-                                statusText = ConvertCenter.statusText
+                                statusText = ConvertCenter.statusText,
+                                appName = getString(R.string.app_display_name)
                             )
                             Screen.Picker -> PickerScreen(
                                 albums = pickerAlbums,
@@ -472,10 +478,17 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onOpenFixTime = { openFixTime() },
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
-                                onExportCrashLogs = { exportCrashLogs() }
+                                onExportCrashLogs = { exportCrashLogs() },
+                                onOpenAbout = { showAbout = true }
+                            )
+                            Screen.About -> AboutScreen(
+                                appName = getString(R.string.app_display_name),
+                                versionName = appVersionName(),
+                                onBack = { showAbout = false }
                             )
                             Screen.Main -> MainScreen(
                                 items = ConvertCenter.items.toList(),
+                                appName = getString(R.string.app_display_name),
                                 statusText = ConvertCenter.statusText,
                                 isConverting = ConvertCenter.isConverting,
                                 progress = ConvertCenter.progress,

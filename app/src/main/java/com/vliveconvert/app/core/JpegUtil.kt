@@ -38,16 +38,18 @@ internal object JpegUtil {
      * 遍历 JPEG 头部段（SOS 之前）。
      * 返回 Segment 序列：totalLen 含 marker 2 字节与长度 2 字节。
      * SOS 时停止。
+     *
+     * [end] 为扫描上界（不含），默认到数组末尾。上层在整份文件（含尾部附加数据）
+     * 上按区间解析时传入，避免为「截取 JPEG 正文」而复制一份等长数组。
      */
-    fun iterateSegments(data: ByteArray, start: Int = 0): Sequence<Segment> = sequence {
-        if (data.size - start < 4 || data[start] != 0xFF.toByte() || data[start + 1] != 0xD8.toByte()) {
+    fun iterateSegments(data: ByteArray, start: Int = 0, end: Int = data.size): Sequence<Segment> = sequence {
+        if (end - start < 4 || data[start] != 0xFF.toByte() || data[start + 1] != 0xD8.toByte()) {
             throw JpegException("不是有效的 JPEG（缺少 SOI）")
         }
         yield(Segment(0xD8.toByte(), start, 2, start + 2, 0))
         var pos = start + 2
-        val size = data.size
 
-        while (pos + 4 <= size) {
+        while (pos + 4 <= end) {
             if (data[pos] != 0xFF.toByte()) {
                 throw JpegException("段边界错位 @$pos")
             }
@@ -58,7 +60,7 @@ internal object JpegUtil {
                 continue
             }
             val segLen = BinaryUtils.readU16BE(data, pos + 2)
-            if (segLen < 2 || pos + 2 + segLen > size) {
+            if (segLen < 2 || pos + 2 + segLen > end) {
                 throw JpegException("段长度非法 @$pos")
             }
             yield(Segment(marker, pos, 2 + segLen, pos + 4, segLen - 2))
@@ -70,12 +72,14 @@ internal object JpegUtil {
     /**
      * 从 SOS 段有效载荷终点扫描熵编码数据，返回 EOI(FFD9) 之后的偏移。
      * 熵编码规则：FF 00 为转义字面量；FF D0-D7 为重启 marker；FF D9 为 EOI。
+     *
+     * [end] 为扫描上界（不含）：调用方在整份文件上解析时必须传入 JPEG 区域的终点，
+     * 否则可能把尾部附加数据（vivo streamdata / footer）里的 FFD9 误判为本图的 EOI。
      */
-    fun findEoiEnd(data: ByteArray, sosPayloadEnd: Int): Int {
+    fun findEoiEnd(data: ByteArray, sosPayloadEnd: Int, end: Int = data.size): Int {
         var i = sosPayloadEnd
-        val size = data.size
 
-        while (i + 1 < size) {
+        while (i + 1 < end) {
             if (data[i] == 0xFF.toByte()) {
                 val nxt = data[i + 1].toInt() and 0xFF
                 if (nxt == 0x00 || nxt in 0xD0..0xD7) {
@@ -93,16 +97,23 @@ internal object JpegUtil {
 
     /**
      * 把可能由多个 JPEG 顺序拼接的数据拆成单个 JPEG 字节块列表。
-     * 返回 (jpegList, consumed)。剩余非 JPEG 字节不在结果中。
+     * 返回 (jpegList, consumed)；consumed 为**绝对**偏移（相对 data 起点），
+     * 即解析完最后一个 JPEG 的位置——调用方据此取其后紧跟的附加数据块。
+     *
+     * [start]/[end] 限定解析区间：vivo 双文件 JPG 的正文后紧跟 streamdata 与 footer，
+     * 解析正文时直接传区间即可，无需先 `copyOfRange` 出一份等长副本（内存优化）。
      */
-    fun splitJpegs(data: ByteArray): Pair<MutableList<ByteArray>, Int> {
+    fun splitJpegs(
+        data: ByteArray,
+        start: Int = 0,
+        end: Int = data.size
+    ): Pair<MutableList<ByteArray>, Int> {
         val result = mutableListOf<ByteArray>()
-        var pos = 0
-        val size = data.size
+        var pos = start
 
-        while (pos + 4 <= size && data[pos] == 0xFF.toByte() && data[pos + 1] == 0xD8.toByte()) {
+        while (pos + 4 <= end && data[pos] == 0xFF.toByte() && data[pos + 1] == 0xD8.toByte()) {
             var sosPayloadEnd: Int? = null
-            for (seg in iterateSegments(data, pos)) {
+            for (seg in iterateSegments(data, pos, end)) {
                 if (seg.marker == 0xDA.toByte()) {
                     sosPayloadEnd = seg.payloadStart + seg.payloadLen
                     break
@@ -111,12 +122,12 @@ internal object JpegUtil {
             if (sosPayloadEnd == null) {
                 throw JpegException("JPEG 缺少 SOS 段")
             }
-            val eoiEnd = findEoiEnd(data, sosPayloadEnd)
+            val eoiEnd = findEoiEnd(data, sosPayloadEnd, end)
             result.add(data.copyOfRange(pos, eoiEnd))
             pos = eoiEnd
 
             // 跳过后续 JPEG 之间可能的填充 0xFF
-            while (pos < size && data[pos] == 0xFF.toByte() && pos + 1 < size && data[pos + 1] == 0xFF.toByte()) {
+            while (pos < end && data[pos] == 0xFF.toByte() && pos + 1 < end && data[pos + 1] == 0xFF.toByte()) {
                 pos++
             }
         }
