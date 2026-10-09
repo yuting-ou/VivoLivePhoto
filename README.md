@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.4.0），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.4.1），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.4.0.apk`](./VivoLivePhoto-v1.4.0.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.4.1.apk`](./VivoLivePhoto-v1.4.1.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,28 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.4.1
+
+对 v1.4.0 的复查（对抗式审查）发现三处**修复不彻底 / 遗漏**，本版补齐：
+
+- **修复 v1.4.0 的 `.MP4` 兼容没真正生效（重要）**：v1.4.0 只改了核心解析
+  `VivoDual.siblingMp4`，但内置选择器 `PickerScanner` 内部另有一份**私有预筛**，
+  仍是硬拼小写 `.mp4`——照片会在选择器里被提前挡掉，用户看到的仍是「静默消失」。
+  更隐蔽的是：该缺陷藏在私有方法内，v1.4.0 的测试断言的是核心函数，**测不到这条真实路径**。
+  现删除重复预筛、把判定入口抽为顶层 `isDualLivePhotoPath`（可被单测直接覆盖），
+  并把「伴生视频非空」校验合并进 `VivoDual`，保证规则只有一个来源
+- **修复重转覆盖可能误删完好的旧产物**：原地覆盖时，若连输出流都没打开成功
+  （权限/占用等），旧文件其实完好无损，原实现却直接删除该记录。
+  现区分「是否已按写模式打开」（一旦打开旧内容即被截断，失败必须删除）与
+  「根本没打开」（保留旧文件），避免无谓丢文件
+- **修复重转后文件时间漂移**：全新导出会固化物理文件 mtime，原地覆盖路径漏了这一步，
+  系统显示的「修改时间」会变成写入时刻（与另一条路径行为不一致）。现抽出
+  `fixPhysicalMtime` 供两条路径共用
+- 测试补强：断言改为直接调用**选择器的收录入口**，另补边界用例
+  （普通照片 / 缺伴生视频 / 路径不存在 / 空字符串均不收录且不抛异常）、空伴生视频拒绝。
+  上述守卫均已用「退回有缺陷实现」**反向验证过确实会失败**
+- 验证：**39 组 JVM 单测全绿**，Lint 零 error/warning，release 构建与签名校验通过
 
 ### v1.4.0
 

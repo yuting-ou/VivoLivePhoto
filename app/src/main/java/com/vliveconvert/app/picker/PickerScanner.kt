@@ -15,6 +15,22 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
+ * 选择器收录判定（全应用唯一的入口）：JPG 扩展名 + 同目录同名伴生视频（含扩展名
+ * 大小写兼容）+ 非内嵌式实况 + vivo footer。
+ *
+ * 抽为顶层 internal 函数而非 PickerScanner 的私有方法，是为了能被单测直接调用——
+ * 此前这里曾自行重复实现一遍「JPG 扩展名 + 硬拼小写 .mp4」的预筛，导致核心解析
+ * 已兼容 `.MP4` 时，照片仍在选择器里被静默挡掉；且该缺陷落在私有方法内，
+ * 单测无法直接覆盖。异常安全：单张判定失败不影响整批扫描。
+ */
+internal fun isDualLivePhotoPath(path: String): Boolean =
+    try {
+        VivoDual.isVivoDualFile(path)
+    } catch (_: Exception) {
+        false
+    }
+
+/**
  * 内置选择器扫描引擎：多线程识别「双文件实况照片」。
  *
  * 只收录 vivo 双文件实况（IMG_xxx.jpg + 同目录同名 IMG_xxx.mp4），判定链：
@@ -119,7 +135,7 @@ class PickerScanner(private val repo: MediaRepo) {
         while (currentCoroutineContext().isActive) {
             val item = st.pending.poll() ?: break
             if (!st.known.containsKey(item.key)) continue // 队列残留已被删除的项
-            if (isDualLivePhoto(item)) {
+            if (isDualLivePhotoPath(item.path)) {
                 withContext(Dispatchers.Main) {
                     if (st.known.containsKey(item.key) &&
                         st.results.none { it.id == item.id }
@@ -130,23 +146,6 @@ class PickerScanner(private val repo: MediaRepo) {
             }
             st.scanned.add(item.key)
             st.doneCount.set(st.scanned.size)
-        }
-    }
-
-    /** 双文件实况判定：JPG + 同目录同名 .mp4 + vivo livephoto footer。 */
-    private fun isDualLivePhoto(item: MediaItem): Boolean {
-        val path = item.path
-        if (!path.endsWith(".jpg", ignoreCase = true) &&
-            !path.endsWith(".jpeg", ignoreCase = true)
-        ) return false
-        // 廉价预筛：伴生 .mp4 存在且非空（vivo 相机的双文件必为 .mp4 扩展名）
-        val stem = path.substringBeforeLast('.')
-        val mp4 = File("$stem.mp4")
-        if (!mp4.exists() || mp4.length() <= 8L) return false
-        return try {
-            VivoDual.isVivoDualFile(path)
-        } catch (_: Exception) {
-            false
         }
     }
 

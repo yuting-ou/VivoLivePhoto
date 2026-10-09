@@ -84,10 +84,11 @@ internal object VivoSingle {
         val primary = asset.primaryJpeg
         // 主图 XMP 段位置：命中时按 [前段][新 XMP][后段] 流式写出，
         // 不再调用 replaceOrInsertXmp 生成一份与主图等长的新数组（内存优化）
+        val newXmpSeg = JpegUtil.buildXmpApp1(xmp)
         val oldXmpSeg = JpegUtil.findXmpSegment(primary)
         val primaryOutLen = if (oldXmpSeg != null)
-            primary.size - oldXmpSeg.totalLen + JpegUtil.buildXmpApp1(xmp).size
-        else primary.size + JpegUtil.buildXmpApp1(xmp).size
+            primary.size - oldXmpSeg.totalLen + newXmpSeg.size
+        else primary.size + newXmpSeg.size
 
         // ── 5. 拼装输出：[JPEG+XMP][GainMap][streamdata][video(含 lpex)][convert footer] ──
         // streamdata 附加块紧跟图像数据（与双文件中的位置一致）：普通实况为流信息，
@@ -110,7 +111,7 @@ internal object VivoSingle {
             if (oldXmpSeg != null) {
                 // 已有 XMP：按 [主图前段][新 XMP][主图后段] 三段写出
                 writeSegment("primary-pre", primary, 0, oldXmpSeg.segStart)
-                writeSegment("xmp", JpegUtil.buildXmpApp1(xmp))
+                writeSegment("xmp", newXmpSeg)
                 val after = oldXmpSeg.segStart + oldXmpSeg.totalLen
                 writeSegment("primary-post", primary, after, primary.size - after)
             } else {

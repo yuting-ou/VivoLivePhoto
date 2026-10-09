@@ -39,15 +39,20 @@ internal object VivoDual {
 
     /**
      * 是否为 vivo 双文件实况照片：
-     * 1) JPG 扩展名；2) 存在同目录同名 .mp4；
-     * 3) XMP 无内嵌动态照片标记（排除 Google/OPPO/小米等内嵌单文件）；
-     * 4) JPG 尾部能解析出含 livephoto ID 的 cameralbum! footer。
+     * 1) JPG 扩展名；2) 存在同目录同名 .mp4；3) XMP 无内嵌动态照片标记
+     *    （排除 Google/OPPO/小米等内嵌单文件）；4) JPG 尾部能解析出含 livephoto ID 的 cameralbum! footer。
+     *
+     * 判定顺序刻意按「由廉价到昂贵」排列：扩展名 → 同目录文件存在性（stat）
+     * → 头部 XMP（读头部）→ 尾部 footer（读尾部）。调用方（内置选择器逐张判定相册）
+     * 依赖这个顺序避免无谓的磁盘读取，**不要调整顺序，也不要在调用侧重复实现一遍**。
      */
     fun isVivoDualFile(path: String): Boolean {
         if (!path.endsWith(".jpg", ignoreCase = true) &&
             !path.endsWith(".jpeg", ignoreCase = true)
         ) return false
-        if (siblingMp4(path) == null) return false
+        // 伴生视频存在且非空：空文件不可能是实况视频，提前排除避免后续读取白费
+        val mp4 = siblingMp4(path) ?: return false
+        if (File(mp4).length() <= 8L) return false
         if (XmpTemplate.parseMotionXmp(XmpTemplate.sniffXmp(path)).isMotion) return false
 
         return try {

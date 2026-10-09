@@ -7,6 +7,7 @@ import com.vliveconvert.app.core.JpegUtil
 import com.vliveconvert.app.core.OutputVerifier
 import com.vliveconvert.app.core.VivoDual
 import com.vliveconvert.app.core.XmpTemplate
+import com.vliveconvert.app.picker.isDualLivePhotoPath
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -665,16 +666,46 @@ class ConverterPipelineTest {
 
     @Test
     fun siblingMp4MatchesUppercaseExtension() {
-        // JPG 侧扩展名判定用 ignoreCase，MP4 侧原先只硬拼小写——
-        // 相机若写出 .MP4，该照片会被判为「非双文件」在选择器里静默消失
+        // 相机若写出 `.MP4`，该照片会被判为「非双文件」而在选择器里静默消失。
+        // 注意这里断言的是**选择器的收录入口** isDualLivePhotoPath——此前选择器
+        // 内部另有一份硬拼小写 `.mp4` 的私有预筛，即使核心解析兼容了 `.MP4`，
+        // 照片仍会在选择器里被挡掉；私有方法无法被单测覆盖，故已抽为顶层函数。
         val dir = Files.createTempDirectory("vlc_case").toFile()
         val jpg = File(dir, "IMG_9201.jpg").apply { writeBytes(vivoDualJpeg()) }
         File(dir, "IMG_9201.MP4").writeBytes(vivoDualMp4())
 
         assertEquals("大写扩展名的伴生视频应能解析到",
             "IMG_9201.MP4", File(VivoDual.siblingMp4(jpg.absolutePath)!!).name)
-        assertTrue("大写扩展名也应识别为 vivo 双文件",
-            VivoDual.isVivoDualFile(jpg.absolutePath))
+        assertTrue("选择器应收录大写扩展名伴生视频的照片（.MP4 兼容）",
+            isDualLivePhotoPath(jpg.absolutePath))
+    }
+
+    @Test
+    fun emptySiblingMp4IsRejected() {
+        // 空/近空的伴生视频不可能是实况视频：识别阶段即排除，
+        // 避免收录后到转换阶段才报错（也避免无谓的头部 XMP/尾部 footer 读取）
+        val dir = Files.createTempDirectory("vlc_empty").toFile()
+        val jpg = File(dir, "IMG_9202.jpg").apply { writeBytes(vivoDualJpeg()) }
+        File(dir, "IMG_9202.mp4").writeBytes(ByteArray(4))
+        assertFalse("空伴生视频不应被选择器收录",
+            isDualLivePhotoPath(jpg.absolutePath))
+    }
+
+    @Test
+    fun pickerEntryRejectsNonDualAndSurvivesBadInput() {
+        // 选择器入口的边界行为：普通照片、缺伴生视频、路径不存在都不能收录，
+        // 且不得抛异常（扫描是批量的，单张异常不能拖垮整批）
+        val dir = Files.createTempDirectory("vlc_pickbound").toFile()
+        val plain = File(dir, "IMG_9203.jpg").apply { writeBytes(minimalJpeg()) }
+        File(dir, "IMG_9203.mp4").writeBytes(vivoDualMp4())
+        assertFalse("普通 JPG+MP4 不应被收录", isDualLivePhotoPath(plain.absolutePath))
+
+        val lone = File(dir, "IMG_9204.jpg").apply { writeBytes(vivoDualJpeg()) }
+        assertFalse("缺伴生视频不应被收录", isDualLivePhotoPath(lone.absolutePath))
+
+        assertFalse("不存在的路径不应收录且不抛异常",
+            isDualLivePhotoPath(File(dir, "not_exist.jpg").absolutePath))
+        assertFalse("空字符串不应收录且不抛异常", isDualLivePhotoPath(""))
     }
 
     @Test

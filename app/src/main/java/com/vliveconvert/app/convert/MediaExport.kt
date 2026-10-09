@@ -63,14 +63,7 @@ internal object MediaExport {
 
             // 物理文件的 mtime 也固化为拍摄时间：系统显示的「修改时间」来自文件 mtime，
             // 只改 MediaStore 列的话会在媒体扫描时被文件 mtime 覆盖回写入时刻
-            try {
-                val dataPath = resolver.query(
-                    uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null
-                )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-                if (dataPath != null) {
-                    File(dataPath).setLastModified(timestamp)
-                }
-            } catch (_: Exception) {}
+            fixPhysicalMtime(resolver, uri, timestamp)
             fixTimestamps(resolver, uri, timestamp)
         } catch (e: Exception) {
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
@@ -121,22 +114,33 @@ internal object MediaExport {
                         null, null, null)?.use { it.moveToFirst() } == true
                 } catch (_: Exception) { false }
                 if (valid) {
+                    // 是否已按写模式打开旧文件：一旦打开，旧内容即被截断，
+                    // 此后任何失败都必须删除该记录（否则留下半损文件）
+                    var truncated = false
                     try {
                         resolver.openOutputStream(old, "w")?.use { out ->
+                            truncated = true
                             src.inputStream().use { input -> input.copyTo(out) }
                         } ?: throw IOException("旧产物输出流不可用")
                         fixTimestamps(resolver, old, timestamp)
+                        // 物理文件 mtime 与媒体库列同为拍摄时间：
+                        // 系统显示的「修改时间」取自文件 mtime，漏设会让重转后的文件
+                        // 时间漂移成写入时刻（与全新导出路径行为不一致）
+                        fixPhysicalMtime(resolver, old, timestamp)
                         val verified = try {
                             resolver.openInputStream(old)?.use {
                                 OutputVerifier.verify(it, result.segments)
                             } == true
                         } catch (_: Exception) { false }
                         if (verified) return old
-                        // 覆盖后自检失败（极罕见）：删旧记录走全新导出
+                        // 覆盖后自检失败（极罕见）：内容已不可信，删旧记录走全新导出
                         try { resolver.delete(old, null, null) } catch (_: Exception) {}
                     } catch (_: Exception) {
-                        // 覆盖中途异常：旧记录可能已半损，删除后全新导出兜底
-                        try { resolver.delete(old, null, null) } catch (_: Exception) {}
+                        // 仅在旧内容确实已被截断时才删除；
+                        // 若连输出流都没打开成功，旧文件仍是完好的，必须保留
+                        if (truncated) {
+                            try { resolver.delete(old, null, null) } catch (_: Exception) {}
+                        }
                     }
                 }
             } catch (_: Exception) {
@@ -144,6 +148,22 @@ internal object MediaExport {
             }
         }
         return exportAndVerify(context, result, timestamp, relPath, useCameraDir)
+    }
+
+    /** 把入库文件对应的物理文件 mtime 固化为拍摄时间（系统「修改时间」取自 mtime） */
+    private fun fixPhysicalMtime(
+        resolver: android.content.ContentResolver,
+        uri: Uri,
+        timestamp: Long
+    ) {
+        try {
+            val dataPath = resolver.query(
+                uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            if (dataPath != null) {
+                File(dataPath).setLastModified(timestamp)
+            }
+        } catch (_: Exception) {}
     }
 
     private fun fixTimestamps(resolver: android.content.ContentResolver, uri: Uri, timestamp: Long) {
