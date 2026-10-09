@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.3.0），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.3.1），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.3.0-ui.apk`](./VivoLivePhoto-v1.3.0-ui.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.3.1.apk`](./VivoLivePhoto-v1.3.1.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,25 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.3.1
+
+- **修复点击「开始转换」立即闪退（严重）**：清单里声明了
+  `<service android:foregroundServiceType="dataSync">`，却漏了 `FOREGROUND_SERVICE` 与
+  `FOREGROUND_SERVICE_DATA_SYNC` 两个权限声明。Android 9+ 起 `startForeground()` 必须持有前者，
+  Android 14+ 起还必须持有服务类型对应的后者——缺失时抛 `SecurityException`，
+  表现为点击「开始转换」立即闪退（该缺陷自 v1.0.7 引入前台服务起就存在）。
+  同时补上运行时申请但从未声明的 `POST_NOTIFICATIONS`（未声明的权限申请会被系统静默拒绝，
+  导致通知权限永远无法授予）
+- **新增清单契约测试（`ManifestContractTest`）**：把「清单必须声明什么」变成可执行断言——
+  校验前台服务权限、**服务类型与其所需权限的自动配对**（以后新增/更换服务类型若漏声明会直接失败）、
+  运行时申请的权限均已在清单声明、位置权限未被误删。
+  该测试已用「移除权限的清单」反向验证过确实能失败，不是摆设
+- **验证方式补强**：此前只用 JVM 单测验证，而既有单测仅覆盖 `core/` 的字节转换管道，
+  **不加载清单、不实例化 Activity/Service**，因此完全漏掉了这类缺陷；
+  实测 Android Lint（AGP 9.5 默认规则集）**也不会**报告该权限缺失。
+  现将单元测试 + Lint + **打包后 APK 权限实查**（`aapt2 dump permissions`）纳入固定流程
+- 测试总数 32 组（新增 4 组清单契约），全绿
 
 ### v1.3.0
 
