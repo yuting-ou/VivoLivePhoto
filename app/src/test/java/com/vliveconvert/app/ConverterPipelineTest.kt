@@ -542,6 +542,85 @@ class ConverterPipelineTest {
         assertTrue("无 GPS 不应阻塞转换", File(result.path).exists())
     }
 
+    // ------------------------------------------------ XMP GPS 合并保留 ----------
+
+    @Test
+    fun extractGpsAttributesFromSourceXmp() {
+        val xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF " +
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" " +
+            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">" +
+            "<rdf:Description rdf:about=\"\" exif:GPSLatitude=\"39,54.6\" " +
+            "exif:GPSLongitude=\"116,23.5\" exif:GPSAltitude=\"43.2\"/></rdf:RDF></x:xmpmeta>"
+        val attrs = XmpTemplate.extractGpsAttributes(xmp)
+        assertEquals("应提取出 3 个 GPS 属性", 3, attrs.size)
+        assertTrue(attrs.any { it.first == "GPSLatitude" && it.second == "39,54.6" })
+        assertTrue(attrs.any { it.first == "GPSLongitude" && it.second == "116,23.5" })
+        assertTrue(attrs.any { it.first == "GPSAltitude" && it.second == "43.2" })
+        // 无输入 / 无 GPS → 空
+        assertTrue(XmpTemplate.extractGpsAttributes(null).isEmpty())
+        assertTrue(XmpTemplate.extractGpsAttributes("<x:xmpmeta><rdf:RDF/></x:xmpmeta>").isEmpty())
+        // 非标准前缀（stEXIF: 等）也应按属性名识别
+        val prefixed = "<rdf:Description stEXIF:GPSLatitude=\"1,2.3\"/>"
+        val got = XmpTemplate.extractGpsAttributes(prefixed)
+        assertEquals(1, got.size)
+        assertEquals("GPSLatitude", got[0].first)
+    }
+
+    @Test
+    fun buildVivoSingleXmpMergesGpsWithNamespace() {
+        val gps = listOf("GPSLatitude" to "39,54.6", "GPSLongitude" to "116,23.5")
+        val out = XmpTemplate.buildVivoSingleXmp(1000L, null, 100, gps)
+        assertTrue("应声明 exif 命名空间", out.contains("xmlns:exif=\"http://ns.adobe.com/exif/1.0/\""))
+        assertTrue("应包含纬度属性", out.contains("exif:GPSLatitude=\"39,54.6\""))
+        assertTrue("应包含经度属性", out.contains("exif:GPSLongitude=\"116,23.5\""))
+        // 模板既有识别字段不受影响
+        assertTrue(out.contains("GCamera:MotionPhoto=\"1\""))
+        assertTrue(out.contains("ns.vivo.com/photos"))
+        // 值中的 XML 特殊字符应转义
+        val escaped = XmpTemplate.buildVivoSingleXmp(1000L, null, 100,
+            listOf("GPSLatitude" to "a&b<c\"d"))
+        assertTrue(escaped.contains("exif:GPSLatitude=\"a&amp;b&lt;c&quot;d\""))
+        // 无 GPS 时模板与旧结构一致（无 exif 注入）
+        val plain = XmpTemplate.buildVivoSingleXmp(1000L, null, 100)
+        assertFalse(plain.contains("xmlns:exif"))
+        assertFalse(plain.contains("exif:GPS"))
+    }
+
+    @Test
+    fun convertPreservesXmpGpsEndToEnd() {
+        // 源 XMP 带 GPS（部分机型把位置写进 XMP 而非 EXIF）：
+        // 模板替换不得丢掉 GPS；源 XMP 无 MotionPhoto 标记，仍应识别为双文件
+        val dir = Files.createTempDirectory("vlc_xmpgps").toFile()
+        val sourceXmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF " +
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" " +
+            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">" +
+            "<rdf:Description rdf:about=\"\" exif:GPSLatitude=\"39,54.6\" " +
+            "exif:GPSLongitude=\"116,23.5\"/></rdf:RDF></x:xmpmeta>"
+        val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        ))
+        val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "IMG_8101.jpg").apply {
+            writeBytes(JpegUtil.replaceOrInsertXmp(minimalJpeg(), sourceXmp) +
+                fakeStreamData("DEGS", 64, 11) + jpgFooter)
+        }
+        File(dir, "IMG_8101.mp4").apply { writeBytes(vivoDualMp4()) }
+        assertTrue("带 GPS XMP 但无 MotionPhoto 标记的源应识别为双文件",
+            VivoDual.isVivoDualFile(jpg.absolutePath))
+
+        val outDir = Files.createTempDirectory("vlc_xmpgps_out").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val (jpegs, _) = JpegUtil.splitJpegs(File(result.path).readBytes())
+        val outXmp = JpegUtil.findXmpSegment(jpegs[0])!!
+        assertTrue("输出 XMP 应保留源 GPS 纬度", outXmp.xmpText.contains("exif:GPSLatitude=\"39,54.6\""))
+        assertTrue("输出 XMP 应保留源 GPS 经度", outXmp.xmpText.contains("exif:GPSLongitude=\"116,23.5\""))
+        assertTrue("输出 XMP 应声明 exif 命名空间", outXmp.xmpText.contains("xmlns:exif="))
+        // vivo 实况识别字段完整保留
+        assertTrue(outXmp.xmpText.contains("GCamera:MotionPhoto=\"1\""))
+    }
+
     companion object {
         /** 28 字符 livephoto ID（'-<数字>' + '0' 填充） */
         private val TEST_LIVE_ID: String = "-1234567890".padEnd(28, '0')

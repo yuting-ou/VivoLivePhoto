@@ -125,6 +125,9 @@ class ConvertService : Service() {
             noGpsCount > 0 && !locationGranted ->
                 "；警告：$noGpsCount 张照片读取时无 GPS（未授予「位置」权限，系统已剥离位置信息），" +
                     "授予后重新转换即可保留地点"
+            noGpsCount > 0 && noGpsCount == ok.get() ->
+                "；注意：$noGpsCount 张源文件读取时均无 GPS（「位置」权限已授予）。" +
+                    "若拍摄时开启了定位，可尝试给本应用开启「所有文件访问权限」后重新转换"
             noGpsCount > 0 ->
                 "；$noGpsCount 张照片源文件本身不含 GPS 位置"
             else -> ""

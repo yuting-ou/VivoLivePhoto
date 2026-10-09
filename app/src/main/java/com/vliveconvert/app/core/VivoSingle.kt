@@ -71,8 +71,16 @@ internal object VivoSingle {
         val footer = FooterUtil.buildFooter(footerJson, FooterUtil.oppoFixedId, FooterUtil.extPrefix)
 
         // ── 4. XMP：视频项 Item:Length = video + footer（已被验证可识别） ──
+        // 模板会整体替换源 XMP——若源 XMP 带 GPS（部分机型把位置写进 XMP 而非 EXIF），
+        // 先提取再合并进输出模板，避免位置信息随模板替换丢失
         val pts = asset.effectivePtsUs()
-        val xmp = XmpTemplate.buildVivoSingleXmp(pts, asset.gainmapLength, video.size + footer.size)
+        val sourceXmpGps = XmpTemplate.extractGpsAttributes(
+            JpegUtil.findXmpSegment(asset.primaryJpeg)?.xmpText)
+        if (sourceXmpGps.isNotEmpty()) {
+            log("info", "源 XMP 含 GPS 字段（${sourceXmpGps.size} 项），已合并保留位置信息", "vivo")
+        }
+        val xmp = XmpTemplate.buildVivoSingleXmp(
+            pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps)
         val primary = JpegUtil.replaceOrInsertXmp(asset.primaryJpeg, xmp)
 
         // ── 5. 拼装输出：[JPEG+XMP][GainMap][streamdata][video(含 lpex)][convert footer] ──

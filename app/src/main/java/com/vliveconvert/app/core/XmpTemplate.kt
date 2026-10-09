@@ -78,10 +78,52 @@ internal object XmpTemplate {
   </rdf:RDF>
 </x:xmpmeta>"""
 
-    /** vivo 单文件实况：Google 容器 + VCamera 私有字段，MotionPhoto 恒为 1。 */
-    fun buildVivoSingleXmp(ptsUs: Long, gainmapLen: Int?, videoLen: Int): String {
-        val head = if (gainmapLen != null) VivoSingleHeadHdr else VivoSingleHeadNonHdr
-        val parts = mutableListOf(head.replace("{pts}", ptsUs.toString()), VivoSingleItemPrimary)
+    /**
+     * 从源 XMP 提取 GPS 相关属性（成对 属性名→值）。
+     *
+     * 为什么需要：单文件写出用固定模板整体替换源 XMP——若相机把位置写进了 XMP
+     * （而非/不止 EXIF），GPS 会随模板替换被静默丢弃。提取后合并进输出模板即可保留。
+     * 兼容任意命名空间前缀（标准为 exif:），按 GPS 属性名匹配，合并时统一 exif: 前缀。
+     */
+    fun extractGpsAttributes(sourceXmp: String?): List<Pair<String, String>> {
+        if (sourceXmp.isNullOrEmpty()) return emptyList()
+        val regex = Regex("""\w+:(GPS[A-Za-z]+)\s*=\s*"([^"]*)"""")
+        return regex.findAll(sourceXmp)
+            .map { it.groupValues[1] to it.groupValues[2] }
+            .filter { it.second.isNotBlank() }
+            .toList()
+    }
+
+    private fun xmlEscape(s: String): String = s
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace("\"", "&quot;").replace("'", "&apos;")
+
+    /** vivo 单文件实况：Google 容器 + VCamera 私有字段，MotionPhoto 恒为 1。
+     *  gpsAttrs 非空时把源照片 XMP 中的 GPS 属性合并进描述节点（保留位置元数据）。 */
+    fun buildVivoSingleXmp(
+        ptsUs: Long, gainmapLen: Int?, videoLen: Int,
+        gpsAttrs: List<Pair<String, String>> = emptyList()
+    ): String {
+        var head = (if (gainmapLen != null) VivoSingleHeadHdr else VivoSingleHeadNonHdr)
+            .replace("{pts}", ptsUs.toString())
+        if (gpsAttrs.isNotEmpty()) {
+            // 注入 exif 命名空间声明（写在 VCamera 声明行之前）
+            head = head.replace(
+                "xmlns:VCamera=\"http://ns.vivo.com/photos/1.0/camera/\"",
+                "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n        " +
+                    "xmlns:VCamera=\"http://ns.vivo.com/photos/1.0/camera/\""
+            )
+            // GPS 属性附加在描述节点的 VCamera 属性之后（标准 RDF/XML，相册按 XML 解析，
+            // 附加带命名空间的属性不影响 GCamera:MotionPhoto 等既有字段的识别）
+            val attrs = gpsAttrs.joinToString(" ") { (name, value) ->
+                "exif:" + name + "=\"" + xmlEscape(value) + "\""
+            }
+            head = head.replace(
+                "VCamera:VMediaKitVersion=\"1.0.0.9\">",
+                "VCamera:VMediaKitVersion=\"1.0.0.9\" " + attrs + ">"
+            )
+        }
+        val parts = mutableListOf(head, VivoSingleItemPrimary)
         if (gainmapLen != null) {
             parts.add(VivoSingleItemGainmap.replace("{gainmap_len}", gainmapLen.toString()))
         }

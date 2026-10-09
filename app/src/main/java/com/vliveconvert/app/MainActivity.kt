@@ -155,6 +155,35 @@ class MainActivity : ComponentActivity() {
 
     /** 位置权限缺失（Compose 状态：驱动主界面警示条与门禁弹窗） */
     private var locationDenied by mutableStateOf(false)
+    /** 用户已在本会话中明确选择「仍要转换」（缺位置权限）：后续批次不再重复门禁 */
+    private var locationForceChosen = false
+    /** 从系统设置返回时若有挂起的转换且权限已授予，自动继续 */
+    private var pendingConvertAfterLocation = false
+    /** 系统不再弹授权框时引导设置的门禁弹窗（与普通门禁弹窗区分文案） */
+    private var showLocationSettingsDialog by mutableStateOf(false)
+
+    /**
+     * 单独申请位置权限：绝不与媒体权限混在同一请求——
+     * ① Android 14+ 的照片选择器流程可能吞掉同批其他权限的授权弹窗
+     *   （部分 OEM 上 ACCESS_MEDIA_LOCATION 的框根本弹不出来）；
+     * ② 重复申请已授予的媒体权限会再次拉起照片选择器，干扰用户。
+     */
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        locationDenied = !hasMediaLocationPermission()
+        if (granted) {
+            ConvertCenter.statusText = "已授予「位置」权限，转换将保留照片 GPS 地点信息"
+            proceedConvertAfterPermissionCheck()
+        } else if (shouldShowRequestPermissionRationale(
+                Manifest.permission.ACCESS_MEDIA_LOCATION)) {
+            // 系统弹过框、用户主动拒绝 → 回到门禁弹窗（可再授权或「仍要转换」）
+            showLocationDialog = true
+        } else {
+            // 「不再询问」或 OEM 限制不弹框 → 引导系统设置手动开启
+            showLocationSettingsDialog = true
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -187,6 +216,11 @@ class MainActivity : ComponentActivity() {
             ConvertCenter.statusText = if (hasMediaLocationPermission())
                 "已获得读取照片和视频权限"
             else "已获得媒体权限；未授予「位置」权限：转换将丢失照片 GPS 地点信息"
+        }
+        // 从系统设置手动授予位置权限返回 → 自动继续挂起的转换批次
+        if (pendingConvertAfterLocation && hasMediaLocationPermission()) {
+            pendingConvertAfterLocation = false
+            proceedConvertAfterPermissionCheck()
         }
     }
 
@@ -399,7 +433,10 @@ class MainActivity : ComponentActivity() {
                                 pendingRestoreCount = pendingRestoreCount,
                                 onRestoreOriginals = { restoreTrashedOriginals() },
                                 locationMissing = locationDenied && !ConvertCenter.isConverting,
-                                onGrantLocation = { requestReadPermissions { } },
+                                onGrantLocation = {
+                                    locationPermissionLauncher.launch(
+                                        Manifest.permission.ACCESS_MEDIA_LOCATION)
+                                },
                                 outputRelPath = outputRelPath,
                                 isMovingOutputs = isMovingOutputs,
                                 onEditOutputPath = {
@@ -485,19 +522,46 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             Button(onClick = {
                                 showLocationDialog = false
-                                if (shouldShowRequestPermissionRationale(
-                                        Manifest.permission.ACCESS_MEDIA_LOCATION)) {
-                                    // 尚可弹系统授权框 → 重新申请，授权成功后自动继续
-                                    requestReadPermissions { proceedConvertAfterPermissionCheck() }
-                                } else {
-                                    // 已「不再询问」→ 引导去系统设置手动授予
-                                    openAppDetailSettings()
-                                }
+                                // 直接发起系统授权框。不用 rationale 预判——
+                                // 「从未申请过」时 rationale 同样返回 false，
+                                // 旧实现据此把首次申请错误路由到系统设置，
+                                // 导致授权框永远弹不出来（死循环 → 用户被迫「仍要转换」）
+                                locationPermissionLauncher.launch(
+                                    Manifest.permission.ACCESS_MEDIA_LOCATION)
                             }) { Text("去授权") }
                         },
                         dismissButton = {
                             OutlinedButton(onClick = {
                                 showLocationDialog = false
+                                proceedConvertAfterPermissionCheck(force = true)
+                            }) { Text("仍要转换") }
+                        }
+                    )
+                }
+
+                // 位置权限「不再询问」后的设置引导弹窗：授予后返回自动继续转换
+                if (showLocationSettingsDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showLocationSettingsDialog = false },
+                        title = { Text("需要手动开启位置权限") },
+                        text = {
+                            Text(
+                                "系统不再弹出「位置」权限授权框（可能已选「不再询问」或系统限制）。\n\n" +
+                                "请到：应用详情 → 权限 → 位置，手动开启后返回本应用，转换会自动继续。\n\n" +
+                                "若权限页没有相关开关，也可尝试给本应用开启" +
+                                "「所有文件访问权限」后重新转换。"
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                showLocationSettingsDialog = false
+                                pendingConvertAfterLocation = true
+                                openAppDetailSettings()
+                            }) { Text("去设置") }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = {
+                                showLocationSettingsDialog = false
                                 proceedConvertAfterPermissionCheck(force = true)
                             }) { Text("仍要转换") }
                         }
@@ -677,9 +741,11 @@ class MainActivity : ComponentActivity() {
      * 开始转换：状态与批次交由前台服务执行（切后台/旋转不中断，通知栏显示进度）。
      * 位置权限门禁：缺失时系统在读取层剥离 GPS，转换必丢地点信息且不可恢复，
      * 必须让用户知情并显式选择，而不是静默转换。
+     * 用户本会话已明确选过「仍要转换」则不再重复打扰（批次汇总仍会如实报告）。
      */
     private fun startConvert() {
-        if (!hasMediaLocationPermission()) {
+        if (ConvertCenter.isConverting) return
+        if (!hasMediaLocationPermission() && !locationForceChosen) {
             showLocationDialog = true
             return
         }
@@ -688,6 +754,7 @@ class MainActivity : ComponentActivity() {
 
     /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才真正开始批次 */
     private fun proceedConvertAfterPermissionCheck(force: Boolean = false) {
+        if (force) locationForceChosen = true
         if (hasMediaLocationPermission() || force) ConvertCenter.start(this)
         else showLocationDialog = true
     }
