@@ -20,14 +20,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.vliveconvert.app.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 关于 / 开源许可。
@@ -42,13 +45,17 @@ fun AboutScreen(
     versionName: String,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    // 许可证文本随包内置，读取一次性完成（约 35KB）
-    val licenseText = remember {
-        runCatching {
-            context.resources.openRawResource(R.raw.license_gpl3)
-                .bufferedReader().use { it.readText() }
-        }.getOrDefault("（许可证文本读取失败，请访问 https://www.gnu.org/licenses/gpl-3.0.txt）")
+    // 许可证全文约 35KB：读取放到 IO 线程，避免在组合（主线程）阶段做资源 I/O；
+    // null = 读取中，读取失败回退为指向官方链接的提示。
+    // 用 LocalResources（而非 LocalContext.current.resources）以正确处理配置变更
+    val resources = LocalResources.current
+    val licenseText by produceState<String?>(initialValue = null, resources) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                resources.openRawResource(R.raw.license_gpl3)
+                    .bufferedReader().use { it.readText() }
+            }.getOrDefault("（许可证文本读取失败，请访问 https://www.gnu.org/licenses/gpl-3.0.txt）")
+        }
     }
 
     Column(
@@ -142,7 +149,7 @@ fun AboutScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                licenseText,
+                licenseText ?: "正在读取许可证文本…",
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

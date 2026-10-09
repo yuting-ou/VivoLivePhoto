@@ -2,7 +2,6 @@ package com.vliveconvert.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -151,14 +149,10 @@ fun MainScreen(
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    "去授权",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickableNoRipple(onGrantLocation)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                InlineTextButton(
+                    text = "去授权",
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    onClick = onGrantLocation
                 )
             }
         }
@@ -178,14 +172,10 @@ fun MainScreen(
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    "重新转换",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickableNoRipple(onReconvertLostGps)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                InlineTextButton(
+                    text = "重新转换",
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    onClick = onReconvertLostGps
                 )
             }
         }
@@ -205,14 +195,10 @@ fun MainScreen(
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    "恢复",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickableNoRipple(onRestoreOriginals)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                InlineTextButton(
+                    text = "恢复",
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    onClick = onRestoreOriginals
                 )
             }
         }
@@ -258,14 +244,11 @@ fun MainScreen(
                 )
                 Spacer(Modifier.weight(1f))
                 if (!isConverting) {
-                    Text(
-                        "清空",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickableNoRipple(onClearAll)
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    InlineTextButton(
+                        text = "清空",
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = onClearAll,
+                        style = MaterialTheme.typography.labelMedium
                     )
                 }
             }
@@ -574,12 +557,3 @@ private fun IndeterminateBar() {
 /** 转换中的项目不显示移除按钮 */
 private fun isBusyStatus(status: String): Boolean =
     status.startsWith("转换中") || status.startsWith("重新转换中")
-
-/** 无涟漪点击（文本按钮用） */
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
-    clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick
-    )
-}

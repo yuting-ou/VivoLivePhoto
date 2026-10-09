@@ -159,6 +159,20 @@ internal object XmpTemplate {
     }
 
     /**
+     * 文件是否为内嵌式单文件实况（XMP 含 MotionPhoto / MicroVideo 标记）。
+     *
+     * 用于「某目录里哪些是本工具转换产物」这类判别——源双文件的 XMP 恰恰不含该标记，
+     * 故它与 MediaExport 识别既往产物用的是同一条件。读取/解析失败一律视为 false
+     * （宁可漏判、不误伤无关文件）。
+     */
+    fun isMotionPhoto(path: String, limit: Int = 512 * 1024): Boolean =
+        try {
+            parseMotionXmp(sniffXmp(path, limit)).isMotion
+        } catch (_: Exception) {
+            false
+        }
+
+    /**
      * 从文件头部直接定位 XMP 文本（检测用，容忍截断）。
      * 不依赖固定头部窗口：先按 XMP APP1 前缀定位，再找闭合标记。
      */

@@ -22,22 +22,28 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
@@ -177,6 +183,57 @@ fun CircleTriCheckbox(
                 }
             }
         }
+    }
+}
+
+/**
+ * 无涟漪点击（文本按钮用）。
+ * 全应用唯一实现：此前 MainScreen 与 SettingsScreen 各有一份完全相同的私有副本。
+ */
+internal fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
+    clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClick = onClick
+    )
+}
+
+/**
+ * 横幅 / 工具栏内的紧凑文本按钮（「去授权 / 重新转换 / 恢复 / 清空」这类内联动作）。
+ *
+ * 视觉仍是贴合文字的紧凑文字（可选底色胶囊），但**触摸目标**扩到 ≥48dp——
+ * 原先仅靠 padding 只有约 28~32dp，低于 Material 可达性下限。
+ *
+ * 两个易错点（都曾踩到）：
+ * 1. `clickable` 必须与 `minimumInteractiveComponentSize()` 在**同一条修饰符链**上，
+ *    否则放大的只是外层 Box 的布局尺寸，可点区域仍是文字本身那点大小；
+ * 2. 最小尺寸要加在外层 Box（内含居中）而不是 Text 上——Text 在高于自身内容的约束里
+ *    会贴顶排版，文字会相对行动区错位。
+ */
+@Composable
+fun InlineTextButton(
+    text: String,
+    contentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    background: Color? = null,
+    style: TextStyle = MaterialTheme.typography.labelLarge,
+    shape: Shape = RoundedCornerShape(8.dp)
+) {
+    Box(
+        modifier
+            .minimumInteractiveComponentSize()
+            .clickableNoRipple(onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = style,
+            color = contentColor,
+            modifier = Modifier
+                .then(if (background != null) Modifier.background(background, shape) else Modifier)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 

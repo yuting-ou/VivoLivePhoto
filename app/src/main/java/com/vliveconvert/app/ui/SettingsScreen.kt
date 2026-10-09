@@ -1,8 +1,6 @@
 package com.vliveconvert.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,7 +104,10 @@ fun SettingsScreen(
                     Text(
                         outputRelPath,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        // 卡片底色是 surfaceContainerLow，`primary` 在其上仅约 4.40:1（低于正文 AA 的 4.5）；
+                        // 值属次要信息，改用与副标题一致的 onSurfaceVariant（≈8:1），
+                        // 可交互性由整行可点 + 右侧 › 表达
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.width(140.dp)
@@ -301,14 +300,5 @@ private fun ChevronRight() {
         contentDescription = null,
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.size(20.dp)
-    )
-}
-
-/** 无涟漪点击（文本按钮用） */
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
-    clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick
     )
 }

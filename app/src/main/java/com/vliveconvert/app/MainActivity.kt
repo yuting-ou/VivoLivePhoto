@@ -53,6 +53,7 @@ import androidx.lifecycle.lifecycleScope
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
+import com.vliveconvert.app.core.XmpTemplate
 import com.vliveconvert.app.picker.AlbumInfo
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
@@ -1367,7 +1368,13 @@ class MainActivity : ComponentActivity() {
     private fun moveOneToCamera(item: MediaItem): Boolean =
         MediaExport.moveUriToCamera(this, item.uri, item.name)
 
-    /** 把输出目录中的全部已转换文件移动到 DCIM/Camera */
+    /**
+     * 把输出目录中的**已转换产物**移动到 DCIM/Camera。
+     *
+     * 只移动本工具产出的单文件实况（XMP 含 MotionPhoto 标记，与 MediaExport 的判别同源）：
+     * 输出目录是用户可配置的，若被指向一个还放着其它照片的目录，全量移动会把无关照片
+     * 一并挪进相机相册。跳过的数量如实回报。
+     */
     private fun moveOutputsToCamera() {
         if (isMovingOutputs || ConvertCenter.isConverting) return
         if (outputRelPath.equals("DCIM/Camera", ignoreCase = true)) {
@@ -1376,11 +1383,17 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) { isMovingOutputs = true }
-            val items = queryImagesIn(outputRelPath)
+            val all = queryImagesIn(outputRelPath)
+            val items = all.filter { XmpTemplate.isMotionPhoto(it.path) }
+            val skipped = all.size - items.size
             if (items.isEmpty()) {
                 withContext(Dispatchers.Main) {
                     isMovingOutputs = false
-                    ConvertCenter.statusText = "输出目录（$outputRelPath）中没有可移动的文件"
+                    ConvertCenter.statusText = if (all.isEmpty())
+                        "输出目录（$outputRelPath）中没有可移动的文件"
+                    else
+                        "输出目录（$outputRelPath）中没有本工具转换的实况产物" +
+                            "（已跳过 $skipped 个其它文件）"
                 }
                 return@launch
             }
@@ -1395,7 +1408,8 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 isMovingOutputs = false
                 ConvertCenter.statusText = "移动完成：$ok 个文件已移到 DCIM/Camera" +
-                    (if (fail > 0) "，失败 $fail 个" else "")
+                    (if (fail > 0) "，失败 $fail 个" else "") +
+                    (if (skipped > 0) "；已跳过 $skipped 个非本工具产物" else "")
             }
         }
     }

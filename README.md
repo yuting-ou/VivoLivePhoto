@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.0），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.1），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.0.apk`](./VivoLivePhoto-v1.7.0.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.1.apk`](./VivoLivePhoto-v1.7.1.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,30 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.1
+
+接着 v1.7.0 的稳定性专项，把上一轮审查中「看到但没动」的几项一并做掉，并顺手消掉一处重复实现。
+
+- **「移到相机相册」不再移动无关照片**：该操作原先移动输出目录里的**全部**图片。而输出目录
+  是用户可配置的——若被指向一个还放着其它照片的目录，这些无关照片会被一并挪进 DCIM/Camera。
+  现按「单文件实况（XMP 含 MotionPhoto / MicroVideo 标记）」过滤，与 MediaExport 识别
+  「既往产物」用的是同一判别条件；跳过的数量如实回报（新增 `XmpTemplate.isMotionPhoto` 及其单测）
+- **内联文本按钮触摸目标达标**：横幅里的「去授权 / 重新转换 / 恢复」与列表头的「清空」原先
+  只靠 padding，约 28~32dp。新增 `InlineTextButton`（视觉仍是紧凑文字，触摸区 ≥48dp）。
+  实现时踩到并修掉一个坑：`clickable` 必须与 `minimumInteractiveComponentSize()` 在**同一条
+  修饰符链**上，否则放大的只是布局尺寸、可点区域仍是文字本身；该约束已写入代码注释
+- **设置页「输出目录」取值改用 `onSurfaceVariant`**：原用 `primary`，而卡片底色是
+  `surfaceContainerLow`，实测对比度 4.40:1，略低于正文 AA 的 4.5:1
+- **关于页许可证文本改为后台读取**：原在组合阶段同步读 35KB 资源，现经 `produceState`
+  切到 IO 线程（读取期间显示占位文案），顺带消除 Lint 的 `LocalContextResourcesRead` 提示
+- **消除 `clickableNoRipple` 的重复实现**：此前 MainScreen 与 SettingsScreen 各有一份完全
+  相同的私有副本，现收口为 Components 中的唯一实现
+- 验证：新增 1 组单测（产物判别），**61 组 JVM 单测全绿**（另 3 组真机样本用例在无样本时跳过），
+  release 构建与签名校验通过
+- 说明：本轮曾尝试为「触摸目标」补一条 Compose UI 测试，但 Robolectric 的字体度量是近似值、
+  节点尺寸会被量成 47dp 且在两次运行间不稳定，无法稳定断言 48dp——**宁可不加，也不留一条
+  会偶发失败的测试**，故撤下该用例
 
 ### v1.7.0
 
