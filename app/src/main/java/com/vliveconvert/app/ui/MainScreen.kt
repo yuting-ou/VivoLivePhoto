@@ -43,10 +43,12 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.vliveconvert.app.R
 import com.vliveconvert.app.ui.theme.statusColors
 
 /**
@@ -110,7 +112,7 @@ fun MainScreen(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "vivo 双文件实况 → 单文件实况",
+                    stringResource(R.string.app_tagline),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -532,7 +534,9 @@ private fun ConvertItemRow(
                 Text(
                     "重转",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    // 背景是实色 tertiary，前景必须用配套的 onTertiary；
+                    // 原先误用 onTertiaryContainer，深色下仅 1.29:1，文字几乎不可见
+                    color = MaterialTheme.colorScheme.onTertiary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.tertiary)
@@ -542,7 +546,8 @@ private fun ConvertItemRow(
                 Spacer(Modifier.width(2.dp))
             }
             if (!busy) {
-                IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) {
+                // 不限定 size：IconButton 默认 48dp，满足最小触摸目标（原先压到 34dp 过小）
+                IconButton(onClick = onRemove) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "移除",

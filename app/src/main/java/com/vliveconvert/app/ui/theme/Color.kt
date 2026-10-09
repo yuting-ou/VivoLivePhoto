@@ -3,10 +3,6 @@ package com.vliveconvert.app.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // vivo 品牌蓝 #415FFF 派生的 M3 色调
-val VivoBlue = Color(0xFF415FFF)
-val VivoBlueDark = Color(0xFFBCC2FF)
-val VivoBlueContainerLight = Color(0xFFDEE0FF)
-val VivoBlueContainerDark = Color(0xFF2A41B8)
 
 // 浅色方案
 val LightPrimary = Color(0xFF415FFF)

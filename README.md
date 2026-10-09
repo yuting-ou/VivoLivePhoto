@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.6.0），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.6.0.apk`](./VivoLivePhoto-v1.6.0.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.0.apk`](./VivoLivePhoto-v1.7.0.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,51 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.0
+
+稳定性专项：把前几轮迭代遗留的一批「边界 / 竞态 / 可达性」缺陷逐条做实，并补上可反向验证的回归测试。
+
+**正确性**
+
+- **修复 mdhd `version=1` 的解析偏移（封面帧时间戳错误）**：mdhd 是 FullBox，v1 时
+  creation/modification 各占 8 字节（v0 各 4 字节），timescale/duration 的偏移应为 `20/24`；
+  原实现两个分支都按 `12/16` 读，v1 会把 modification_time 当成 timescale → duration/fps 全错，
+  而 fps 又用于由 `imageTime`（封面帧序号）反推封面时间戳。现按 version 分别取偏移
+- **选择器识别改用 seek 读尾部**：原先用 `FileInputStream.skip(size-8192)` 定位尾部窗口，
+  而 `skip` 的契约允许「少跳」——一旦少跳，窗口就错位、footer 解析失败，该照片会被**静默**
+  判为「非双文件」而从选择器消失。改为 `RandomAccessFile.seek` 精确定位（同 v1.4.1 修
+  `.MP4` 遗漏、v1.5.1 修越界误覆盖一样，属于同一类「静默漏收/误收」缺陷）
+
+**耗电与卡死**
+
+- **修复扫描状态不收敛**：扫描只在校验到「确实有待扫项」时才写收尾状态，于是两条真实路径
+  永不收敛——(1) 相册为空 / 查询无结果 → UI 的完成轮询**每 200ms 空转**且进度条永久停在
+  「扫描中」；(2) 扫描中途切走（job 被 cancel）→ 收尾分支被跳过，`running` 残留为 true。
+  现改为任何非取消路径都收敛到 `completed`，并在 `resetProgress` 中复位 `running`；
+  UI 侧以 `running && !completed` 判定并加「job 身份守卫」，防止被替换的旧 job 抢写完成态
+- **修复「修复文件时间」每次进入不重扫**：此前漏调 `SingleLiveScanner.newSession()`，
+  同一进程内再次进入不会重新查询媒体库——新拍的实况不出现，已删除 / 已修复的条目仍留在清单里
+
+**可达性与视觉**
+
+- **修复「重转」按钮文字几乎不可见**：实色 `tertiary` 背景上误配了 `onTertiaryContainer`
+  （那是配 `tertiaryContainer` 的前景），深色主题下对比度仅 **1.29:1**；改用配套的
+  `onTertiary`，并把该配对纳入对比度回归测试（原测试只校验了正确的那一对，漏掉了这个错配）
+- **触摸目标达标**：圆形三态复选框（全选 / 按日期全选 / 单张勾选）由 26dp 扩到 ≥48dp
+  （视觉仍是 26dp 的圆），条目「移除」按钮由 34dp 恢复为 IconButton 默认的 48dp
+- **设置页底部不再被系统导航栏遮挡**：补上 `navigationBarsPadding()`（此前该 import 存在却从未使用）
+- 日期分组 key 的月份改为 1 基（与 `dateLabel` 一致）；一句话定位文案收口为字符串资源；
+  删除 4 个从未被引用的重复品牌色常量
+
+**验证**
+
+- 新增 4 组测试（mdhd v0/v1 解析、扫描状态收敛、实色 tertiary 对比度配对）
+- 两处关键修复均以「注入缺陷」反向验证：重新引入 mdhd 偏移错误 → v1 用例失败而 v0 仍通过；
+  去掉收敛点 → 空相册用例失败。测试不是摆设
+- **60 组 JVM 单测全绿**（另 3 组真机样本用例在无样本时跳过），Lint 无 error
+  （`lintVitalRelease` 通过；debug 报告仅剩「依赖有新版本 / 启动图标形状」这类既有提示性 warning），
+  release 构建与签名校验通过
 
 ### v1.6.0
 

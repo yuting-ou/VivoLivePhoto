@@ -3,4 +3,6 @@
     <string name="app_name">Vivo Live Photo yuting改进版</string>
     <!-- 应用内统一品牌名（权限页 / 顶栏 / 设置页版本栏） -->
     <string name="app_display_name">Vivo Live Photo</string>
+    <!-- 一句话定位（顶栏副标题 / 权限页副标题） -->
+    <string name="app_tagline">vivo 双文件实况 → 单文件实况</string>
 </resources>

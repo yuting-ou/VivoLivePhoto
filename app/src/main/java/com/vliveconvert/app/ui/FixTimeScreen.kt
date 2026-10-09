@@ -116,9 +116,12 @@ fun FixTimeScreen(
     val results = state?.results
     val total = state?.total ?: 0
     val scanProgress by produceState(0 to false, state) {
+        val s = state ?: return@produceState // 无相册：不轮询（否则永不完成、每 200ms 空转）
         while (true) {
-            value = (state?.doneCount?.get() ?: 0) to (state?.running ?: false)
-            if (state?.completed == true) break // 扫描完成即终止轮询，避免空转耗电
+            val doneAll = s.completed
+            // 以 !completed 兜底，避免收尾瞬间的撕裂读把 spinner 永久锁在「扫描中」
+            value = s.doneCount.get() to (s.running && !doneAll)
+            if (doneAll) break // 扫描完成即终止轮询，避免空转耗电
             delay(200)
         }
     }

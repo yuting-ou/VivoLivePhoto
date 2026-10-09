@@ -13,8 +13,8 @@ android {
         applicationId = "com.vliveconvert.app"
         minSdk = 34
         targetSdk = 37
-        versionCode = 21
-        versionName = "1.6.0"
+        versionCode = 22
+        versionName = "1.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -97,6 +97,12 @@ dependencies {
     // v1.3.1「点击开始转换闪退」正是发生在这层；单测只覆盖 core/ 转换管道）
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("androidx.test:core:1.6.1")
+    // 协程测试：Dispatchers.setMain 用测试调度器接管 Main。
+    // 必要性：扫描器的状态复位在 withContext(Main) 内，而 Dispatchers.Main 会在
+    // 首个 Robolectric 测试沙箱里被静态绑定到那个沙箱的 Looper——整套测试一起跑时
+    // 后续用例的 idle() 推不动它，导致用例偶发失败。接管后完全确定、不依赖 Looper。
+    // 版本与解析出的 kotlinx-coroutines-core 对齐
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

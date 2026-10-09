@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -125,55 +126,64 @@ fun CircleTriCheckbox(
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier
-            .size(26.dp)
+            // 触摸目标 ≥48dp：视觉仍是 26dp 圆，点击区域扩到 Material 标准最小尺寸
+            // （原先是 26dp，而本组件承担全选/按日期全选等关键交互，过小易误触）
+            .minimumInteractiveComponentSize()
             .clip(CircleShape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null
-            ) { onClick?.invoke() }
-            .border(2.dp, borderColor, CircleShape),
+            ) { onClick?.invoke() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(Modifier.size(26.dp)) {
-            val s = size.minDimension
-            val stroke = 2.dp.toPx()
-            when (state) {
-                ToggleableState.On -> {
-                    drawCircle(fillColor, radius = s / 2 - stroke / 2 - 1.dp.toPx())
-                    drawLine(
-                        color = checkColor,
-                        start = Offset(s * 0.30f, s * 0.53f),
-                        end = Offset(s * 0.45f, s * 0.68f),
-                        strokeWidth = stroke,
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = checkColor,
-                        start = Offset(s * 0.45f, s * 0.68f),
-                        end = Offset(s * 0.72f, s * 0.34f),
-                        strokeWidth = stroke,
-                        cap = StrokeCap.Round
-                    )
+        // 视觉圆（26dp，与修复前完全一致）：描边 + 三态图形
+        Box(
+            Modifier
+                .size(26.dp)
+                .border(2.dp, borderColor, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.size(26.dp)) {
+                val s = size.minDimension
+                val stroke = 2.dp.toPx()
+                when (state) {
+                    ToggleableState.On -> {
+                        drawCircle(fillColor, radius = s / 2 - stroke / 2 - 1.dp.toPx())
+                        drawLine(
+                            color = checkColor,
+                            start = Offset(s * 0.30f, s * 0.53f),
+                            end = Offset(s * 0.45f, s * 0.68f),
+                            strokeWidth = stroke,
+                            cap = StrokeCap.Round
+                        )
+                        drawLine(
+                            color = checkColor,
+                            start = Offset(s * 0.45f, s * 0.68f),
+                            end = Offset(s * 0.72f, s * 0.34f),
+                            strokeWidth = stroke,
+                            cap = StrokeCap.Round
+                        )
+                    }
+                    ToggleableState.Indeterminate -> {
+                        drawLine(
+                            color = fillColor,
+                            start = Offset(s * 0.28f, s / 2),
+                            end = Offset(s * 0.72f, s / 2),
+                            strokeWidth = stroke * 1.2f,
+                            cap = StrokeCap.Round
+                        )
+                    }
+                    ToggleableState.Off -> {}
                 }
-                ToggleableState.Indeterminate -> {
-                    drawLine(
-                        color = fillColor,
-                        start = Offset(s * 0.28f, s / 2),
-                        end = Offset(s * 0.72f, s / 2),
-                        strokeWidth = stroke * 1.2f,
-                        cap = StrokeCap.Round
-                    )
-                }
-                ToggleableState.Off -> {}
             }
         }
     }
 }
 
-/** 日期 key（年-月-日） */
+/** 日期 key（年-月-日；月份补 1，与 dateLabel 一致） */
 fun dateKey(time: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = time }
-    return "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.MONTH)}-${cal.get(Calendar.DAY_OF_MONTH)}"
+    return "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.MONTH) + 1}-${cal.get(Calendar.DAY_OF_MONTH)}"
 }
 
 /** 日期标签：今天 / 昨天 / x月x日（今年） / yyyy年x月x日（往年） */

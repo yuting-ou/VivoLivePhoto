@@ -80,6 +80,9 @@ class PickerScanner(private val repo: MediaRepo) {
             scanned.clear()
             doneCount.set(0)
             total = 0
+            // 上一次扫描被取消时不会走到收尾分支，running 会残留为 true——
+            // 若不在此复位，切回后进度条会一直显示「扫描中」
+            running = false
         }
     }
 
@@ -106,20 +109,28 @@ class PickerScanner(private val repo: MediaRepo) {
         if (st.completed) return
         st.job?.cancel()
         st.job = scope.launch(Dispatchers.IO) {
+            val self = currentCoroutineContext()[Job]
             // SnapshotStateList 的 clear 必须在 Main 线程（与网格迭代并发会 CME 崩溃）
             withContext(Dispatchers.Main) { st.resetProgress() }
             if (!isActive) return@launch
-            if (diffRefresh(st, bucketId)) {
+            val hasWork = diffRefresh(st, bucketId)
+            if (hasWork) {
                 st.running = true
                 // workers 作为本 job 的子协程启动，随父协程取消而终止
                 val workers = (1..SCAN_THREADS).map {
                     launch { scanWorker(st) }
                 }
                 workers.forEach { it.join() }
-                if (st.pending.isEmpty()) {
-                    st.running = false
-                    st.completed = true
-                }
+            }
+            // 收敛点（必须无条件到达）：空相册 / 查询无结果时若直接跳过，
+            // UI 的完成轮询（每 200ms）永不终止 → 空转耗电，且进度条永久停在「扫描中」。
+            // 先置 completed 再清 running，避免「已读到 running=true、随后读到 completed=true」
+            // 的撕裂读把 spinner 锁死（UI 侧同时按 running && !completed 判定，双保险）。
+            // 身份守卫：join() 之后到此处没有挂起点，被 cancel 的旧 job 仍可能执行到这里；
+            // 若它已被新 job 取代（st.job 变了），就绝不能替新扫描写下「已完成」。
+            if (st.job === self) {
+                st.completed = true
+                st.running = false
             }
         }
     }

@@ -115,9 +115,14 @@ fun PickerScreen(
     // 进度轮询（done/running 为普通并发变量，需轮询驱动重组）；
     // 扫描完成后终止轮询，避免空转耗电（重新进入扫描会生成新 state 自动重启轮询）
     val progress by produceState(0 to false, state) {
+        val s = state ?: return@produceState // 无相册：不轮询（否则永不完成、每 200ms 空转）
         while (true) {
-            value = (state?.doneCount?.get() ?: 0) to (state?.running ?: false)
-            if (state?.completed == true) break
+            val doneAll = s.completed
+            // running 与 completed 是两个独立变量：收尾瞬间可能先读到 running=true、
+            // 再读到 completed=true，若直接用 running 会让 spinner 永久卡在「扫描中」，
+            // 故以 !completed 兜底
+            value = s.doneCount.get() to (s.running && !doneAll)
+            if (doneAll) break
             delay(200)
         }
     }

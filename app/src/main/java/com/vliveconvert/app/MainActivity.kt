@@ -1054,6 +1054,9 @@ class MainActivity : ComponentActivity() {
             showAllFilesDialog = true
             return
         }
+        // 与内置选择器一致：每次进入开启新会话，清空上次的扫描结果与 completed 标记。
+        // 否则同一进程内再次进入不会重新查询媒体库——新拍的实况不出现、已删除/已修复的项仍留在清单里。
+        singleLiveScanner.newSession()
         showFixTime = true
         fixStatus = "正在读取相册…"
         lifecycleScope.launch(Dispatchers.IO) {

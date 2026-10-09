@@ -1,7 +1,7 @@
 package com.vliveconvert.app.core
 
 import java.io.File
-import java.io.FileInputStream
+import java.io.RandomAccessFile
 import kotlin.math.round
 
 /**
@@ -58,17 +58,15 @@ internal object VivoDual {
         return try {
             val f = File(path)
             val size = f.length()
-            FileInputStream(path).use { fs ->
-                fs.skip(maxOf(0L, size - 8192))
-                val tail = ByteArray(minOf(8192L, size).toInt())
-                var read = 0
-                while (read < tail.size) {
-                    val n = fs.read(tail, read, tail.size - read)
-                    if (n < 0) break
-                    read += n
-                }
-                val footer = FooterUtil.parseFooter(tail.copyOfRange(0, read))
-                footer?.livephotoId != null
+            // 尾部窗口读取用 seek 而非 FileInputStream.skip：skip 的契约允许「少跳」，
+            // 一旦发生窗口就会错位、footer 解析失败，该照片会被静默判为非双文件而漏收。
+            val tailLen = minOf(8192L, size).toInt()
+            if (tailLen <= 0) return false
+            RandomAccessFile(f, "r").use { raf ->
+                raf.seek(size - tailLen)
+                val tail = ByteArray(tailLen)
+                raf.readFully(tail)
+                FooterUtil.parseFooter(tail)?.livephotoId != null
             }
         } catch (e: Exception) {
             false

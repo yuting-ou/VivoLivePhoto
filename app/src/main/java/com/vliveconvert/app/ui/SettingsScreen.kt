@@ -92,6 +92,8 @@ fun SettingsScreen(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
+                // 边到边显示下，滚动内容底部会与系统导航栏重叠，最后一行无法滚出遮挡区
+                .navigationBarsPadding()
         ) {
             Spacer(Modifier.height(12.dp))
 

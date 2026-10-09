@@ -124,4 +124,22 @@ class StatusContrastTest {
         assertContrast("深色 onPrimary / primary",
             dark.onPrimary, dark.primary, TEXT_MIN)
     }
+
+    /**
+     * 「重转」按钮：实色 tertiary 背景上的前景必须用配套的 onTertiary。
+     *
+     * 回归背景：该处原误用 onTertiaryContainer（那是配 tertiaryContainer 的前景），
+     * 深色主题下 onTertiaryContainer(#FDD7FC) 叠在实色 tertiary(#E9BBE0) 上仅 1.29:1，
+     * 文字几乎不可见；而当时的用例只校验了 onTertiaryContainer/tertiaryContainer
+     * 这一正确配对，恰好漏掉它，测试给了虚假的安全感。
+     */
+    @Test
+    fun solidTertiarySurfaceUsesMatchingOnTertiary() {
+        val light = themeColorScheme(light = true)
+        val dark = themeColorScheme(light = false)
+        assertContrast("浅色 重转按钮文字 / 实色 tertiary",
+            light.onTertiary, light.tertiary, TEXT_MIN)
+        assertContrast("深色 重转按钮文字 / 实色 tertiary",
+            dark.onTertiary, dark.tertiary, TEXT_MIN)
+    }
 }

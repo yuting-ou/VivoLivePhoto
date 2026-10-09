@@ -187,6 +187,10 @@ internal object Mp4Util {
             }
 
             // mdhd：timescale + duration
+            // FullBox 布局随 version 变化：creation/modification 在 v1 是 8 字节、v0 是 4 字节，
+            // 故 timescale/duration 的偏移不同（v1: 20/24，v0: 12/16）。按 v0 的偏移读 v1
+            // 会把 modification_time 当成 timescale → duration/fps 全错 → 由 imageTime 反推的
+            // 封面帧时间戳错误。
             val mdhd = trak.firstOrNull { it.type == "mdhd" }
             var durationS = 0.0
             if (mdhd != null) {
@@ -195,8 +199,8 @@ internal object Mp4Util {
                 val timescale: Long
                 val duration: Long
                 if (version.toInt() == 1) {
-                    timescale = BinaryUtils.readU32BE(data, body + 12)
-                    duration = BinaryUtils.readU64BE(data, body + 16)
+                    timescale = BinaryUtils.readU32BE(data, body + 20)
+                    duration = BinaryUtils.readU64BE(data, body + 24)
                 } else {
                     timescale = BinaryUtils.readU32BE(data, body + 12)
                     duration = BinaryUtils.readU32BE(data, body + 16)
