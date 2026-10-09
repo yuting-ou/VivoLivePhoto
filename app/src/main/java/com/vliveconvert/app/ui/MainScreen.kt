@@ -116,21 +116,15 @@ fun MainScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            // 设置入口：与其它页面的返回按钮同为「无底色的图标按钮」，
+            // 原先套一个 primaryContainer 实心圆，看起来更像头像而不是设置
             IconButton(onClick = onOpenSettings) {
-                Box(
-                    Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.Settings,
-                        contentDescription = "设置",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    Icons.Filled.Settings,
+                    contentDescription = "设置",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -140,8 +134,10 @@ fun MainScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    // 圆角内缩卡片（而非整幅通栏色带）：多条同时出现时才不刺眼、更像一组提示
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.errorContainer)
-                    // 纵向不加 padding：动作按钮自身已 ≥48dp，再补会让每条横幅白占 8dp
                     .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -164,6 +160,8 @@ fun MainScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.tertiaryContainer)
                     .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -187,6 +185,8 @@ fun MainScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.primaryContainer)
                     .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically

@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.3），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.4），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.3.apk`](./VivoLivePhoto-v1.7.3.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.4.apk`](./VivoLivePhoto-v1.7.4.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,21 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.4
+
+UI 美化与易用性打磨。每一条都是**先看截图、再改、再看截图**确认的。
+
+- **横幅由「通栏色带」改为「圆角内缩卡片」**：三条提示同时出现时，原先三整条不同色块横贯
+  屏幕、像彩虹一样抢眼；改为留白 + 圆角的卡片后，它们读起来是「一组提示」而不是三条色带
+- **顶栏设置入口改为无底色的图标按钮**：原先套了一个 `primaryContainer` 实心圆，
+  看着更像用户头像；现在与其它页面的返回按钮同一种样式，全应用一致
+- **缩略图占位画上淡「照片」字形**：原先只有一块呼吸灰块，容易让人以为「这里本来就是空的」；
+  画上相框 + 山 + 太阳的轮廓后，一眼就知道是在等缩略图加载
+- **导出完成状态去掉冗余的「相册」二字**：「完成：已导出到相册 DCIM/Camera」会把
+  `DCIM/Camera` 拆成两行；去掉二字后回到单行，列表整齐、行高一致
+- 验证：**68 组 JVM 单测全绿**（含 7 张界面渲染截图），Lint 无 error，
+  release 构建与签名校验通过
 
 ### v1.7.3
 

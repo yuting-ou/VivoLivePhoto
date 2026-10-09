@@ -244,8 +244,8 @@ class ConvertService : Service() {
                     // 重转在位置权限已授予的前提下执行：仍无 GPS = 源本身没位置
                     "完成：已重新转换（源文件本身不含 GPS 位置）"
                 deferToCamera -> "完成：待原图删除后以原名移入相机相册"
-                moveToCamera -> "完成：已导出到相册 DCIM/Camera"
-                else -> "完成：已导出到相册 $outputRelPath"
+                moveToCamera -> "完成：已导出到 DCIM/Camera"
+                else -> "完成：已导出到 $outputRelPath"
             }
             // 不再在行内状态里附加「（源文件无 GPS 位置数据）」：该语义已由
             // 橙色行底色 + 琥珀「!」徽标 + 行内「重转」按钮三重表达，批次汇总也给出计数；

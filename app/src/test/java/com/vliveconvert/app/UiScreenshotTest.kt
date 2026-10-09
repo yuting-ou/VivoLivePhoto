@@ -221,9 +221,9 @@ class UiScreenshotTest {
                 ConvertItem(item = item(2, "IMG_20260831_140512.jpg"),
                     status = "转换中…"),
                 ConvertItem(item = item(3, "IMG_20260831_141030.jpg"),
-                    status = "完成：已导出到相册 DCIM/Camera", done = true),
+                    status = "完成：已导出到 DCIM/Camera", done = true),
                 ConvertItem(item = item(4, "IMG_20260831_150200.jpg"),
-                    status = "完成：已导出到相册 DCIM/Camera",
+                    status = "完成：已导出到 DCIM/Camera",
                     done = true, lostGps = true, outUri = "content://media/external/images/media/9"),
                 ConvertItem(item = item(5, "IMG_20260831_161500.jpg"),
                     status = "失败：内存不足（文件过大），请减少单批数量后重试", failed = true)

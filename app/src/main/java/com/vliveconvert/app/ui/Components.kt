@@ -34,11 +34,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -97,7 +102,8 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
                 )
             }
         }
-        // 加载占位：呼吸脉冲
+        // 加载占位：呼吸底色 + 淡淡的「照片」字形。
+        // 只给一块灰板会让人以为「这里本来就空」，画上轮廓才读得出是在等缩略图
         if (bitmap == null) {
             val pulse by rememberInfiniteTransition(label = "thumbPulse").animateFloat(
                 initialValue = 0.45f,
@@ -108,8 +114,36 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = pulse))
-            )
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = pulse)),
+                contentAlignment = Alignment.Center
+            ) {
+                val glyph = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.30f)
+                Canvas(Modifier.size(26.dp)) {
+                    val w = size.width
+                    val h = size.height
+                    val stroke = 1.6.dp.toPx()
+                    drawRoundRect(
+                        color = glyph,
+                        cornerRadius = CornerRadius(w * 0.14f, w * 0.14f),
+                        size = ComposeSize(w, h),
+                        style = Stroke(width = stroke)
+                    )
+                    drawCircle(glyph, radius = w * 0.075f, center = Offset(w * 0.30f, h * 0.30f))
+                    val mountain = Path().apply {
+                        moveTo(w * 0.14f, h * 0.76f)
+                        lineTo(w * 0.40f, h * 0.46f)
+                        lineTo(w * 0.58f, h * 0.68f)
+                        lineTo(w * 0.70f, h * 0.56f)
+                        lineTo(w * 0.86f, h * 0.76f)
+                    }
+                    drawPath(
+                        path = mountain,
+                        color = glyph,
+                        style = Stroke(
+                            width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
+            }
         }
     }
 }
