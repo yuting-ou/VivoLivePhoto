@@ -5,8 +5,9 @@ vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android
 > 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.3.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **APK 直达**：仓库根目录 [`VivoLivePhoto-v1.3.0-ui.apk`](./VivoLivePhoto-v1.3.0-ui.apk)
-> （手机浏览器打开本仓库 → 点开该文件 → Download 即可安装）。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
+> 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
+> [`VivoLivePhoto-v1.3.0-ui.apk`](./VivoLivePhoto-v1.3.0-ui.apk) 下载，内容一致。
 
 ## 背景
 
