@@ -1,3 +1,6 @@
 <resources>
+    <!-- 桌面图标名：保留「yuting改进版」以便与原版 brovast/VLiveConvert 区分 -->
     <string name="app_name">Vivo Live Photo yuting改进版</string>
+    <!-- 应用内统一品牌名（权限页 / 顶栏 / 设置页版本栏） -->
+    <string name="app_display_name">Vivo Live Photo</string>
 </resources>

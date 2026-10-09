@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.picker.AlbumInfo
@@ -53,10 +54,12 @@ import com.vliveconvert.app.picker.PickerScanner
 import com.vliveconvert.app.picker.PickerScreen
 import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.ConvertCenter
+import com.vliveconvert.app.service.ConvertService
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
+import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -66,8 +69,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
-/** 主界面栈：权限页 → 主页 → 选择器 / 修复时间（用于转场方向判定） */
-private enum class Screen { Permission, Main, Picker, FixTime }
+/** 主界面栈：权限页 → 主页 → 选择器 / 修复时间 / 设置（用于转场方向判定） */
+private enum class Screen { Permission, Main, Picker, FixTime, Settings }
 
 /**
  * 主界面：转换队列与进度的真实状态在 [ConvertCenter]（进程级单例），
@@ -117,6 +120,10 @@ class MainActivity : ComponentActivity() {
     private var isFixing by mutableStateOf(false)
     private var fixProgress by mutableFloatStateOf(0f)
     private var fixSelectionReset by mutableIntStateOf(0)
+
+    // 设置页（收纳低频项）与状态详情弹窗
+    private var showSettings by mutableStateOf(false)
+    private var showStatusDetail by mutableStateOf(false)
 
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
@@ -375,6 +382,8 @@ class MainActivity : ComponentActivity() {
                 // 系统返回键/侧滑返回：选择器与修复时间界面返回主页，主页保持默认退出行为；
                 // 转换中吞掉返回，防止误退
                 BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
+                BackHandler(enabled = showStatusDetail) { showStatusDetail = false }
+                BackHandler(enabled = showSettings) { showSettings = false }
                 BackHandler(enabled = showFixTime) { showFixTime = false }
                 BackHandler(enabled = showPicker) { showPicker = false }
 
@@ -385,6 +394,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // 目标界面：授权后带权限状态一起参与重组，权限授予时也有过渡动画
                     val targetScreen = if (!hasReadPermission()) Screen.Permission
+                    else if (showSettings) Screen.Settings
                     else if (showPicker) Screen.Picker
                     else if (showFixTime) Screen.FixTime
                     else Screen.Main
@@ -433,6 +443,37 @@ class MainActivity : ComponentActivity() {
                                 onBack = { showFixTime = false },
                                 onFix = { selected -> startFixTimes(selected) }
                             )
+                            Screen.Settings -> SettingsScreen(
+                                appName = getString(R.string.app_display_name),
+                                versionName = appVersionName(),
+                                outputRelPath = outputRelPath,
+                                moveToCamera = moveToCamera,
+                                deleteOriginal = deleteOriginal,
+                                crashLogCount = crashLogCount,
+                                isBusy = ConvertCenter.isConverting || isMovingOutputs || isFixing,
+                                onBack = { showSettings = false },
+                                onEditOutputPath = {
+                                    outputPathInput = outputRelPath
+                                    showOutputPathDialog = true
+                                },
+                                onToggleMoveToCamera = { on ->
+                                    moveToCamera = on
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("move_to_camera", on).apply()
+                                },
+                                onToggleDeleteOriginal = { on ->
+                                    // 开启且未授予所有文件访问权限时，提示授权以去掉系统确认框
+                                    if (on && !Environment.isExternalStorageManager()) {
+                                        showAllFilesDialog = true
+                                    }
+                                    deleteOriginal = on
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("delete_original", on).apply()
+                                },
+                                onOpenFixTime = { openFixTime() },
+                                onMoveOutputsToCamera = { moveOutputsToCamera() },
+                                onExportCrashLogs = { exportCrashLogs() }
+                            )
                             Screen.Main -> MainScreen(
                                 items = ConvertCenter.items.toList(),
                                 statusText = ConvertCenter.statusText,
@@ -450,32 +491,13 @@ class MainActivity : ComponentActivity() {
                                     it.done && it.lostGps && !it.failed
                                 },
                                 onReconvertLostGps = { reconvertLostGpsItems() },
+                                onReconvertItem = { ci -> reconvertOneItem(ci) },
                                 outputRelPath = outputRelPath,
-                                isMovingOutputs = isMovingOutputs,
-                                onEditOutputPath = {
-                                    outputPathInput = outputRelPath
-                                    showOutputPathDialog = true
-                                },
-                                onMoveOutputsToCamera = { moveOutputsToCamera() },
-                                onOpenFixTime = { openFixTime() },
-                                crashLogCount = crashLogCount,
-                                onExportCrashLogs = { exportCrashLogs() },
-                                deleteOriginal = deleteOriginal,
-                                onToggleDeleteOriginal = { on ->
-                                    // 开启且未授予所有文件访问权限时，提示授权以去掉系统确认框
-                                    if (on && !Environment.isExternalStorageManager()) {
-                                        showAllFilesDialog = true
-                                    }
-                                    deleteOriginal = on
-                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                        .edit().putBoolean("delete_original", on).apply()
-                                },
                                 moveToCamera = moveToCamera,
-                                onToggleMoveToCamera = { on ->
-                                    moveToCamera = on
-                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                        .edit().putBoolean("move_to_camera", on).apply()
-                                },
+                                deleteOriginal = deleteOriginal,
+                                onOpenSettings = { showSettings = true },
+                                onShowStatusDetail = { showStatusDetail = true },
+                                onCancelConvert = { cancelConvert() },
                                 onAddMore = { openBuiltInPicker() },
                                 onStartConvert = { startConvert() },
                                 onClearAll = {
@@ -594,6 +616,23 @@ class MainActivity : ComponentActivity() {
                                         "未授予「位置」权限，已取消重新转换（授权后可再点「重新转换」）"
                                 }
                             }) { Text(if (pendingActionIsReconvert) "取消" else "仍要转换") }
+                        }
+                    )
+                }
+
+                // 状态详情：主界面只显示单行摘要，完整文案（含 GPS 警告）在此展开
+                if (showStatusDetail) {
+                    AlertDialog(
+                        onDismissRequest = { showStatusDetail = false },
+                        title = { Text("状态详情") },
+                        text = {
+                            Text(
+                                ConvertCenter.statusText.ifEmpty { "暂无状态信息" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = { showStatusDetail = false }) { Text("知道了") }
                         }
                     )
                 }
@@ -797,14 +836,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 一键重新转换丢位置的照片（主界面「重新转换」入口）：
+     * 一键重新转换丢位置的照片（主界面「重新转换」入口，批量）：
      * 重转的唯一目的就是找回 GPS，权限是硬前提——未授予时直接弹系统授权框
      * （授权框即门禁，无需再过应用内弹窗）；拒绝则引导系统设置，授予后自动继续。
      */
     private fun reconvertLostGpsItems() {
         if (ConvertCenter.isConverting) return
-        val candidates = ConvertCenter.reconvertCandidates()
-        if (candidates.isEmpty()) return
+        if (ConvertCenter.reconvertCandidates().isEmpty()) return
         if (!hasMediaLocationPermission()) {
             pendingLocationAction = { doReconvertLostGps() }
             pendingActionIsReconvert = true
@@ -814,12 +852,43 @@ class MainActivity : ComponentActivity() {
         doReconvertLostGps()
     }
 
+    /** 单条目行内「重转」：与批量入口共用同一套权限门禁与执行逻辑 */
+    private fun reconvertOneItem(ci: ConvertItem) {
+        if (ConvertCenter.isConverting) return
+        if (!ci.done || !ci.lostGps || ci.failed) return
+        if (!hasMediaLocationPermission()) {
+            pendingLocationAction = { doReconvert(listOf(ci)) }
+            pendingActionIsReconvert = true
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+            return
+        }
+        doReconvert(listOf(ci))
+    }
+
+    private fun doReconvertLostGps() = doReconvert(ConvertCenter.reconvertCandidates())
+
+    /** 取消当前转换批次（停前台服务；已完成的条目保留结果） */
+    private fun cancelConvert() {
+        if (!ConvertCenter.isConverting) return
+        stopService(Intent(this, ConvertService::class.java))
+        // 执行中的条目复位为「待转换」：否则会永久停在忙碌态（无移除按钮、一直转圈）
+        ConvertCenter.items.forEachIndexed { i, ci ->
+            if (ci.status.startsWith("转换中") || ci.status.startsWith("重新转换中")) {
+                ConvertCenter.items[i] = ci.copy(status = "待转换")
+            }
+        }
+        ConvertCenter.isConverting = false
+        ConvertCenter.progress = 0f
+        ConvertCenter.progressDetail = ""
+        ConvertCenter.statusText = "已取消转换（已完成的条目保留结果）"
+        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+    }
+
     /**
-     * 执行重转批次：先剔除源文件已不存在的条目（原图被删，无法重转），
+     * 执行重转：先剔除源文件已不存在的条目（原图被删，无法重转），
      * 明确标注原因并清掉丢位置标记（不再提供无意义的重转入口），其余进入重转。
      */
-    private fun doReconvertLostGps() {
-        val candidates = ConvertCenter.reconvertCandidates()
+    private fun doReconvert(candidates: List<ConvertItem>) {
         if (candidates.isEmpty()) {
             ConvertCenter.statusText = "没有需要重新转换的照片"
             return
@@ -838,6 +907,13 @@ class MainActivity : ComponentActivity() {
         if (n == 0 && gone.isEmpty()) {
             ConvertCenter.statusText = "没有可重新转换的照片"
         }
+    }
+
+    /** 版本名（设置页底部展示） */
+    private fun appVersionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+    } catch (_: Exception) {
+        ""
     }
 
     // ---------- 修复文件时间 ----------

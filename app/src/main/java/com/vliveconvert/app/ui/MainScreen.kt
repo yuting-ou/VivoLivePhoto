@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,10 +19,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,22 +33,27 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.vliveconvert.app.picker.MediaItem
 
 /**
  * 主界面：待转换列表 + 开始转换。
+ *
+ * 信息架构（v1.3.0 重排）：主界面只保留「选照片 → 转换」主路径。
+ * 低频项（输出目录 / 两个开关 / 修复时间 / 移到相机 / 日志）全部收进 [SettingsScreen]，
+ * 顶栏只剩标题与设置入口，底部只剩设置摘要 + 两个主按钮——照片列表因此获得绝大部分竖向空间。
  */
 @Composable
 fun MainScreen(
@@ -62,96 +70,66 @@ fun MainScreen(
     /** 已完成但丢了位置的可重转条数：>0 时显示「重新转换找回位置」入口 */
     reconvertCount: Int,
     onReconvertLostGps: () -> Unit,
+    /** 单个条目行内「重转」 */
+    onReconvertItem: (ConvertItem) -> Unit,
     outputRelPath: String,
-    isMovingOutputs: Boolean,
-    onEditOutputPath: () -> Unit,
-    onMoveOutputsToCamera: () -> Unit,
-    crashLogCount: Int,
-    onExportCrashLogs: () -> Unit,
-    deleteOriginal: Boolean,
-    onToggleDeleteOriginal: (Boolean) -> Unit,
     moveToCamera: Boolean,
-    onToggleMoveToCamera: (Boolean) -> Unit,
+    deleteOriginal: Boolean,
+    onOpenSettings: () -> Unit,
+    onShowStatusDetail: () -> Unit,
+    onCancelConvert: () -> Unit,
     onAddMore: () -> Unit,
     onStartConvert: () -> Unit,
     onClearAll: () -> Unit,
-    onOpenFixTime: () -> Unit,
     onRemove: (ConvertItem) -> Unit
 ) {
+    val pendingCount = items.count { !it.done && !it.failed }
+
     Column(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ── 顶栏 ──
-        Column(
+        // ── 顶栏：标题 + 设置 ──
+        Row(
             Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .statusBarsPadding()
+                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Vivo Live Photo", style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("vivo 双文件实况 → 单文件实况",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // 本地崩溃日志导出入口（有崩溃记录时才显示）
-                    if (crashLogCount > 0 && !isConverting) {
-                        Text(
-                            "日志",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onExportCrashLogs)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    if (!isConverting) {
-                        Text(
-                            "修复时间",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onOpenFixTime)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    if (!isConverting && !isMovingOutputs) {
-                        Text(
-                            "移到相机",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onMoveOutputsToCamera)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    if (items.isNotEmpty() && !isConverting) {
-                        Text(
-                            "清空",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onClearAll)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Vivo Live Photo",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "vivo 双文件实况 → 单文件实况",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "设置",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
         // ── 位置权限缺失警示条 ──
         if (locationMissing) {
@@ -159,16 +137,14 @@ fun MainScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "未授予「位置」权限：系统读取照片时会剥离 GPS，转换将丢失地点信息",
-                    style = MaterialTheme.typography.labelMedium,
+                    "未授予「位置」权限，转换会丢失 GPS 地点信息",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 6.dp)
+                    modifier = Modifier.weight(1f)
                 )
                 Text(
                     "去授权",
@@ -177,100 +153,142 @@ fun MainScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .clickableNoRipple(onGrantLocation)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
         }
 
-        // ── 状态条 ──
-        if (statusText.isNotEmpty()) {
-            Text(
-                statusText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-        }
-
-        // ── 恢复原图入口（回收站路径删除后显示，30 天内有效） ──
-        if (pendingRestoreCount > 0) {
-            Text(
-                "↩ 恢复已删除的原图（${pendingRestoreCount} 项，30 天内有效）",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickableNoRipple(onRestoreOriginals)
-                    .padding(horizontal = 4.dp, vertical = 4.dp)
-            )
-        }
-
-        // ── 重新转换找回位置入口（有「完成但丢位置」的条目时显示） ──
+        // ── 重新转换找回位置入口 ──
         if (reconvertCount > 0 && !isConverting) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.tertiaryContainer)
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "📍 $reconvertCount 张照片转换后没有位置信息（未授权时系统会剥离 GPS），" +
-                        "授权后可一键找回",
-                    style = MaterialTheme.typography.labelMedium,
+                    "$reconvertCount 张照片没有位置信息，授权后可一键找回",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 6.dp)
+                    modifier = Modifier.weight(1f)
                 )
                 Text(
                     "重新转换",
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .clickableNoRipple(onReconvertLostGps)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
+            }
+        }
+
+        // ── 恢复原图入口（回收站路径删除后显示，30 天内有效） ──
+        if (pendingRestoreCount > 0) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "已删除的原图可恢复（$pendingRestoreCount 项，30 天内）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "恢复",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickableNoRipple(onRestoreOriginals)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        // ── 状态摘要（长文案折叠，点击看详情） ──
+        if (statusText.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickableNoRipple(onShowStatusDetail)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    statusText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "详情 ›",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // ── 列表头 ──
+        if (items.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (isConverting) "转换中 · 共 ${items.size} 张"
+                    else "已选 ${items.size} 张",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(Modifier.weight(1f))
+                if (!isConverting) {
+                    Text(
+                        "清空",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickableNoRipple(onClearAll)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
             }
         }
 
         // ── 列表 ──
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (items.isEmpty()) {
-                Column(
-                    Modifier.fillMaxSize().padding(bottom = 96.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("还没有选择照片", style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "点击下方「添加照片」，从相册中选择双文件实况照片\n（vivo 相机实况模式拍摄的 .jpg + .mp4 成对文件）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
+                EmptyState()
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    contentPadding = PaddingValues(
                         start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(items, key = { it.item.key }) { ci ->
-                        ConvertItemRow(ci = ci, onRemove = { onRemove(ci) })
+                        ConvertItemRow(
+                            ci = ci,
+                            onRemove = { onRemove(ci) },
+                            onReconvert = { onReconvertItem(ci) }
+                        )
                     }
                 }
             }
         }
 
-        // ── 底部操作栏 ──
+        // ── 底部操作栏：设置摘要 + 主路径按钮 ──
         Surface(tonalElevation = 3.dp) {
             Column(
                 Modifier
@@ -279,102 +297,85 @@ fun MainScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 if (isConverting) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
-                    )
-                    Text(
-                        progressDetail,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                }
-                // ── 输出目录（点击修改；「转换后移到相机相册」开启时由其接管，不再单独展示） ──
-                if (!moveToCamera) {
+                    // 整体进度
                     Row(
-                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        Modifier.fillMaxWidth().padding(bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "输出目录：$outputRelPath",
-                            style = MaterialTheme.typography.bodyMedium,
+                            progressDetail,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onCancelConvert,
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                    ) { Text("取消转换") }
+                } else {
+                    // 设置摘要：一眼看清关键选项，点击进设置
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickableNoRipple(onOpenSettings)
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "输出 ${if (moveToCamera) "DCIM/Camera" else outputRelPath}" +
+                                " · 删原图 ${if (deleteOriginal) "开" else "关"}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onEditOutputPath)
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                            modifier = Modifier.weight(1f)
                         )
                         Text(
-                            "修改",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickableNoRipple(onEditOutputPath)
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                            "设置 ›",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
-                }
-                // ── 转换后移到相机相册开关（处理中禁用，保证批次语义确定） ──
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("转换后移到相机相册",
-                            style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "写入 DCIM/Camera；配合「删除原图」时先删原图再以原名移入，不产生 (1) 序号",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = moveToCamera,
-                        onCheckedChange = onToggleMoveToCamera,
-                        enabled = !isConverting
-                    )
-                }
-                // ── 转换后删除原图开关（处理中禁用，保证批次语义确定） ──
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("转换后删除原图",
-                            style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "删除原 .jpg 与伴生 .mp4（恢复方式见删除完成后的提示）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = deleteOriginal,
-                        onCheckedChange = onToggleDeleteOriginal,
-                        enabled = !isConverting
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(
-                        onClick = onAddMore,
-                        enabled = !isConverting,
-                        modifier = Modifier.weight(1f).height(46.dp)
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("添加照片")
-                    }
-                    Button(
-                        onClick = onStartConvert,
-                        enabled = !isConverting && items.any { !it.done && !it.failed },
-                        modifier = Modifier.weight(1f).height(46.dp)
-                    ) {
-                        Text(if (isConverting) "转换中…" else "开始转换")
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = onAddMore,
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("添加")
+                        }
+                        Button(
+                            onClick = onStartConvert,
+                            enabled = pendingCount > 0,
+                            modifier = Modifier.weight(1.4f).height(48.dp)
+                        ) {
+                            Text(
+                                if (pendingCount > 0) "开始转换（$pendingCount）"
+                                else "开始转换"
+                            )
+                        }
                     }
                 }
             }
@@ -383,50 +384,158 @@ fun MainScreen(
 }
 
 @Composable
-private fun ConvertItemRow(ci: ConvertItem, onRemove: () -> Unit) {
+private fun EmptyState() {
+    Column(
+        Modifier.fillMaxSize().padding(bottom = 64.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "还没有选择照片",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "点击下方「添加」，选择 vivo 相机实况模式\n拍摄的 .jpg + .mp4 成对文件",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * 列表项：缩略图右下角状态角标 + 状态文案前置图标 + 行底色。
+ * 状态不再只靠文字颜色区分（图标/徽标/底色三重编码）。
+ */
+@Composable
+private fun ConvertItemRow(
+    ci: ConvertItem,
+    onRemove: () -> Unit,
+    onReconvert: () -> Unit
+) {
     val resolver = LocalContext.current.contentResolver
+    val busy = isBusyStatus(ci.status)
+    val lostGps = ci.done && ci.lostGps && !ci.failed
+    val bg = when {
+        ci.failed -> MaterialTheme.colorScheme.errorContainer
+        lostGps -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val main = MaterialTheme.colorScheme.onSurface
+    val statusColor = when {
+        ci.failed -> MaterialTheme.colorScheme.onErrorContainer
+        lostGps -> MaterialTheme.colorScheme.onTertiaryContainer
+        ci.done -> SuccessGreen
+        busy -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = bg,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            ) {
-                MediaThumbnail(ci.item.uri, resolver, Modifier.fillMaxSize())
+            // 缩略图 + 右下角状态角标
+            Box(Modifier.size(48.dp)) {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                ) {
+                    MediaThumbnail(ci.item.uri, resolver, Modifier.fillMaxSize())
+                }
+                val badge = when {
+                    ci.failed -> Triple("✕", MaterialTheme.colorScheme.error, bg)
+                    lostGps -> Triple("!", WarningAmber, bg)
+                    ci.done -> Triple("✓", SuccessGreen, bg)
+                    else -> null
+                }
+                if (badge != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(badge.second),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            badge.first,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
             Spacer(Modifier.width(12.dp))
+
             Column(Modifier.weight(1f)) {
                 Text(
                     ci.item.name,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = main,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
                     ci.status,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = when {
-                        ci.failed -> MaterialTheme.colorScheme.error
-                        ci.done -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                    style = MaterialTheme.typography.bodySmall,
+                    color = statusColor,
+                    maxLines = if (busy) 1 else 2,
+                    overflow = TextOverflow.Ellipsis
                 )
+                // 转换中的单项进度（不定长：字节级转换无粒度回调，不伪造百分比）
+                if (busy) {
+                    Spacer(Modifier.height(5.dp))
+                    IndeterminateBar()
+                }
             }
-            if (!isBusyStatus(ci.status)) {
-                IconButton(onClick = onRemove) {
+
+            // 行内重转（丢位置）/ 移除
+            if (lostGps) {
+                Text(
+                    "重转",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.tertiary)
+                        .clickableNoRipple(onReconvert)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+                Spacer(Modifier.width(2.dp))
+            }
+            if (!busy) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "移除",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
             }
@@ -434,8 +543,26 @@ private fun ConvertItemRow(ci: ConvertItem, onRemove: () -> Unit) {
     }
 }
 
+/** 不定长进度条（字节级转换无粒度回调，用系统不定长动画，不伪造百分比） */
+@Composable
+private fun IndeterminateBar() {
+    LinearProgressIndicator(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .clip(RoundedCornerShape(2.dp))
+    )
+}
+
 /** 转换中的项目不显示移除按钮 */
-private fun isBusyStatus(status: String): Boolean = status == "转换中…"
+private fun isBusyStatus(status: String): Boolean =
+    status.startsWith("转换中") || status.startsWith("重新转换中")
+
+/** 成功态绿（与主题 errorContainer 的红形成明确对立） */
+private val SuccessGreen = Color(0xFF2E7D32)
+
+/** 丢位置琥珀（warning） */
+private val WarningAmber = Color(0xFFB26A00)
 
 /** 无涟漪点击（文本按钮用） */
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {

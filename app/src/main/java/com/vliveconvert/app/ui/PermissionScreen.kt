@@ -36,8 +36,7 @@ fun PermissionScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("VLiveConvert", style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
+        Text("Vivo Live Photo", style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(8.dp))
         Text("vivo 双文件实况 → 单文件实况",
