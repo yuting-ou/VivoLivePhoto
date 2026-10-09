@@ -2,8 +2,11 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.0.9），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.2.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
+>
+> **APK 直达**：仓库根目录 [`VivoLivePhoto-v1.2.0-reconvert.apk`](./VivoLivePhoto-v1.2.0-reconvert.apk)
+> （手机浏览器打开本仓库 → 点开该文件 → Download 即可安装）。
 
 ## 背景
 
@@ -99,6 +102,26 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.2.0
+
+- **修复转换后照片丢失地点信息（核心修复）**：未授予「位置」权限（`ACCESS_MEDIA_LOCATION`）时，
+  Android 会在应用读取照片时由 MediaProvider/FUSE **在读取层实时剥离 GPS EXIF**——
+  本工具的「字节级无损」忠实保留了脱敏后的字节，转换产物因此无位置且事后不可恢复；
+  原版权限被拒后静默继续，用户完全无感知。修复后：转换前门禁弹窗说明后果、
+  单独申请位置权限（不与媒体权限混批，避免 Android 14+ 照片选择器吞掉授权框）、
+  「不再询问」时引导系统设置并在授予后返回自动继续
+- **GPS 双通道保留**：EXIF 原样透传之外，转换时提取源 XMP 的 GPS 属性（部分机型把位置写进 XMP）
+  合并进输出模板并注入 exif 命名空间，消除「固定模板整体替换源 XMP 丢位置」的隐性通道
+- **一键重新转换找回位置（新功能）**：转换后逐张检测源图是否含 GPS（EXIF + XMP 双通道），
+  丢位置的条目在主界面出现「重新转换」入口——点击后批量重转、**原地覆盖**旧产物
+  （不产生 "(1)" 序号堆积，覆盖同样过写后 MD5 自检，失败自动回滚全新导出）；
+  重转不触发删除原图；兼容旧版本转换记录（按状态文案推导）；源文件已删除的条目明确标注不可找回
+- 修复首次授权死循环：旧逻辑以 `shouldShowRequestPermissionRationale` 预判路由，
+  而「从未申请过」时该方法同样返回 false → 首次点「去授权」被错误送去系统设置，
+  授权框永远弹不出来
+- 测试：JVM 单测新增 8 项（GPS 检测六形态大小端、EXIF/XMP 端到端保留、队列新字段往返与
+  旧队列兼容推导等）全绿
 
 ### v1.0.9
 

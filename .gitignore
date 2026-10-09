@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 根目录 APK 不自动入库（发布新版时 git add -f 显式加入，供手机直接下载）
+/*.apk
