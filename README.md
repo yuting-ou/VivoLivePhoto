@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.2 稳定版），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.3），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.2.apk`](./VivoLivePhoto-v1.7.2.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.3.apk`](./VivoLivePhoto-v1.7.3.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,29 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.3
+
+UI 设计改进：**先把「看得见」这件事解决掉**，再据此改。此前所有界面改动都只靠推理、未经目视。
+
+- **新增界面截图验证手段**（`UiScreenshotTest`）：本机没有真机、也没有可硬件加速的模拟器
+  （无 `/dev/kvm`、无系统镜像），故用 Robolectric 的**原生图形**把 Compose 真实渲染成 PNG。
+  实现要点：`captureToImage()` 走窗口 PixelCopy，在 Robolectric 下会卡在「等待重绘」并超时；
+  改为**直接绘制 Activity 视图树**（`view.draw(Canvas)`）取真实 Skia 结果。
+  运行 `./gradlew :app:testDebugUnitTest --tests '*UiScreenshotTest'` 后，
+  截图落在 `app/build/ui-shots/`；它同时充当**渲染冒烟**——任一界面组合即崩会被它拦住
+- **修复时间页按「目标拍摄时间」排序与分组**（目视才发现）：原先按修改时间分组，
+  而本页要做的正是把（错的）修改时间改成拍摄时间——于是分组标题会与目标时间对不上
+  （文件名 20260831，标题却显示「2025年8月3日」），反而误导。现按目标时间分组
+- **设置页取值层级修复**：上一版为达标把「输出目录」取值从 `primary` 换成 `onSurfaceVariant`，
+  目视后确认它**与副标题同色、看不出这是当前值**——现改用 `onSurface`（既拉开层级，对比度 ≈14:1）
+- **设置页三条副标题收短**：原先会词中折行（「导出文件的保 /存位置」「恢 /复」），
+  收起后每行都单行显示，行高统一
+- **横幅去掉纵向 padding**：动作按钮自身已 ≥48dp，再补纵向 padding 会让每条横幅白占 8dp；
+  三条横幅同时出现时省下 24dp
+- **行内状态不再追加「（源文件无 GPS 位置数据）」**：该语义已由行底色 +「!」徽标 +
+  行内「重转」按钮 + 批次汇总计数四处表达；追加这句会把行内文字挤到换行并触发省略号截断
+- 验证：**68 组 JVM 单测全绿**（含 7 张界面渲染），Lint 无 error，release 构建与签名校验通过
 
 ### v1.7.2（稳定版）
 

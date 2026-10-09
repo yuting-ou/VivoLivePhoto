@@ -141,7 +141,8 @@ fun MainScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    // 纵向不加 padding：动作按钮自身已 ≥48dp，再补会让每条横幅白占 8dp
+                    .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -164,7 +165,7 @@ fun MainScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.tertiaryContainer)
-                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -187,7 +188,7 @@ fun MainScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    .padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(

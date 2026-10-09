@@ -246,7 +246,10 @@ class ConvertService : Service() {
                 deferToCamera -> "完成：待原图删除后以原名移入相机相册"
                 moveToCamera -> "完成：已导出到相册 DCIM/Camera"
                 else -> "完成：已导出到相册 $outputRelPath"
-            } + (if (!isReconvert && !result.sourceHasGps) "（源文件无 GPS 位置数据）" else "")
+            }
+            // 不再在行内状态里附加「（源文件无 GPS 位置数据）」：该语义已由
+            // 橙色行底色 + 琥珀「!」徽标 + 行内「重转」按钮三重表达，批次汇总也给出计数；
+            // 追加这句会把两行状态挤成三行并触发省略号截断，列表可读性反而变差
             // 状态写入用 NonCancellable：若取消恰好发生在导出过程中（产物已入库），
             // 这一笔必须如实记成「完成」——否则条目显示「待转换」而文件已存在，
             // 用户再转一次就会得到 (1) 重复文件。

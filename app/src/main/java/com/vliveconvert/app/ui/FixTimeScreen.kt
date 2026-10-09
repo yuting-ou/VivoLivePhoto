@@ -129,12 +129,15 @@ fun FixTimeScreen(
 
     val n = results?.size ?: 0
     val displayOrder = remember(results, n) {
-        results.orEmpty().sortedByDescending { it.sortTime }
+        results.orEmpty().sortedByDescending { groupTime(it) }
     }
     // 排序+分组快照缓存：仅列表长度变化时重算（扫描期间避免重复全量排序）。
-    // 必须在 @Composable 上下文中计算——LazyGrid 内容 lambda 非同类上下文
+    // 必须在 @Composable 上下文中计算——LazyGrid 内容 lambda 非同类上下文。
+    // 按「目标拍摄时间」分组：本页要做的正是把（错的）修改时间改成拍摄时间，
+    // 若按修改时间分组，分组标题会与目标时间对不上（例：文件名 20260831，
+    // 标题却显示 2025年8月3日），反而误导
     val gridGroups = remember(results, n) {
-        results.orEmpty().sortedByDescending { it.sortTime }.groupBy { dateKey(it.sortTime) }
+        results.orEmpty().sortedByDescending { groupTime(it) }.groupBy { dateKey(groupTime(it)) }
     }
 
     val toggleItem: (MediaItem) -> Unit = { item ->
@@ -277,7 +280,7 @@ fun FixTimeScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    dateLabel(groupItems.first().sortTime),
+                                    dateLabel(groupTime(groupItems.first())),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -366,12 +369,21 @@ private fun AlbumChip(album: AlbumInfo, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 底部显示目标时间：文件名时间 → 拍摄时间 → 无 */
+/** 目标「拍摄时间」：文件名内嵌时间 → 拍摄时间；两者都没有返回 0 */
+private fun targetTime(item: MediaItem): Long =
+    PhotoTime.parseFromName(item.name) ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
+
+/** 底部显示目标时间 */
 private fun targetTimeText(item: MediaItem): String {
-    val t = PhotoTime.parseFromName(item.name)
-        ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
+    val t = targetTime(item)
     return if (t > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(t)) else "无时间"
 }
+
+/**
+ * 排序 / 分组用时间：目标拍摄时间优先，缺失时回退 [MediaItem.sortTime]。
+ * 本页的分组必须按目标时间——否则分组标题会与「将被改成的时间」对不上（见 gridGroups 处说明）。
+ */
+private fun groupTime(item: MediaItem): Long = targetTime(item).takeIf { it > 0 } ?: item.sortTime
 
 /**
  * 当前「修改时间」的展示格式（入参为物理 mtime，毫秒）。

@@ -13,8 +13,8 @@ android {
         applicationId = "com.vliveconvert.app"
         minSdk = 34
         targetSdk = 37
-        versionCode = 24
-        versionName = "1.7.2"
+        versionCode = 25
+        versionName = "1.7.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -103,6 +103,10 @@ dependencies {
     // 后续用例的 idle() 推不动它，导致用例偶发失败。接管后完全确定、不依赖 Looper。
     // 版本与解析出的 kotlinx-coroutines-core 对齐
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // Compose 截图测试（Robolectric 原生图形下渲染为位图）：本机没有真机/模拟器（无 KVM），
+    // 这是唯一能「看到」真实渲染结果的手段，用于 UI 设计改进的目视验证
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

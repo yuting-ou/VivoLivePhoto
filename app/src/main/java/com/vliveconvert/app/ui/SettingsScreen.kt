@@ -98,16 +98,16 @@ fun SettingsScreen(
             SettingsCard {
                 ClickableRow(
                     title = "输出目录",
-                    subtitle = "相对主存储路径，导出文件的保存位置",
+                    subtitle = "导出文件的保存位置",
                     onClick = onEditOutputPath
                 ) {
                     Text(
                         outputRelPath,
                         style = MaterialTheme.typography.bodyMedium,
-                        // 卡片底色是 surfaceContainerLow，`primary` 在其上仅约 4.40:1（低于正文 AA 的 4.5）；
-                        // 值属次要信息，改用与副标题一致的 onSurfaceVariant（≈8:1），
-                        // 可交互性由整行可点 + 右侧 › 表达
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 用 onSurface 而非 onSurfaceVariant：后者与副标题同色，取值会「融」进副标题、
+                        // 看不出这是当前值；也不能用 primary——它在卡片底色 surfaceContainerLow 上仅
+                        // 4.40:1，低于正文 AA。onSurface 既拉出层级又满足对比度（≈14:1）
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.width(140.dp)
@@ -124,7 +124,7 @@ fun SettingsScreen(
             SettingsCard {
                 SwitchRow(
                     title = "移到相机相册",
-                    subtitle = "写入 DCIM/Camera；配合「删除原图」先删后移，不产生 (1) 序号",
+                    subtitle = "写入 DCIM/Camera（配合删除原图可免序号）",
                     checked = moveToCamera,
                     enabled = !isBusy,
                     onToggle = onToggleMoveToCamera
@@ -132,7 +132,7 @@ fun SettingsScreen(
                 CardDivider()
                 SwitchRow(
                     title = "删除原图",
-                    subtitle = "删除原 .jpg 与伴生 .mp4（可在提示的入口中恢复）",
+                    subtitle = "删除原 .jpg 与伴生 .mp4（可恢复）",
                     checked = deleteOriginal,
                     enabled = !isBusy,
                     onToggle = onToggleDeleteOriginal
