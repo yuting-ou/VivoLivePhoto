@@ -90,6 +90,62 @@ internal object MediaExport {
         return uri
     }
 
+    /**
+     * 重新转换的导出：优先**原地覆盖**上次导出的 MediaStore 记录
+     * （本应用是文件所有者，可对已入库的自己文件直接重写内容），
+     * 不产生「IMG_xxx(1).jpg」重名序号文件；旧记录已失效（被用户删除等）
+     * 或覆盖失败时回退为全新导出。
+     *
+     * 覆盖同样做写后自检：自检不过则删除旧记录并全新导出兜底，
+     * 保证「完成」的产物一定是校验通过的。
+     */
+    fun replaceOrExportAndVerify(
+        context: Context,
+        result: SingleWriteResult,
+        timestamp: Long,
+        relPath: String,
+        useCameraDir: Boolean,
+        oldUriString: String?
+    ): Uri {
+        val resolver = context.contentResolver
+        val src = File(result.path)
+        if (!src.exists() || src.length() == 0L) {
+            throw IOException("转换产物缺失或为空")
+        }
+        if (oldUriString != null) {
+            try {
+                val old = Uri.parse(oldUriString)
+                // 旧记录仍有效才覆盖（用户可能已手动删除产物）
+                val valid = try {
+                    resolver.query(old, arrayOf(MediaStore.MediaColumns._ID),
+                        null, null, null)?.use { it.moveToFirst() } == true
+                } catch (_: Exception) { false }
+                if (valid) {
+                    try {
+                        resolver.openOutputStream(old, "w")?.use { out ->
+                            src.inputStream().use { input -> input.copyTo(out) }
+                        } ?: throw IOException("旧产物输出流不可用")
+                        fixTimestamps(resolver, old, timestamp)
+                        val verified = try {
+                            resolver.openInputStream(old)?.use {
+                                OutputVerifier.verify(it, result.segments)
+                            } == true
+                        } catch (_: Exception) { false }
+                        if (verified) return old
+                        // 覆盖后自检失败（极罕见）：删旧记录走全新导出
+                        try { resolver.delete(old, null, null) } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                        // 覆盖中途异常：旧记录可能已半损，删除后全新导出兜底
+                        try { resolver.delete(old, null, null) } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {
+                // URI 解析等异常 → 全新导出
+            }
+        }
+        return exportAndVerify(context, result, timestamp, relPath, useCameraDir)
+    }
+
     private fun fixTimestamps(resolver: android.content.ContentResolver, uri: Uri, timestamp: Long) {
         try {
             resolver.update(

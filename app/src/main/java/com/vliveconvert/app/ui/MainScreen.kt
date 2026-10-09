@@ -59,6 +59,9 @@ fun MainScreen(
     /** 位置权限缺失：转换会因系统读取层脱敏而丢失 GPS 地点信息 */
     locationMissing: Boolean,
     onGrantLocation: () -> Unit,
+    /** 已完成但丢了位置的可重转条数：>0 时显示「重新转换找回位置」入口 */
+    reconvertCount: Int,
+    onReconvertLostGps: () -> Unit,
     outputRelPath: String,
     isMovingOutputs: Boolean,
     onEditOutputPath: () -> Unit,
@@ -202,6 +205,37 @@ fun MainScreen(
                     .clickableNoRipple(onRestoreOriginals)
                     .padding(horizontal = 4.dp, vertical = 4.dp)
             )
+        }
+
+        // ── 重新转换找回位置入口（有「完成但丢位置」的条目时显示） ──
+        if (reconvertCount > 0 && !isConverting) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.tertiaryContainer)
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "📍 $reconvertCount 张照片转换后没有位置信息（未授权时系统会剥离 GPS），" +
+                        "授权后可一键找回",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 6.dp)
+                )
+                Text(
+                    "重新转换",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickableNoRipple(onReconvertLostGps)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+            }
         }
 
         // ── 列表 ──

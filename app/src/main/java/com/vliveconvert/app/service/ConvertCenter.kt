@@ -111,6 +111,34 @@ object ConvertCenter {
         return true
     }
 
+    /**
+     * 重新转换丢位置的条目（主线程调用）：把 done && lostGps 的条目重置为待转换
+     * 并标记 reconvert（跳过删除原图收集、输出原地覆盖旧产物），随后启动服务批次。
+     * @param targets 调用方已预过滤的「源文件仍在、可重转」条目
+     * @return 实际进入重转的条数（0 = 无可重转项）
+     */
+    fun beginReconvert(context: Context, targets: List<ConvertItem>): Int {
+        if (isConverting) return 0
+        if (targets.isEmpty()) return 0
+        // 重置目标条目：保留 outUri（覆盖旧产物用），清 done/failed，标记重转模式
+        targets.forEach { t ->
+            replaceItem(t, t.copy(
+                status = "重新转换中…", done = false, failed = false, reconvert = true))
+        }
+        persistQueue(context, items.toList())
+        isConverting = true
+        progress = 0f
+        progressDetail = "已处理 0/${targets.size}"
+        statusText = "正在重新转换 ${targets.size} 张照片以找回位置信息…"
+        context.startForegroundService(
+            Intent(context, ConvertService::class.java).setAction(ConvertService.ACTION_START))
+        return targets.size
+    }
+
+    /** 可重转条目数（已完成但丢位置的）：主界面「重新转换找回位置」入口的计数 */
+    fun reconvertCandidates(): List<ConvertItem> =
+        items.filter { it.done && it.lostGps && !it.failed }
+
     /** 按源文件 key 替换列表项（主线程调用） */
     fun replaceItem(old: ConvertItem, new: ConvertItem) {
         val idx = items.indexOfFirst { it.item.key == old.item.key }

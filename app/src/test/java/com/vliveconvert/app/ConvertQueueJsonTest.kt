@@ -4,6 +4,7 @@ import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.service.QueueJson
 import com.vliveconvert.app.ui.ConvertItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -65,6 +66,50 @@ class ConvertQueueJsonTest {
         assertNull(QueueJson.fromJson("not json at all"))
         assertNull(QueueJson.fromJson(""))
         assertNull(QueueJson.fromJson("[{\"broken\":true}"))
+    }
+
+    @Test
+    fun roundTripPreservesGpsFields() {
+        // v1.2.0 新字段：lostGps / outUri / reconvert 的往返无损
+        val queue = listOf(
+            ConvertItem(item = item(7, "IMG_1007.jpg"),
+                status = "完成：已导出到相册 DCIM/Camera（源文件无 GPS 位置数据）",
+                done = true, lostGps = true,
+                outUri = "content://media/external/images/media/123"),
+            ConvertItem(item = item(8, "IMG_1008.jpg"),
+                status = "重新转换中…", reconvert = true, lostGps = true,
+                outUri = "content://media/external/images/media/124"),
+        )
+        val restored = QueueJson.fromJson(QueueJson.toJson(queue))!!
+        // 完成态条目全字段无损往返
+        assertEquals(queue[0], restored[0])
+        // 执行中条目恢复为「待转换」，重转语义字段保留（重转中断续转仍覆盖旧产物）
+        assertEquals("待转换", restored[1].status)
+        assertTrue(restored[1].reconvert)
+        assertTrue(restored[1].lostGps)
+        assertEquals("content://media/external/images/media/124", restored[1].outUri)
+    }
+
+    @Test
+    fun legacyQueueDerivesLostGpsFromStatus() {
+        // 旧版本（v1.1.x）队列无 lostGps 字段：已完成条目按状态文案推导，
+        // 让老队列里丢位置的照片也能进「重新转换」入口
+        val legacy = """[{
+            "id": 9, "path": "/storage/emulated/0/DCIM/Camera/IMG_1009.jpg",
+            "name": "IMG_1009.jpg", "bucketId": 1,
+            "dateTaken": 1754000000000, "dateModified": 1754000000, "size": 2048,
+            "status": "完成：已导出到相册 DCIM/Camera（源文件无 GPS 位置数据）",
+            "done": true, "failed": false
+        }, {
+            "id": 10, "path": "/storage/emulated/0/DCIM/Camera/IMG_1010.jpg",
+            "name": "IMG_1010.jpg", "bucketId": 1,
+            "dateTaken": 1754000000001, "dateModified": 1754000001, "size": 2048,
+            "status": "完成：已导出到相册 DCIM/Camera", "done": true, "failed": false
+        }]"""
+        val restored = QueueJson.fromJson(legacy)!!
+        assertTrue("旧队列丢位置条目应推导出 lostGps", restored[0].lostGps)
+        assertFalse("正常完成条目不应误标", restored[1].lostGps)
+        assertNull("旧队列无 outUri 字段应为 null", restored[0].outUri)
     }
 
     @Test

@@ -157,8 +157,10 @@ class MainActivity : ComponentActivity() {
     private var locationDenied by mutableStateOf(false)
     /** 用户已在本会话中明确选择「仍要转换」（缺位置权限）：后续批次不再重复门禁 */
     private var locationForceChosen = false
-    /** 从系统设置返回时若有挂起的转换且权限已授予，自动继续 */
-    private var pendingConvertAfterLocation = false
+    /** 位置权限就绪后要继续的动作（开始转换 / 重新转换）；系统设置返回时消费 */
+    private var pendingLocationAction: (() -> Unit)? = null
+    /** 待权限动作是「重新转换」：无权限时执行毫无意义，设置引导弹窗不提供「仍要转换」 */
+    private var pendingActionIsReconvert = false
     /** 系统不再弹授权框时引导设置的门禁弹窗（与普通门禁弹窗区分文案） */
     private var showLocationSettingsDialog by mutableStateOf(false)
 
@@ -172,12 +174,18 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         locationDenied = !hasMediaLocationPermission()
+        val action = pendingLocationAction
         if (granted) {
             ConvertCenter.statusText = "已授予「位置」权限，转换将保留照片 GPS 地点信息"
-            proceedConvertAfterPermissionCheck()
+            pendingLocationAction = null
+            action?.invoke()
+        } else if (action != null) {
+            // 重转/转换在等权限：用户拒绝 → 引导系统设置。
+            // 保留挂起动作：设置页授予后返回时自动继续；弹窗「取消/仍要转换」时消费
+            showLocationSettingsDialog = true
         } else if (shouldShowRequestPermissionRationale(
                 Manifest.permission.ACCESS_MEDIA_LOCATION)) {
-            // 系统弹过框、用户主动拒绝 → 回到门禁弹窗（可再授权或「仍要转换」）
+            // 警示条上的主动授权：拒绝 → 回门禁弹窗（可再授权或「仍要转换」）
             showLocationDialog = true
         } else {
             // 「不再询问」或 OEM 限制不弹框 → 引导系统设置手动开启
@@ -217,10 +225,11 @@ class MainActivity : ComponentActivity() {
                 "已获得读取照片和视频权限"
             else "已获得媒体权限；未授予「位置」权限：转换将丢失照片 GPS 地点信息"
         }
-        // 从系统设置手动授予位置权限返回 → 自动继续挂起的转换批次
-        if (pendingConvertAfterLocation && hasMediaLocationPermission()) {
-            pendingConvertAfterLocation = false
-            proceedConvertAfterPermissionCheck()
+        // 从系统设置手动授予位置权限返回 → 自动继续挂起的动作（开始/重新转换）
+        val action = pendingLocationAction
+        if (action != null && hasMediaLocationPermission()) {
+            pendingLocationAction = null
+            action()
         }
     }
 
@@ -437,6 +446,10 @@ class MainActivity : ComponentActivity() {
                                     locationPermissionLauncher.launch(
                                         Manifest.permission.ACCESS_MEDIA_LOCATION)
                                 },
+                                reconvertCount = ConvertCenter.items.count {
+                                    it.done && it.lostGps && !it.failed
+                                },
+                                onReconvertLostGps = { reconvertLostGpsItems() },
                                 outputRelPath = outputRelPath,
                                 isMovingOutputs = isMovingOutputs,
                                 onEditOutputPath = {
@@ -510,7 +523,10 @@ class MainActivity : ComponentActivity() {
                 // 位置权限门禁弹窗：未授予时开始转换必丢 GPS，需用户显式确认
                 if (showLocationDialog) {
                     AlertDialog(
-                        onDismissRequest = { showLocationDialog = false },
+                        onDismissRequest = {
+                            showLocationDialog = false
+                            pendingLocationAction = null // 关闭弹窗即取消挂起的转换
+                        },
                         title = { Text("缺少「位置」权限") },
                         text = {
                             Text(
@@ -533,21 +549,27 @@ class MainActivity : ComponentActivity() {
                         dismissButton = {
                             OutlinedButton(onClick = {
                                 showLocationDialog = false
+                                pendingLocationAction = null // 消费挂起动作（强转路径自行继续）
                                 proceedConvertAfterPermissionCheck(force = true)
                             }) { Text("仍要转换") }
                         }
                     )
                 }
 
-                // 位置权限「不再询问」后的设置引导弹窗：授予后返回自动继续转换
+                // 位置权限「不再询问」后的设置引导弹窗：授予后返回自动继续挂起的动作
                 if (showLocationSettingsDialog) {
                     AlertDialog(
-                        onDismissRequest = { showLocationSettingsDialog = false },
+                        onDismissRequest = {
+                            showLocationSettingsDialog = false
+                            pendingLocationAction = null // 关闭弹窗即取消挂起动作
+                        },
                         title = { Text("需要手动开启位置权限") },
                         text = {
                             Text(
                                 "系统不再弹出「位置」权限授权框（可能已选「不再询问」或系统限制）。\n\n" +
-                                "请到：应用详情 → 权限 → 位置，手动开启后返回本应用，转换会自动继续。\n\n" +
+                                "请到：应用详情 → 权限 → 位置，手动开启后返回本应用，" +
+                                (if (pendingActionIsReconvert) "重新转换会自动继续。"
+                                 else "转换会自动继续。") + "\n\n" +
                                 "若权限页没有相关开关，也可尝试给本应用开启" +
                                 "「所有文件访问权限」后重新转换。"
                             )
@@ -555,15 +577,23 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             Button(onClick = {
                                 showLocationSettingsDialog = false
-                                pendingConvertAfterLocation = true
                                 openAppDetailSettings()
                             }) { Text("去设置") }
                         },
                         dismissButton = {
                             OutlinedButton(onClick = {
                                 showLocationSettingsDialog = false
-                                proceedConvertAfterPermissionCheck(force = true)
-                            }) { Text("仍要转换") }
+                                val action = pendingLocationAction
+                                pendingLocationAction = null
+                                if (action != null && !pendingActionIsReconvert) {
+                                    // 普通转换：用户明确选择无位置继续
+                                    proceedConvertAfterPermissionCheck(force = true)
+                                } else if (action != null) {
+                                    // 重转：无权限时执行无意义，仅取消
+                                    ConvertCenter.statusText =
+                                        "未授予「位置」权限，已取消重新转换（授权后可再点「重新转换」）"
+                                }
+                            }) { Text(if (pendingActionIsReconvert) "取消" else "仍要转换") }
                         }
                     )
                 }
@@ -746,6 +776,8 @@ class MainActivity : ComponentActivity() {
     private fun startConvert() {
         if (ConvertCenter.isConverting) return
         if (!hasMediaLocationPermission() && !locationForceChosen) {
+            pendingLocationAction = { proceedConvertAfterPermissionCheck() }
+            pendingActionIsReconvert = false
             showLocationDialog = true
             return
         }
@@ -755,8 +787,57 @@ class MainActivity : ComponentActivity() {
     /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才真正开始批次 */
     private fun proceedConvertAfterPermissionCheck(force: Boolean = false) {
         if (force) locationForceChosen = true
-        if (hasMediaLocationPermission() || force) ConvertCenter.start(this)
-        else showLocationDialog = true
+        if (hasMediaLocationPermission() || force) {
+            ConvertCenter.start(this)
+        } else {
+            pendingLocationAction = { proceedConvertAfterPermissionCheck() }
+            pendingActionIsReconvert = false
+            showLocationDialog = true
+        }
+    }
+
+    /**
+     * 一键重新转换丢位置的照片（主界面「重新转换」入口）：
+     * 重转的唯一目的就是找回 GPS，权限是硬前提——未授予时直接弹系统授权框
+     * （授权框即门禁，无需再过应用内弹窗）；拒绝则引导系统设置，授予后自动继续。
+     */
+    private fun reconvertLostGpsItems() {
+        if (ConvertCenter.isConverting) return
+        val candidates = ConvertCenter.reconvertCandidates()
+        if (candidates.isEmpty()) return
+        if (!hasMediaLocationPermission()) {
+            pendingLocationAction = { doReconvertLostGps() }
+            pendingActionIsReconvert = true
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+            return
+        }
+        doReconvertLostGps()
+    }
+
+    /**
+     * 执行重转批次：先剔除源文件已不存在的条目（原图被删，无法重转），
+     * 明确标注原因并清掉丢位置标记（不再提供无意义的重转入口），其余进入重转。
+     */
+    private fun doReconvertLostGps() {
+        val candidates = ConvertCenter.reconvertCandidates()
+        if (candidates.isEmpty()) {
+            ConvertCenter.statusText = "没有需要重新转换的照片"
+            return
+        }
+        val (gone, alive) = candidates.partition { !File(it.item.path).exists() }
+        // 源已不在（如启用过「转换后删除」）：位置无法找回，如实标注并退出重转队列
+        for (t in gone) {
+            ConvertCenter.replaceItem(t, t.copy(
+                status = "位置无法找回：原图已被删除（可从云端备份恢复后重新转换）",
+                lostGps = false))
+        }
+        if (gone.isNotEmpty()) {
+            ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+        }
+        val n = ConvertCenter.beginReconvert(this, alive)
+        if (n == 0 && gone.isEmpty()) {
+            ConvertCenter.statusText = "没有可重新转换的照片"
+        }
     }
 
     // ---------- 修复文件时间 ----------

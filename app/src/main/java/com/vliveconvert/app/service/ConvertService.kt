@@ -121,10 +121,15 @@ class ConvertService : Service() {
                 PackageManager.PERMISSION_GRANTED
         } catch (_: Exception) { true }
         val noGpsCount = noGps.get()
+        val reconvertBatch = targets.isNotEmpty() && targets.all { it.reconvert }
         val gpsNote = when {
+            reconvertBatch && noGpsCount > 0 ->
+                "；$noGpsCount 张源文件本身不含 GPS 位置（位置权限已授予，非脱敏丢失）"
+            reconvertBatch ->
+                "；位置信息已找回并保留"
             noGpsCount > 0 && !locationGranted ->
                 "；警告：$noGpsCount 张照片读取时无 GPS（未授予「位置」权限，系统已剥离位置信息），" +
-                    "授予后重新转换即可保留地点"
+                    "可在列表上方点「重新转换」找回"
             noGpsCount > 0 && noGpsCount == ok.get() ->
                 "；注意：$noGpsCount 张源文件读取时均无 GPS（「位置」权限已授予）。" +
                     "若拍摄时开启了定位，可尝试给本应用开启「所有文件访问权限」后重新转换"
@@ -132,8 +137,9 @@ class ConvertService : Service() {
                 "；$noGpsCount 张照片源文件本身不含 GPS 位置"
             else -> ""
         }
-        val finalStatus = "转换完成：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-            "（输出目录：$finalDest）$gpsNote"
+        val batchTitle = if (reconvertBatch) "重新转换完成" else "转换完成"
+        val finalStatus = "$batchTitle：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
+            (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote
         withContext(Dispatchers.Main) {
             ConvertCenter.isConverting = false
             ConvertCenter.progress = 0f
@@ -166,12 +172,16 @@ class ConvertService : Service() {
         noGps: AtomicInteger
     ) {
         val app = applicationContext
+        // 重转模式（找回位置）：跳过删除原图收集（上次批次已处理过），
+        // 输出原地覆盖旧产物（不产生重名序号文件）
+        val isReconvert = ci.reconvert
         // 「移到相机相册 + 转换后删除原图」同时开启：
         // 产物先导出到输出目录（中转），原图删除确认完成后以原名 move 进 DCIM/Camera——
         // 先删原图腾出文件名，转换结果保持原名、无 "(1)" 序号
-        val deferToCamera = moveToCamera && deleteOriginal
+        val deferToCamera = !isReconvert && moveToCamera && deleteOriginal
         withContext(Dispatchers.Main) {
-            ConvertCenter.replaceItem(ci, ci.copy(status = "转换中…"))
+            ConvertCenter.replaceItem(ci, ci.copy(
+                status = if (isReconvert) "重新转换中…" else "转换中…"))
         }
         var staged: String? = null
         try {
@@ -193,26 +203,42 @@ class ConvertService : Service() {
                     ?: (if (ci.item.dateModified > 0) ci.item.dateModified * 1000L
                         else System.currentTimeMillis())
             }
-            // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）
-            val exportUri = MediaExport.exportAndVerify(
-                app, result, ts, outputRelPath, moveToCamera && !deferToCamera)
+            // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）；
+            // 重转：优先原地覆盖上次导出的记录
+            val exportUri = if (isReconvert) {
+                MediaExport.replaceOrExportAndVerify(
+                    app, result, ts, outputRelPath, moveToCamera, ci.outUri)
+            } else {
+                MediaExport.exportAndVerify(
+                    app, result, ts, outputRelPath, moveToCamera && !deferToCamera)
+            }
             ok.incrementAndGet()
             // 源图读到的字节无 GPS（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
             if (!result.sourceHasGps) noGps.incrementAndGet()
-            if (deferToCamera) {
+            if (!isReconvert && deferToCamera) {
                 // 中转条目：删除原图确认完成后由 finalize 以原名移入相机相册
                 ConvertCenter.pendingFinalize.add(
                     ConvertCenter.FinalizeEntry(exportUri, ci.item.name, ci.item.key))
             }
-            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除
-            if (deleteOriginal) collectOriginalUris(ci)
+            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除（重转不收集）
+            if (!isReconvert && deleteOriginal) collectOriginalUris(ci)
             val statusText = when {
+                isReconvert && result.sourceHasGps ->
+                    "完成：已重新转换，位置信息已保留"
+                isReconvert ->
+                    // 重转在位置权限已授予的前提下执行：仍无 GPS = 源本身没位置
+                    "完成：已重新转换（源文件本身不含 GPS 位置）"
                 deferToCamera -> "完成：待原图删除后以原名移入相机相册"
                 moveToCamera -> "完成：已导出到相册 DCIM/Camera"
                 else -> "完成：已导出到相册 $outputRelPath"
-            } + (if (!result.sourceHasGps) "（源文件无 GPS 位置数据）" else "")
+            } + (if (!isReconvert && !result.sourceHasGps) "（源文件无 GPS 位置数据）" else "")
             withContext(Dispatchers.Main) {
-                ConvertCenter.replaceItem(ci, ci.copy(status = statusText, done = true))
+                ConvertCenter.replaceItem(ci, ci.copy(
+                    status = statusText, done = true,
+                    // 重转已获权限，结果即最终结论：找到位置或源本身无位置，均不再标记丢失
+                    lostGps = !isReconvert && !result.sourceHasGps,
+                    outUri = exportUri.toString(),
+                    reconvert = false))
             }
         } catch (e: CancellationException) {
             throw e // 协程取消必须继续传播（服务销毁等场景）

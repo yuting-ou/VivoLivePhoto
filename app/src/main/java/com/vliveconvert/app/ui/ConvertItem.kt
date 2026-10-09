@@ -9,4 +9,10 @@ data class ConvertItem(
     val status: String = "待转换",
     val failed: Boolean = false,
     val done: Boolean = false,
+    /** 转换产物无 GPS 位置（多为读取层被系统脱敏）：驱动「重新转换找回位置」入口 */
+    val lostGps: Boolean = false,
+    /** 上次导出的 MediaStore URI（重新转换时原地覆盖旧产物，避免重名加序号） */
+    val outUri: String? = null,
+    /** 本项为「重新转换」（找回位置）：跳过删除原图收集，输出覆盖旧产物 */
+    val reconvert: Boolean = false,
 )
