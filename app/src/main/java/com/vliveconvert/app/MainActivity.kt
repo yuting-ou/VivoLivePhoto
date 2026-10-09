@@ -26,15 +26,21 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,6 +61,7 @@ import com.vliveconvert.app.picker.PickerScreen
 import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.ConvertService
+import com.vliveconvert.app.service.Preflight
 import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
@@ -125,6 +132,10 @@ class MainActivity : ComponentActivity() {
     // 设置页（收纳低频项）与状态详情弹窗
     private var showSettings by mutableStateOf(false)
     private var showStatusDetail by mutableStateOf(false)
+    // 转换前的影响面预估弹窗
+    private var showPreflightDialog by mutableStateOf(false)
+    private var preflight: Preflight.Info? = null
+    private var skipPreflightNext by mutableStateOf(false)
     // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
     private var showAbout by mutableStateOf(false)
 
@@ -528,6 +539,85 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 转换前的影响面预估：把可确定的事实摊开再开跑
+                preflight?.let { info ->
+                    if (showPreflightDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showPreflightDialog = false },
+                            title = { Text("开始转换") },
+                            text = {
+                                val hasLoc = hasMediaLocationPermission()
+                                Column {
+                                    PreflightLine("待转换", "${info.pendingCount} 张")
+                                    if (info.missingSources > 0) {
+                                        PreflightLine(
+                                            "源文件已丢失",
+                                            "${info.missingSources} 张（将转换失败）",
+                                            MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                    PreflightLine(
+                                        "源文件体积",
+                                        Preflight.formatSize(info.totalSourceBytes) +
+                                            "（输出体积与之相当）"
+                                    )
+                                    PreflightLine(
+                                        "输出位置",
+                                        if (moveToCamera) "DCIM/Camera" else outputRelPath
+                                    )
+                                    if (deleteOriginal) {
+                                        // 只有转换成功的条目才会进入删除流程：源文件已丢失的必然失败，
+                                        // 不计入可删除数（宁可少报，也不能让「将删除」多于实际）
+                                        PreflightLine(
+                                            "将删除原图",
+                                            "${info.pendingCount - info.missingSources} 个 .jpg" +
+                                                (if (info.companionVideoCount > 0)
+                                                    " + ${info.companionVideoCount} 个 .mp4"
+                                                 else "") +
+                                                "（可在提示的入口恢复）",
+                                            MaterialTheme.colorScheme.error
+                                        )
+                                    } else {
+                                        PreflightLine("原图", "保留")
+                                    }
+                                    PreflightLine(
+                                        "位置信息",
+                                        if (hasLoc) "将保留"
+                                        else "未授予位置权限，输出将不含位置信息",
+                                        if (hasLoc) null else MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = skipPreflightNext,
+                                            onCheckedChange = { skipPreflightNext = it }
+                                        )
+                                        Text(
+                                            "以后不再提示",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(onClick = {
+                                    showPreflightDialog = false
+                                    if (skipPreflightNext) {
+                                        getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                            .edit().putBoolean("skip_preflight", true).apply()
+                                    }
+                                    ConvertCenter.start(this)
+                                }) { Text("开始转换") }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { showPreflightDialog = false })
+                                { Text("取消") }
+                            }
+                        )
+                    }
+                }
+
                 // 所有文件访问权限引导（删除原图 / 修复时间功能需要时）
                 if (showAllFilesDialog) {
                     AlertDialog(
@@ -827,24 +917,49 @@ class MainActivity : ComponentActivity() {
      */
     private fun startConvert() {
         if (ConvertCenter.isConverting) return
+        if (ConvertCenter.items.none { !it.done && !it.failed }) {
+            ConvertCenter.statusText = "没有待转换的照片"
+            return
+        }
         if (!hasMediaLocationPermission() && !locationForceChosen) {
             pendingLocationAction = { proceedConvertAfterPermissionCheck() }
             pendingActionIsReconvert = false
             showLocationDialog = true
             return
         }
-        ConvertCenter.start(this)
+        showPreflightThenConvert()
     }
 
-    /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才真正开始批次 */
+    /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才继续 */
     private fun proceedConvertAfterPermissionCheck(force: Boolean = false) {
         if (force) locationForceChosen = true
         if (hasMediaLocationPermission() || force) {
-            ConvertCenter.start(this)
+            showPreflightThenConvert()
         } else {
             pendingLocationAction = { proceedConvertAfterPermissionCheck() }
             pendingActionIsReconvert = false
             showLocationDialog = true
+        }
+    }
+
+    /**
+     * 转换前的影响面确认：批量操作（开启「删除原图」后还带不可逆性）在开跑前
+     * 把可确定的事实摊开——待转换张数、源文件是否缺失、体积、会删掉哪些文件、
+     * 位置信息是否会保留。用户可在弹窗内勾选「不再提示」。
+     */
+    private fun showPreflightThenConvert() {
+        if (getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                .getBoolean("skip_preflight", false)) {
+            ConvertCenter.start(this)
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 全部是 stat 级操作（存在性/大小/伴生视频），开销极小
+            val info = Preflight.compute(ConvertCenter.itemsSnapshot())
+            withContext(Dispatchers.Main) {
+                preflight = info
+                showPreflightDialog = true
+            }
         }
     }
 
@@ -959,6 +1074,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             var ok = 0
             var skip = 0
+            val fixed = mutableListOf<MediaItem>()
             for ((idx, item) in targets.withIndex()) {
                 val time = PhotoTime.parseFromName(item.name)
                     ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
@@ -981,6 +1097,7 @@ class MainActivity : ComponentActivity() {
                             null, null
                         )
                         ok++
+                        fixed.add(item)
                         if (!mtimeOk) {
                             withContext(Dispatchers.Main) {
                                 fixStatus = "部分文件 mtime 修改未生效（已更新媒体库时间）：${item.name}"
@@ -997,6 +1114,13 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 isFixing = false
                 fixSelectionReset++
+                // 已修复条目的「修改时间」现已等于目标时间，不应再留在修复清单里
+                // （界面约定：已一致的不会出现）。不移除的话，格子上残留的「现在」时间
+                // 会显示为修复前的旧值，与结果自相矛盾。
+                for (item in fixed) {
+                    singleLiveScanner.stateOf(item.bucketId)
+                        .results.removeAll { it.id == item.id }
+                }
                 fixStatus = "修复完成：成功 $ok 项，跳过 $skip 项" +
                     (if (skip > 0) "（文件名中无时间信息或不可写）" else "")
             }
@@ -1271,5 +1395,33 @@ class MainActivity : ComponentActivity() {
                     (if (fail > 0) "，失败 $fail 个" else "")
             }
         }
+    }
+}
+
+/** 影响面预估弹窗中的一行：左侧标签，右侧值（可着色） */
+@Composable
+private fun PreflightLine(
+    label: String,
+    value: String,
+    tint: androidx.compose.ui.graphics.Color? = null
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(84.dp)
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = tint ?: MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
     }
 }

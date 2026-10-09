@@ -75,6 +75,7 @@ import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.SingleLiveScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -369,6 +370,17 @@ private fun targetTimeText(item: MediaItem): String {
     return if (t > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(t)) else "无时间"
 }
 
+/**
+ * 当前「修改时间」的展示格式（入参为物理 mtime，毫秒）。
+ *
+ * 取值必须与扫描器的纳入判定**同源**：[SingleLiveScanner] 用 `File.lastModified()`
+ * 决定「是否需要修复」，若这里改读 MediaStore 的 DATE_MODIFIED（秒级缓存值），
+ * 就可能出现「列在这里、却显示时间已经一致」的自相矛盾。故由调用方传入物理 mtime，
+ * 读不到（<=0）时显示「未知」。
+ */
+private fun formatCurrentTime(ms: Long): String =
+    if (ms > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(ms)) else "未知"
+
 @Composable
 private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
     val resolver = LocalContext.current.contentResolver
@@ -388,6 +400,12 @@ private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
         ),
         label = "badgeScale"
     )
+    // 物理 mtime（与扫描判定同源）；按 item.key 记忆化，避免每次重组都做一次磁盘 stat
+    val currentMs = remember(item.key) {
+        try { File(item.path).lastModified() } catch (_: Exception) { 0L }
+    }
+    val currentText = formatCurrentTime(currentMs)
+    val targetText = targetTimeText(item)
 
     Box(
         Modifier
@@ -413,7 +431,7 @@ private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
         ) {
             MediaThumbnail(item.uri, resolver, Modifier.fillMaxSize())
         }
-        // 底部：文件名 + 目标时间
+        // 底部：文件名 + 「现在 → 目标」时间对照（修复前确认改动是否符合预期）
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -429,8 +447,15 @@ private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                "→ ${targetTimeText(item)}",
-                color = if (targetTimeText(item) == "无时间") Color(0xFFFFCDD2) else Color.White,
+                "现 $currentText",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "→ $targetText",
+                color = if (targetText == "无时间") Color(0xFFFFCDD2) else Color.White,
                 fontSize = 9.sp,
                 maxLines = 1
             )
