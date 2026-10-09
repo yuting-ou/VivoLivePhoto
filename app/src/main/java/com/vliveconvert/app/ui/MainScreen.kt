@@ -269,7 +269,7 @@ fun MainScreen(
         // ── 列表 ──
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (items.isEmpty()) {
-                EmptyState()
+                EmptyState(onAdd = onAddMore)
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -384,27 +384,29 @@ fun MainScreen(
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(onAdd: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(bottom = 64.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // 中央大 + 号：用户的第一反应就是点它，必须真的能点（点按有涟漪反馈）
         Box(
             Modifier
-                .size(72.dp)
+                .size(84.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable(onClick = onAdd),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Filled.Add,
-                contentDescription = null,
+                contentDescription = "添加照片",
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(40.dp)
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(18.dp))
         Text(
             "还没有选择照片",
             style = MaterialTheme.typography.titleMedium,
@@ -412,7 +414,7 @@ private fun EmptyState() {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "点击下方「添加」，选择 vivo 相机实况模式\n拍摄的 .jpg + .mp4 成对文件",
+            "点击上方「＋」选择 vivo 相机实况模式\n拍摄的 .jpg + .mp4 成对文件",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
