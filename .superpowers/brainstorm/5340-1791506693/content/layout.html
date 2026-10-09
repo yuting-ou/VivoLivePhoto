@@ -1,0 +1,204 @@
+<h2>主界面信息架构：三种方案</h2>
+<p class="subtitle">现状把所有控件平铺在主界面：顶栏 4 个纯文字按钮（日志 / 修复时间 / 移到相机 / 清空）、底部输出目录 + 2 个开关 + 2 个按钮。结果是「照片列表」被挤到不足半屏，而这些都是低频操作。你更想要哪种组织方式？</p>
+
+<div class="cards" style="grid-template-columns:repeat(3,1fr); gap:14px;">
+
+  <!-- ============ A 现状 ============ -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:10px; background:#0f1015; display:flex; justify-content:center;">
+      <div style="width:236px;height:440px;border-radius:20px;overflow:hidden;background:#FBF8FF;color:#1B1B21;display:flex;flex-direction:column;border:1px solid #46464F;font-size:8px;line-height:1.35;">
+
+        <!-- 顶栏：标题 + 4 个文字按钮 -->
+        <div style="background:#EFEDF6;padding:7px 8px 6px;">
+          <div style="font-size:11px;font-weight:700;">Vivo Live Photo</div>
+          <div style="display:flex;justify-content:space-between;margin-top:3px;color:#46464F;">
+            <span style="font-size:7px;">vivo 双文件实况 → 单文件实况</span>
+            <span style="font-size:7px;color:#BA1A1A;">日志</span>
+          </div>
+          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:3px;">
+            <span style="font-size:7.5px;color:#415FFF;">修复时间</span>
+            <span style="font-size:7.5px;color:#415FFF;">移到相机</span>
+            <span style="font-size:7.5px;color:#415FFF;">清空</span>
+          </div>
+        </div>
+
+        <!-- 位置权限警告横幅 -->
+        <div style="background:#FFDAD6;color:#410002;padding:4px 8px;display:flex;justify-content:space-between;">
+          <span style="width:80%;">未授予「位置」权限：系统读取照片时会剥离 GPS</span>
+          <span style="font-weight:700;color:#410002;">去授权</span>
+        </div>
+
+        <!-- 重新转换横幅 -->
+        <div style="background:#FDD7FC;color:#2D1235;padding:4px 8px;display:flex;justify-content:space-between;">
+          <span style="width:76%;">📍 2 张照片转换后没有位置信息，授权后可一键找回</span>
+          <span style="font-weight:700;">重新转换</span>
+        </div>
+
+        <!-- 状态条（超长） -->
+        <div style="padding:4px 8px;color:#46464F;">
+          转换完成：成功 3 个，失败 0 个（输出目录：DCIM/Camera）；警告：2 张照片读取时无 GPS（未授予「位置」权限，系统已剥离位置信息），授予后重新转换即可保留地点
+        </div>
+
+        <!-- 列表 -->
+        <div style="padding:0 8px;flex:1;overflow:hidden;">
+          <div style="background:#F5F2FA;border-radius:7px;padding:5px;display:flex;gap:5px;align-items:center;margin-bottom:4px;">
+            <div style="width:26px;height:26px;border-radius:5px;background:#DEE0FF;"></div>
+            <div><div style="font-weight:600;">IMG_20260831_134354.jpg</div><div style="color:#415FFF;">完成：已导出到相册 DCIM/Camera</div></div>
+          </div>
+          <div style="background:#F5F2FA;border-radius:7px;padding:5px;display:flex;gap:5px;align-items:center;margin-bottom:4px;">
+            <div style="width:26px;height:26px;border-radius:5px;background:#DEE0FF;"></div>
+            <div><div style="font-weight:600;">IMG_20260831_134432.jpg</div><div style="color:#BA1A1A;">失败：内存不足（文件过大）</div></div>
+          </div>
+        </div>
+
+        <!-- 底部：目录 + 2 开关 + 2 按钮 -->
+        <div style="background:#EFEDF6;padding:5px 8px;">
+          <div style="color:#46464F;display:flex;justify-content:space-between;"><span>输出目录：Pictures/VLiveConvert</span><span style="color:#415FFF;">修改</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;">
+            <div><div>转换后移到相机相册</div><div style="font-size:6.5px;color:#46464F;">写入 DCIM/Camera；配合删除原图不产生 (1) 序号</div></div>
+            <div style="width:18px;height:10px;border-radius:5px;background:#415FFF;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;">
+            <div><div>转换后删除原图</div><div style="font-size:6.5px;color:#46464F;">删除原 .jpg 与伴生 .mp4</div></div>
+            <div style="width:18px;height:10px;border-radius:5px;background:#C7C5D0;"></div>
+          </div>
+          <div style="display:flex;gap:5px;margin-top:5px;">
+            <div style="flex:1;text-align:center;border:1px solid #767680;border-radius:6px;padding:4px;">＋ 添加照片</div>
+            <div style="flex:1;text-align:center;background:#415FFF;color:#fff;border-radius:6px;padding:4px;">开始转换</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · 现状（只做视觉打磨）</h3>
+      <p>控件全部留在原位，仅优化间距 / 图标 / 层级。<br><b>列表可视高度 ≈ 90px</b></p>
+    </div>
+  </div>
+
+  <!-- ============ B 顶栏收口 ============ -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:10px; background:#0f1015; display:flex; justify-content:center;">
+      <div style="width:236px;height:440px;border-radius:20px;overflow:hidden;background:#FBF8FF;color:#1B1B21;display:flex;flex-direction:column;border:1px solid #46464F;font-size:8px;line-height:1.35;">
+
+        <!-- 顶栏：标题 + 溢出菜单 + 设置图标 -->
+        <div style="background:#EFEDF6;padding:8px;display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:11px;font-weight:700;">Vivo Live Photo</div>
+            <div style="font-size:7px;color:#46464F;">vivo 双文件实况 → 单文件实况</div>
+          </div>
+          <div style="display:flex;gap:9px;align-items:center;font-size:13px;color:#46464F;">
+            <span>⚙</span><span style="font-size:14px;">⋮</span>
+          </div>
+        </div>
+
+        <!-- 顶部只保留一条最重要的提示 -->
+        <div style="background:#FFDAD6;color:#410002;padding:5px 8px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="width:78%;">未授予「位置」权限，转换会丢失地点信息</span>
+          <span style="font-weight:700;">去授权</span>
+        </div>
+
+        <!-- 状态条折叠为单行 + 详情 -->
+        <div style="padding:5px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #E3E1EC;">
+          <span style="color:#46464F;">成功 3 · 失败 0</span>
+          <span style="color:#415FFF;">查看详情 ›</span>
+        </div>
+
+        <!-- 列表占满剩余空间 -->
+        <div style="padding:6px 8px;flex:1;overflow:hidden;">
+          <div style="font-size:7px;color:#46464F;margin-bottom:3px;">今天 · 3 张</div>
+          <div style="background:#F5F2FA;border-radius:7px;padding:6px;display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+            <div style="width:30px;height:30px;border-radius:5px;background:#DEE0FF;"></div>
+            <div style="flex:1;"><div style="font-weight:600;">IMG_20260831_134354.jpg</div><div style="color:#415FFF;">✓ 完成 · 位置已保留</div></div>
+          </div>
+          <div style="background:#F5F2FA;border-radius:7px;padding:6px;display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+            <div style="width:30px;height:30px;border-radius:5px;background:#DEE0FF;"></div>
+            <div style="flex:1;"><div style="font-weight:600;">IMG_20260831_134432.jpg</div><div style="color:#BA1A1A;">✕ 失败 · 内存不足</div></div>
+          </div>
+          <div style="background:#F5F2FA;border-radius:7px;padding:6px;display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+            <div style="width:30px;height:30px;border-radius:5px;background:#DEE0FF;"></div>
+            <div style="flex:1;"><div style="font-weight:600;">IMG_20260901_090112.jpg</div><div style="color:#46464F;font-size:7px;">○ 待转换</div></div>
+          </div>
+          <div style="background:#F5F2FA;border-radius:7px;padding:6px;display:flex;gap:6px;align-items:center;">
+            <div style="width:30px;height:30px;border-radius:5px;background:#DEE0FF;"></div>
+            <div style="flex:1;"><div style="font-weight:600;">IMG_20260901_090233.jpg</div><div style="color:#46464F;font-size:7px;">○ 待转换</div></div>
+          </div>
+        </div>
+
+        <!-- 底部：只有两个主按钮 -->
+        <div style="background:#EFEDF6;padding:7px 8px;">
+          <div style="display:flex;gap:6px;">
+            <div style="flex:1;text-align:center;border:1px solid #767680;border-radius:7px;padding:6px;">＋ 添加照片</div>
+            <div style="flex:1.3;text-align:center;background:#415FFF;color:#fff;border-radius:7px;padding:6px;font-weight:600;">开始转换</div>
+          </div>
+          <div style="text-align:center;color:#46464F;font-size:6.5px;margin-top:3px;">输出：DCIM/Camera · 删原图 关 · 设置里可改</div>
+        </div>
+
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · 顶栏收口（设置进菜单）</h3>
+      <p>日志 / 修复时间 / 移到相机 / 清空 / 输出目录 / 两个开关全部收进 <b>⚙ 设置页</b>；主界面只留主路径。<br><b>列表可视高度 ≈ 250px</b></p>
+    </div>
+  </div>
+
+  <!-- ============ C 底部抽屉 ============ -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:10px; background:#0f1015; display:flex; justify-content:center;">
+      <div style="width:236px;height:440px;border-radius:20px;overflow:hidden;background:#FBF8FF;color:#1B1B21;display:flex;flex-direction:column;border:1px solid #46464F;font-size:8px;line-height:1.35;position:relative;">
+
+        <div style="background:#EFEDF6;padding:8px;display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:11px;font-weight:700;">Vivo Live Photo</div>
+            <div style="font-size:7px;color:#46464F;">vivo 双文件实况 → 单文件实况</div>
+          </div>
+          <span style="font-size:13px;color:#46464F;">⚙</span>
+        </div>
+
+        <div style="background:#FFDAD6;color:#410002;padding:5px 8px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="width:78%;">未授予「位置」权限，转换会丢失地点信息</span>
+          <span style="font-weight:700;">去授权</span>
+        </div>
+
+        <div style="padding:6px 8px;flex:1;overflow:hidden;">
+          <div style="font-size:7px;color:#46464F;margin-bottom:3px;">今天 · 5 张已选</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">
+            <div style="aspect-ratio:1;border-radius:6px;background:#DEE0FF;"></div>
+            <div style="aspect-ratio:1;border-radius:6px;background:#C7C5D0;"></div>
+            <div style="aspect-ratio:1;border-radius:6px;background:#DEE0FF;"></div>
+            <div style="aspect-ratio:1;border-radius:6px;background:#C7C5D0;"></div>
+            <div style="aspect-ratio:1;border-radius:6px;background:#DEE0FF;"></div>
+            <div style="aspect-ratio:1;border-radius:6px;background:#C7C5D0;display:flex;align-items:center;justify-content:center;color:#46464F;">＋</div>
+          </div>
+          <div style="color:#46464F;margin-top:5px;">成功 3 · 失败 0 · 2 张无位置</div>
+        </div>
+
+        <!-- 底部抽屉（收起态：把手 + 主按钮） -->
+        <div style="background:#EFEDF6;border-radius:14px 14px 0 0;padding:4px 8px 8px;box-shadow:0 -2px 8px rgba(0,0,0,.14);">
+          <div style="width:28px;height:3px;border-radius:2px;background:#C7C5D0;margin:0 auto 6px;"></div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <div style="text-align:center;border:1px solid #767680;border-radius:7px;padding:6px 9px;">＋</div>
+            <div style="flex:1;text-align:center;background:#415FFF;color:#fff;border-radius:7px;padding:6px;font-weight:600;">开始转换（5 张）</div>
+          </div>
+          <div style="text-align:center;color:#415FFF;font-size:7px;margin-top:4px;">上滑展开设置 ›</div>
+        </div>
+
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · 底部抽屉（设置上滑展开）</h3>
+      <p>主界面变成<b>相册网格 + 一个主按钮</b>；所有设置与开关收进底部抽屉，上滑才出现。<br><b>列表可视高度 ≈ 260px</b></p>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:18px;">
+  <div class="label">我注意到的问题（可多选，稍后一起处理）</div>
+  <div class="options" data-multiselect style="margin-top:8px;">
+    <div class="option" data-choice="nav" onclick="toggleSelect(this)"><div class="letter">1</div><div class="content"><h3>顶栏按钮换成图标</h3><p>4 个纯文字按钮热区小、易误触</p></div></div>
+    <div class="option" data-choice="brand" onclick="toggleSelect(this)"><div class="letter">2</div><div class="content"><h3>品牌名统一</h3><p>权限页写「VLiveConvert」，主页写「Vivo Live Photo」，应用名又是第三个</p></div></div>
+    <div class="option" data-choice="list" onclick="toggleSelect(this)"><div class="letter">3</div><div class="content"><h3>列表项状态可视化</h3><p>加图标/徽标/单项进度条，不只靠文字颜色</p></div></div>
+    <div class="option" data-choice="type" onclick="toggleSelect(this)"><div class="letter">4</div><div class="content"><h3>中文排版层级</h3><p>目前 Typography 几乎全是默认值</p></div></div>
+  </div>
+</div>
