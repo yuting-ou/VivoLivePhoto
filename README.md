@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.1），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.2 稳定版），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.1.apk`](./VivoLivePhoto-v1.7.1.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.2.apk`](./VivoLivePhoto-v1.7.2.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,22 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.2（稳定版）
+
+可达性收尾 + 一次从干净状态的完整回归。至此 v1.7.x 的功能与修复告一段落。
+
+- **行内「重转」按钮**统一到与其它内联动作相同的实现：触摸目标 ~28dp → ≥48dp
+  （视觉不变，仍是 tertiary 实色胶囊），并保留上一版修正的 `onTertiary` 配对
+- **两处整行可点区域**（状态摘要「详情 ›」、底部设置摘要）补齐最小尺寸：
+  `minimumInteractiveComponentSize()` 与 `clickable` 同链，命中区高度达到 48dp
+- 至此**应用内所有可交互元素**（按钮 / 圆形三态复选框 / 图标按钮 / 整行可点）
+  触摸目标均 ≥48dp
+- 完整回归（从 `clean` 开始）：**61 组 JVM 单测全绿**（另 3 组真机样本用例在无样本时跳过）、
+  Lint 无 error（仅剩依赖版本 / 图标形状这类提示）、release 构建与签名校验通过、
+  打包后 APK 的版本与内容实查通过
+- 本版不含新的功能或行为变更；功能与缺陷修复见下方 v1.7.1（数据安全 / 可达性）与
+  v1.7.0（解析正确性 / 耗电与卡死）
 
 ### v1.7.1
 

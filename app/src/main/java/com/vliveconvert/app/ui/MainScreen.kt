@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -208,8 +209,10 @@ fun MainScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
+                    .minimumInteractiveComponentSize()
                     .clickableNoRipple(onShowStatusDetail)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -321,8 +324,10 @@ fun MainScreen(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
+                            // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
+                            .minimumInteractiveComponentSize()
                             .clickableNoRipple(onOpenSettings)
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                            .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -514,17 +519,14 @@ private fun ConvertItemRow(
 
             // 行内重转（丢位置）/ 移除
             if (lostGps) {
-                Text(
-                    "重转",
-                    style = MaterialTheme.typography.labelMedium,
+                InlineTextButton(
+                    text = "重转",
                     // 背景是实色 tertiary，前景必须用配套的 onTertiary；
                     // 原先误用 onTertiaryContainer，深色下仅 1.29:1，文字几乎不可见
-                    color = MaterialTheme.colorScheme.onTertiary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.tertiary)
-                        .clickableNoRipple(onReconvert)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                    background = MaterialTheme.colorScheme.tertiary,
+                    onClick = onReconvert,
+                    style = MaterialTheme.typography.labelMedium
                 )
                 Spacer(Modifier.width(2.dp))
             }
