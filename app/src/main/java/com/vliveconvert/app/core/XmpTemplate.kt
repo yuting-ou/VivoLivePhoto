@@ -169,28 +169,36 @@ internal object XmpTemplate {
             val bufLen = minOf(limit, fileSize)
             if (bufLen < 2) return ""
             val buffer = ByteArray(bufLen)
+            var read = 0
             FileInputStream(path).use { fis ->
-                var read = 0
                 while (read < bufLen) {
                     val n = fis.read(buffer, read, bufLen - read)
                     if (n < 0) break
                     read += n
                 }
-                if (read < 2 || buffer[0] != 0xFF.toByte() || buffer[1] != 0xD8.toByte()) return@use ""
-                val head = buffer.copyOfRange(0, read)
-                val idx = BinaryUtils.indexOf(head, JpegUtil.xmpApp1Prefix)
-                if (idx == -1) return@use ""
-                val endMarker = "</x:xmpmeta>".toByteArray(Charsets.US_ASCII)
-                val tail = head.copyOfRange(idx, head.size)
-                val end = BinaryUtils.indexOf(tail, endMarker)
-                if (end == -1) return@use ""
-                // XMP 终点 = 起始位置 + endMarker 在 tail 中的偏移 + endMarker 长度
-                // （tail 从 idx 起算，终点换算回 head 坐标时不再叠加 idx）
-                val xmpEnd = idx + end + endMarker.size
-                return@use String(head.copyOfRange(idx, xmpEnd), Charsets.UTF_8)
             }
+            sniffXmpBytes(if (read < buffer.size) buffer.copyOf(read) else buffer)
         } catch (e: Exception) {
             ""
         }
+    }
+
+    /**
+     * 从已读入内存的头部字节定位 XMP 文本（检测用，容忍截断）。
+     * 供取不到文件路径的场景使用——例如判断 MediaStore URI 指向的既有文件
+     * 是否为单文件实况（用于「重复转换不累积序号文件」的判别），此时只能走输入流。
+     */
+    fun sniffXmpBytes(head: ByteArray): String {
+        if (head.size < 2) return ""
+        if (head[0] != 0xFF.toByte() || head[1] != 0xD8.toByte()) return ""
+        val idx = BinaryUtils.indexOf(head, JpegUtil.xmpApp1Prefix)
+        if (idx == -1) return ""
+        val endMarker = "</x:xmpmeta>".toByteArray(Charsets.US_ASCII)
+        // 从 XMP 起点之后找闭合标记：XMP 终点 = 起点 + 闭合标记长度
+        val end = BinaryUtils.indexOf(head, endMarker, idx)
+        if (end == -1) return ""
+        val xmpEnd = end + endMarker.size
+        if (xmpEnd > head.size) return ""
+        return String(head, idx, xmpEnd - idx, Charsets.UTF_8)
     }
 }

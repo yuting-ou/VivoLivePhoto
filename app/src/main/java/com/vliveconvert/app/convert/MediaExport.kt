@@ -1,11 +1,13 @@
 package com.vliveconvert.app.convert
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import com.vliveconvert.app.core.OutputVerifier
 import com.vliveconvert.app.core.SingleWriteResult
+import com.vliveconvert.app.core.XmpTemplate
 import java.io.File
 import java.io.IOException
 
@@ -20,15 +22,24 @@ internal object MediaExport {
     /**
      * 导出转换产物到系统相册并做写后自检，返回入库 URI。
      *
-     * @param useCameraDir true 时直接写入 DCIM/Camera（与相机拍摄照片同目录，重名追加序号）
-     * @param relPath useCameraDir 为 false 时的自定义输出目录（MediaStore 相对路径）
+     * 命名策略（避免重复转换累积 `IMG_x(1).jpg` / `(2)` / `(3)`…）：
+     * 1. [oldUriString] 显式指定旧产物（重转路径：队列记录了上次导出的 URI）→ 原地覆盖
+     * 2. 目标目录中存在**同一源照片的既往产物** → 原地覆盖（自动识别，见 [findPreviousOutput]）
+     * 3. 都没有 → 新建（重名时由 MediaStore 追加序号）
+     *
+     * 注意 2 不会误伤相机的原始双文件：判别依据是「同名 + XMP 含 MotionPhoto 标记」，
+     * 而源双文件的 XMP 恰恰不含该标记（这正是本工具识别双文件的条件）。
+     *
+     * @param useCameraDir true 时写入 DCIM/Camera，false 时写入 [relPath]
+     * @param oldUriString 显式指定的既有产物 URI（重转路径）
      */
     fun exportAndVerify(
         context: Context,
         result: SingleWriteResult,
         timestamp: Long,
         relPath: String,
-        useCameraDir: Boolean
+        useCameraDir: Boolean,
+        oldUriString: String? = null
     ): Uri {
         val resolver = context.contentResolver
         val src = File(result.path)
@@ -36,7 +47,18 @@ internal object MediaExport {
             throw IOException("转换产物缺失或为空")
         }
         val targetRelPath = if (useCameraDir) "DCIM/Camera" else relPath
-        val displayName = if (useCameraDir) uniqueCameraName(resolver, src.name) else src.name
+        val stem = src.name.substringBeforeLast('.')
+
+        // 覆盖既有产物（显式指定优先；否则自动识别同源既往产物）
+        val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
+            ?: findPreviousOutput(resolver, targetRelPath, stem)
+        if (previous != null) {
+            overwriteExisting(resolver, previous, src, result, timestamp)?.let { return it }
+            // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
+        }
+
+        val displayName =
+            if (useCameraDir) uniqueCameraName(resolver, src.name) else src.name
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -84,70 +106,122 @@ internal object MediaExport {
     }
 
     /**
-     * 重新转换的导出：优先**原地覆盖**上次导出的 MediaStore 记录
-     * （本应用是文件所有者，可对已入库的自己文件直接重写内容），
-     * 不产生「IMG_xxx(1).jpg」重名序号文件；旧记录已失效（被用户删除等）
-     * 或覆盖失败时回退为全新导出。
+     * 原地覆盖既有产物：成功且自检通过返回其 URI；不可行返回 null（调用方转新建路径）。
      *
-     * 覆盖同样做写后自检：自检不过则删除旧记录并全新导出兜底，
-     * 保证「完成」的产物一定是校验通过的。
+     * 安全语义：一旦按写模式打开，旧内容即被截断，此后任何失败都必须删除该记录
+     * （否则留下半损文件）；若连输出流都没打开成功，旧文件仍完好，必须保留。
      */
-    fun replaceOrExportAndVerify(
-        context: Context,
+    private fun overwriteExisting(
+        resolver: android.content.ContentResolver,
+        old: Uri,
+        src: File,
         result: SingleWriteResult,
-        timestamp: Long,
-        relPath: String,
-        useCameraDir: Boolean,
-        oldUriString: String?
-    ): Uri {
-        val resolver = context.contentResolver
-        val src = File(result.path)
-        if (!src.exists() || src.length() == 0L) {
-            throw IOException("转换产物缺失或为空")
-        }
-        if (oldUriString != null) {
-            try {
-                val old = Uri.parse(oldUriString)
-                // 旧记录仍有效才覆盖（用户可能已手动删除产物）
-                val valid = try {
-                    resolver.query(old, arrayOf(MediaStore.MediaColumns._ID),
-                        null, null, null)?.use { it.moveToFirst() } == true
-                } catch (_: Exception) { false }
-                if (valid) {
-                    // 是否已按写模式打开旧文件：一旦打开，旧内容即被截断，
-                    // 此后任何失败都必须删除该记录（否则留下半损文件）
-                    var truncated = false
-                    try {
-                        resolver.openOutputStream(old, "w")?.use { out ->
-                            truncated = true
-                            src.inputStream().use { input -> input.copyTo(out) }
-                        } ?: throw IOException("旧产物输出流不可用")
-                        fixTimestamps(resolver, old, timestamp)
-                        // 物理文件 mtime 与媒体库列同为拍摄时间：
-                        // 系统显示的「修改时间」取自文件 mtime，漏设会让重转后的文件
-                        // 时间漂移成写入时刻（与全新导出路径行为不一致）
-                        fixPhysicalMtime(resolver, old, timestamp)
-                        val verified = try {
-                            resolver.openInputStream(old)?.use {
-                                OutputVerifier.verify(it, result.segments)
-                            } == true
-                        } catch (_: Exception) { false }
-                        if (verified) return old
-                        // 覆盖后自检失败（极罕见）：内容已不可信，删旧记录走全新导出
-                        try { resolver.delete(old, null, null) } catch (_: Exception) {}
-                    } catch (_: Exception) {
-                        // 仅在旧内容确实已被截断时才删除；
-                        // 若连输出流都没打开成功，旧文件仍是完好的，必须保留
-                        if (truncated) {
-                            try { resolver.delete(old, null, null) } catch (_: Exception) {}
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // URI 解析等异常 → 全新导出
+        timestamp: Long
+    ): Uri? {
+        // 旧记录仍有效才覆盖（用户可能已手动删除产物）
+        val valid = try {
+            resolver.query(old, arrayOf(MediaStore.MediaColumns._ID),
+                null, null, null)?.use { it.moveToFirst() } == true
+        } catch (_: Exception) { false }
+        if (!valid) return null
+
+        var truncated = false
+        return try {
+            resolver.openOutputStream(old, "w")?.use { out ->
+                truncated = true
+                src.inputStream().use { input -> input.copyTo(out) }
+            } ?: throw IOException("旧产物输出流不可用")
+            fixTimestamps(resolver, old, timestamp)
+            // 物理 mtime 与媒体库列同为拍摄时间（漏设会让时间漂移成写入时刻）
+            fixPhysicalMtime(resolver, old, timestamp)
+            val verified = try {
+                resolver.openInputStream(old)?.use {
+                    OutputVerifier.verify(it, result.segments)
+                } == true
+            } catch (_: Exception) { false }
+            if (verified) return old
+            // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
+            try { resolver.delete(old, null, null) } catch (_: Exception) {}
+            null
+        } catch (_: Exception) {
+            // 仅在旧内容确实已被截断时才删除
+            if (truncated) {
+                try { resolver.delete(old, null, null) } catch (_: Exception) {}
             }
+            null
         }
-        return exportAndVerify(context, result, timestamp, relPath, useCameraDir)
+    }
+
+    /** 判断既有产物是否为单文件实况（XMP 含 MotionPhoto/MicroVideo 标记）时读取的头部长度 */
+    private const val XMP_SNIFF_LIMIT = 512 * 1024
+
+    /**
+     * 目标目录中「同一源照片的既往转换产物」：文件基名与源相同（含 MediaStore 自动追加的
+     * `(n)` 形式）且本身是**单文件实况**。
+     *
+     * 为什么这样判：源双文件的 XMP 恰恰不含 MotionPhoto 标记（这正是本工具识别双文件的条件），
+     * 而转换产物必然含——因此「同名 + 含 MotionPhoto」即可确定为既往产物，
+     * 不会误伤相机的原始双文件（误判会导致覆盖源文件、造成数据丢失）。
+     *
+     * 找到后原地覆盖，重复转换不再累积 `IMG_x(1)/(2)/(3)…`。
+     */
+    private fun findPreviousOutput(
+        resolver: android.content.ContentResolver,
+        targetRelPath: String,
+        stem: String
+    ): Uri? {
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val ids = mutableListOf<Long>()
+        // LIKE 模式里的 `_` / `%` 是通配符，而 vivo 文件名形如 IMG_20260831_134354 本身就含 `_`，
+        // 不转义会匹配到无关文件（可能把别的照片误判为既往产物）。用 ESCAPE 精确匹配。
+        val escapedStem = stem
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        try {
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID),
+                // RELATIVE_PATH 按带/不带尾斜杠两种形态匹配（与 MainActivity.queryImagesIn 一致）：
+                // 真实设备通常规范化带尾斜杠，个别实现不带
+                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?) AND (" +
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=? OR " +
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? ESCAPE '\\')",
+                arrayOf("$targetRelPath/", targetRelPath, "$stem.jpg", "$escapedStem(%"),
+                null
+            )?.use { c ->
+                while (c.moveToNext()) ids.add(c.getLong(0))
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        for (id in ids) {
+            val uri = ContentUris.withAppendedId(collection, id)
+            if (isSingleFileLivePhoto(resolver, uri)) return uri
+        }
+        return null
+    }
+
+    /** 既有文件是否为单文件实况（XMP 含 MotionPhoto / MicroVideo 标记） */
+    private fun isSingleFileLivePhoto(
+        resolver: android.content.ContentResolver,
+        uri: Uri
+    ): Boolean = try {
+        resolver.openInputStream(uri)?.use { ins ->
+            val buf = ByteArray(XMP_SNIFF_LIMIT)
+            var n = 0
+            while (n < buf.size) {
+                val r = ins.read(buf, n, buf.size - n)
+                if (r < 0) break
+                n += r
+            }
+            if (n <= 0) false
+            else XmpTemplate.parseMotionXmp(
+                XmpTemplate.sniffXmpBytes(if (n < buf.size) buf.copyOf(n) else buf)
+            ).isMotion
+        } ?: false
+    } catch (_: Exception) {
+        false
     }
 
     /** 把入库文件对应的物理文件 mtime 固化为拍摄时间（系统「修改时间」取自 mtime） */
@@ -189,8 +263,10 @@ internal object MediaExport {
             resolver.query(
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
                 arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
-                "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-                arrayOf("DCIM/Camera/"),
+                // 按带/不带尾斜杠两种形态匹配（与 MainActivity.queryImagesIn 一致）：
+                // 只匹配带尾斜杠的形态在个别实现上取不到既有文件名，序号会变得不确定
+                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?)",
+                arrayOf("DCIM/Camera/", "DCIM/Camera"),
                 null
             )?.use { c ->
                 val i = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)

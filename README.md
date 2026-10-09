@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.4.1），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.5.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.4.1.apk`](./VivoLivePhoto-v1.4.1.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.5.0.apk`](./VivoLivePhoto-v1.5.0.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,39 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.5.0
+
+补齐上一轮列出的两项遗留项。
+
+- **深色模式对比度修复（含实测数据）**：列表项状态色原先硬编码
+  `SuccessGreen = #2E7D32` / `WarningAmber = #B26A00`，**不随主题变化**。按 WCAG 公式实测：
+  - 深色主题下成功态文字对比度仅 **3.35:1**（AA 正文要求 ≥ 4.5:1）
+  - 失败徽标在深色下用主题 error（#FFB4AB 浅珊瑚）配硬编码白字，仅 **1.70:1**，几乎不可读
+
+  现新增 `ui/theme/StatusColors.kt`：成功/警告/进行中三色各给出浅色与深色两套，
+  并配套各自的徽标符号色（`onSuccess`/`onWarning`）；失败徽标改用主题的
+  `error` / `onError` 成对取值。**新增 `StatusContrastTest`** 以 WCAG 相对亮度公式
+  逐项断言「状态文字 vs 行底色」「徽标符号 vs 徽标填充」「徽标填充 vs 行底色」达标——
+  把「深色模式可读」变成可执行回归，不再依赖真机肉眼检查
+- **重复转换不再累积 `IMG_x(1)/(2)/(3)…`（新行为）**：此前每次导出都新建文件、重名由
+  MediaStore 追加序号，重复转换同一批照片会不断堆出垃圾文件。现在导出前会识别目标目录中
+  **同一源照片的既往产物**并**原地覆盖**。
+
+  判别依据：文件名基名相同 **且** 该文件是单文件实况（XMP 含 `GCamera:MotionPhoto="1"`）。
+  这恰好是安全的——源双文件的 XMP 恰恰不含该标记（这正是本工具识别双文件的条件），
+  因此**不会误伤相机的原始双文件**（误判会直接覆盖源文件、造成数据丢失）。
+  覆盖同样过写后 MD5 自检
+- 顺带修正两处既有实现的不一致：`uniqueCameraName` 与新增的既往产物查询原先只按
+  「带尾斜杠」形态匹配 `RELATIVE_PATH`，而项目里 `queryImagesIn` 早就用
+  `IN (?,?)` 兼容两种形态——现统一，避免个别设备上取不到既有文件名
+- `XmpTemplate` 新增 `sniffXmpBytes`（内存版 XMP 定位），供只能走输入流的场景
+  （判断 MediaStore URI 指向的既有文件类型）使用；原按路径版本改为复用它
+- 测试：新增 9 组（对比度 4 组；判别器 2 组；**Robolectric + MediaStore 端到端 3 组**：
+  重复转换原地覆盖、源双文件绝不被覆盖、无既往产物时正常新建）。
+  这些守卫均已用「退回有缺陷实现」**反向验证过确实会失败**
+- 验证：**45 组 JVM 单测全绿**（另 3 组真机样本用例在无样本时跳过），
+  Lint 零 error/warning，release 构建与签名校验通过
 
 ### v1.4.1
 

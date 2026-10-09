@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 
 /** vivo 品牌蓝浅色方案（#415FFF 派生） */
 private val LightColorScheme = lightColorScheme(
@@ -74,6 +75,13 @@ private val DarkColorScheme = darkColorScheme(
     inversePrimary = DarkInversePrimary,
 )
 
+/**
+ * 按主题取配色方案（浅色/深色）。
+ * 供对比度回归测试使用——`LightColorScheme`/`DarkColorScheme` 本身是文件私有。
+ */
+internal fun themeColorScheme(light: Boolean) =
+    if (light) LightColorScheme else DarkColorScheme
+
 @Composable
 fun VLiveConvertTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -81,10 +89,13 @@ fun VLiveConvertTheme(
 ) {
     // 固定使用 vivo 品牌蓝配色，不跟随系统动态取色（保证品牌一致性）
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val statusColors = if (darkTheme) DarkStatusColors else LightStatusColors
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalStatusColors provides statusColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

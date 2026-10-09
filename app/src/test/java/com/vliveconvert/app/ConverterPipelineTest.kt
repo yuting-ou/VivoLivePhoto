@@ -775,6 +775,54 @@ class ConverterPipelineTest {
         assertTrue(outXmp!!.xmpText.contains("""GCamera:MotionPhoto="1""""))
     }
 
+    // ------------------------------------------------ 「重复转换不累积序号文件」的判别器 ----------
+
+    /**
+     * 判别器（MediaExport.findPreviousOutput 走的判定）依赖「同名 + XMP 含 MotionPhoto」，
+     * 用于认出同一源照片的既往产物并原地覆盖，避免重复转换累积 IMG_x(1)/(2)/(3)…
+     *
+     * **这是安全攸关的不变量**：若源双文件被误判为「既往产物」，导出时会直接覆盖源文件，
+     * 造成原始数据丢失。故此处明确断言两侧行为。
+     */
+    @Test
+    fun previousOutputDiscriminatorDistinguishesSourceFromConvertedOutput() {
+        val dir = Files.createTempDirectory("vlc_disc").toFile()
+        val (jpg, _) = makePair(dir, "IMG_9401")
+
+        // 源双文件：XMP 不含 MotionPhoto（这正是本工具识别双文件的条件）→ 不可判为既往产物
+        val srcBytes = jpg.readBytes()
+        assertFalse(
+            "源双文件不得被判为单文件实况，否则导出会覆盖源文件（数据丢失）",
+            XmpTemplate.parseMotionXmp(XmpTemplate.sniffXmpBytes(srcBytes)).isMotion
+        )
+
+        // 转换产物：XMP 必然含 MotionPhoto → 可被认作既往产物，从而原地覆盖
+        val outDir = Files.createTempDirectory("vlc_disc_out").toFile()
+        val outPath = Converter.convertToVivoSingle(
+            jpg.absolutePath, outDir.absolutePath, ::log).path
+        assertTrue(
+            "转换产物应被判为单文件实况，据此识别为既往产物并原地覆盖",
+            XmpTemplate.parseMotionXmp(
+                XmpTemplate.sniffXmpBytes(File(outPath).readBytes())
+            ).isMotion
+        )
+    }
+
+    /** 内存版 XMP 定位（供输入流场景使用）必须与按路径读取的版本结果一致 */
+    @Test
+    fun sniffXmpBytesMatchesPathBasedSniffing() {
+        val dir = Files.createTempDirectory("vlc_sniffbytes").toFile()
+        val (jpg, _) = makePair(dir, "IMG_9402")
+
+        val byPath = XmpTemplate.sniffXmp(jpg.absolutePath)
+        val byBytes = XmpTemplate.sniffXmpBytes(jpg.readBytes())
+        assertEquals("两条路径应得到相同 XMP 文本", byPath, byBytes)
+
+        // 非 JPEG / 空输入不应抛异常
+        assertEquals("", XmpTemplate.sniffXmpBytes(ByteArray(0)))
+        assertEquals("", XmpTemplate.sniffXmpBytes(byteArrayOf(1, 2, 3, 4)))
+    }
+
     companion object {
         /** 28 字符 livephoto ID（'-<数字>' + '0' 填充） */
         private val TEST_LIVE_ID: String = "-1234567890".padEnd(28, '0')

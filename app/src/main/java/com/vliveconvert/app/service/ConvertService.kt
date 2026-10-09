@@ -212,15 +212,13 @@ class ConvertService : Service() {
                     ?: (if (ci.item.dateModified > 0) ci.item.dateModified * 1000L
                         else System.currentTimeMillis())
             }
-            // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）；
-            // 重转：优先原地覆盖上次导出的记录
-            val exportUri = if (isReconvert) {
-                MediaExport.replaceOrExportAndVerify(
-                    app, result, ts, outputRelPath, moveToCamera, ci.outUri)
-            } else {
-                MediaExport.exportAndVerify(
-                    app, result, ts, outputRelPath, moveToCamera && !deferToCamera)
-            }
+            // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）。
+            // 命名策略在 MediaExport 内统一处理：显式指定旧产物（重转路径）或自动识别
+            // 同源既往产物时原地覆盖，避免重复转换累积 IMG_x(1)/(2)/(3)…
+            val exportUri = MediaExport.exportAndVerify(
+                app, result, ts, outputRelPath,
+                useCameraDir = moveToCamera && !deferToCamera,
+                oldUriString = if (isReconvert) ci.outUri else null)
             ok.incrementAndGet()
             // 源图读到的字节无 GPS（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
             if (!result.sourceHasGps) noGps.incrementAndGet()

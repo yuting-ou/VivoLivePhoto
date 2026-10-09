@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.vliveconvert.app.ui.theme.statusColors
 
 /**
  * 主界面：待转换列表 + 开始转换。
@@ -437,6 +438,7 @@ private fun ConvertItemRow(
     val resolver = LocalContext.current.contentResolver
     val busy = isBusyStatus(ci.status)
     val lostGps = ci.done && ci.lostGps && !ci.failed
+    val status = statusColors
     val bg = when {
         ci.failed -> MaterialTheme.colorScheme.errorContainer
         lostGps -> MaterialTheme.colorScheme.tertiaryContainer
@@ -446,8 +448,8 @@ private fun ConvertItemRow(
     val statusColor = when {
         ci.failed -> MaterialTheme.colorScheme.onErrorContainer
         lostGps -> MaterialTheme.colorScheme.onTertiaryContainer
-        ci.done -> SuccessGreen
-        busy -> MaterialTheme.colorScheme.primary
+        ci.done -> status.success
+        busy -> status.info
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -470,10 +472,16 @@ private fun ConvertItemRow(
                 ) {
                     MediaThumbnail(ci.item.uri, resolver, Modifier.fillMaxSize())
                 }
-                val badge = when {
-                    ci.failed -> Triple("✕", MaterialTheme.colorScheme.error, bg)
-                    lostGps -> Triple("!", WarningAmber, bg)
-                    ci.done -> Triple("✓", SuccessGreen, bg)
+                // 状态角标：填充色与符号色成对取自主题（深色下不再用浅色底配白字，
+                // 那会让符号对比度跌到 1.7:1 几乎不可读）
+                val badge: Triple<String, Color, Color>? = when {
+                    ci.failed -> Triple(
+                        "✕",
+                        MaterialTheme.colorScheme.error,
+                        MaterialTheme.colorScheme.onError
+                    )
+                    lostGps -> Triple("!", status.warning, status.onWarning)
+                    ci.done -> Triple("✓", status.success, status.onSuccess)
                     else -> null
                 }
                 if (badge != null) {
@@ -488,7 +496,7 @@ private fun ConvertItemRow(
                         Text(
                             badge.first,
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White,
+                            color = badge.third,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -561,12 +569,6 @@ private fun IndeterminateBar() {
 /** 转换中的项目不显示移除按钮 */
 private fun isBusyStatus(status: String): Boolean =
     status.startsWith("转换中") || status.startsWith("重新转换中")
-
-/** 成功态绿（与主题 errorContainer 的红形成明确对立） */
-private val SuccessGreen = Color(0xFF2E7D32)
-
-/** 丢位置琥珀（warning） */
-private val WarningAmber = Color(0xFFB26A00)
 
 /** 无涟漪点击（文本按钮用） */
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
