@@ -56,6 +56,9 @@ fun MainScreen(
     progressDetail: String,
     pendingRestoreCount: Int,
     onRestoreOriginals: () -> Unit,
+    /** 位置权限缺失：转换会因系统读取层脱敏而丢失 GPS 地点信息 */
+    locationMissing: Boolean,
+    onGrantLocation: () -> Unit,
     outputRelPath: String,
     isMovingOutputs: Boolean,
     onEditOutputPath: () -> Unit,
@@ -145,6 +148,35 @@ fun MainScreen(
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+
+        // ── 位置权限缺失警示条 ──
+        if (locationMissing) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "未授予「位置」权限：系统读取照片时会剥离 GPS，转换将丢失地点信息",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 6.dp)
+                )
+                Text(
+                    "去授权",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickableNoRipple(onGrantLocation)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+            }
         }
 
         // ── 状态条 ──

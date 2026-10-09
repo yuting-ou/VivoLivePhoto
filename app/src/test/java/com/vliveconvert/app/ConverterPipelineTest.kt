@@ -409,6 +409,139 @@ class ConverterPipelineTest {
             XmpTemplate.parseMotionXmp(sniffed).isMotion)
     }
 
+    // ------------------------------------------------ GPS EXIF 检测与保留 ----------
+
+    /** 构造 EXIF APP1 段（"Exif\0\0" + 自定义 TIFF 载荷） */
+    private fun exifApp1(tiff: ByteArray): ByteArray {
+        val payload = JpegUtil.exifPrefix + tiff
+        val seg = ByteArray(4 + payload.size)
+        seg[0] = 0xFF.toByte()
+        seg[1] = 0xE1.toByte()
+        BinaryUtils.writeU16BE(seg, 2, payload.size + 2)
+        System.arraycopy(payload, 0, seg, 4, payload.size)
+        return seg
+    }
+
+    /** 在最小 JPEG 的 SOI 后插入 EXIF APP1 段 */
+    private fun jpegWithExif(exifApp1Seg: ByteArray): ByteArray {
+        val base = minimalJpeg()
+        return base.copyOfRange(0, 2) + exifApp1Seg + base.copyOfRange(2, base.size)
+    }
+
+    /** 小端 TIFF：IFD0 含 1 个 Orientation(0x0112) 条目（有效 EXIF、无 GPS） */
+    private val tiffWithoutGps: ByteArray = byteArrayOf(
+        0x49, 0x49, 0x2A, 0x00,             // "II" + magic 0x002A
+        0x08, 0x00, 0x00, 0x00,             // IFD0 offset = 8
+        0x01, 0x00,                         // IFD0: 1 entry
+        0x12, 0x01, 0x03, 0x00,             // tag 0x0112 Orientation, type SHORT
+        0x01, 0x00, 0x00, 0x00,             // count 1
+        0x01, 0x00, 0x00, 0x00,             // value 1（内联）
+        0x00, 0x00, 0x00, 0x00              // next IFD = 0
+    )
+
+    /** 小端 TIFF：IFD0 的 0x8825 指向含 1 个条目的 GPS IFD（有效 GPS） */
+    private val tiffWithGps: ByteArray = byteArrayOf(
+        0x49, 0x49, 0x2A, 0x00,             // "II" + magic
+        0x08, 0x00, 0x00, 0x00,             // IFD0 offset = 8
+        0x01, 0x00,                         // IFD0: 1 entry
+        0x25, 0x88.toByte(), 0x04, 0x00,    // tag 0x8825 GPSInfo 指针, type LONG
+        0x01, 0x00, 0x00, 0x00,             // count 1
+        0x1A, 0x00, 0x00, 0x00,             // value → GPS IFD offset 26
+        0x00, 0x00, 0x00, 0x00,             // next IFD = 0
+        0x01, 0x00,                         // GPS IFD: 1 entry
+        0x01, 0x00, 0x02, 0x00,             // tag 0x0001 GPSLatitudeRef, type ASCII
+        0x02, 0x00, 0x00, 0x00,             // count 2
+        0x4E, 0x00, 0x00, 0x00,             // value "N\0"（内联）
+        0x00, 0x00, 0x00, 0x00              // next IFD = 0
+    )
+
+    /** 大端 TIFF（"MM"）：IFD0 的 0x8825 指向含 1 个条目的 GPS IFD */
+    private val tiffWithGpsBE: ByteArray = byteArrayOf(
+        0x4D, 0x4D, 0x00, 0x2A,             // "MM" + magic 0x002A（大端）
+        0x00, 0x00, 0x00, 0x08,             // IFD0 offset = 8
+        0x00, 0x01,                         // IFD0: 1 entry
+        0x88.toByte(), 0x25, 0x00, 0x04,    // tag 0x8825, type LONG
+        0x00, 0x00, 0x00, 0x01,             // count 1
+        0x00, 0x00, 0x00, 0x1A,             // → GPS IFD offset 26
+        0x00, 0x00, 0x00, 0x00,             // next IFD = 0
+        0x00, 0x01,                         // GPS IFD: 1 entry
+        0x00, 0x01, 0x00, 0x02,             // tag GPSLatitudeRef, type ASCII
+        0x00, 0x00, 0x00, 0x02,             // count 2
+        0x4E, 0x00, 0x00, 0x00,             // value "N\0"（内联）
+        0x00, 0x00, 0x00, 0x00              // next IFD = 0
+    )
+
+    /** 小端 TIFF：0x8825 指向空 GPS IFD（0 条目）——脱敏后的常见残留形态 */
+    private val tiffWithEmptyGpsIfd: ByteArray = byteArrayOf(
+        0x49, 0x49, 0x2A, 0x00,
+        0x08, 0x00, 0x00, 0x00,
+        0x01, 0x00,
+        0x25, 0x88.toByte(), 0x04, 0x00,
+        0x01, 0x00, 0x00, 0x00,
+        0x1A, 0x00, 0x00, 0x00,             // → GPS IFD offset 26
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,                         // GPS IFD: 0 entries（空）
+        0x00, 0x00, 0x00, 0x00
+    )
+
+    @Test
+    fun gpsExifDetection() {
+        // 无 EXIF → false
+        assertFalse("无 EXIF 的 JPEG 应判定为无 GPS", JpegUtil.hasGpsExif(minimalJpeg()))
+        // 有 EXIF 但无 GPS → false
+        assertFalse("有 EXIF 无 GPS IFD 应判定为无 GPS",
+            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithoutGps))))
+        // GPS IFD 存在且非空 → true
+        assertTrue("含非空 GPS IFD 应判定为有 GPS",
+            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithGps))))
+        // 大端（MM）EXIF 同样正确解析
+        assertTrue("大端 EXIF 的非空 GPS IFD 应判定为有 GPS",
+            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithGpsBE))))
+        // GPS 指针指向空 IFD（脱敏残留形态）→ false
+        assertFalse("空 GPS IFD 应判定为无 GPS",
+            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithEmptyGpsIfd))))
+        // 仅 XMP（无 EXIF APP1）→ false，不应误判
+        val xmpOnly = JpegUtil.replaceOrInsertXmp(
+            minimalJpeg(), """<x:xmpmeta><rdf:RDF/></x:xmpmeta>""")
+        assertFalse("仅 XMP 的 JPEG 应判定为无 GPS", JpegUtil.hasGpsExif(xmpOnly))
+    }
+
+    @Test
+    fun convertPreservesGpsExifEndToEnd() {
+        // 源 JPEG 带 GPS EXIF → 转换结果 sourceHasGps=true，且输出主体仍含 GPS（无损透传）
+        val dir = Files.createTempDirectory("vlc_gps").toFile()
+        val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        ))
+        val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "IMG_8001.jpg").apply {
+            writeBytes(jpegWithExif(exifApp1(tiffWithGps)) +
+                fakeStreamData("DEGS", 64, 11) + jpgFooter)
+        }
+        File(dir, "IMG_8001.mp4").apply { writeBytes(vivoDualMp4()) }
+        assertTrue(JpegUtil.hasGpsExif(jpg.readBytes()))
+
+        val outDir = Files.createTempDirectory("vlc_gps_out").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        assertTrue("源含 GPS 时 sourceHasGps 应为 true", result.sourceHasGps)
+
+        val (jpegs, _) = JpegUtil.splitJpegs(File(result.path).readBytes())
+        assertTrue("GPS EXIF 应无损保留到输出主图", JpegUtil.hasGpsExif(jpegs[0]))
+    }
+
+    @Test
+    fun convertReportsMissingGpsWhenSourceHasNone() {
+        // 源 JPEG 无 GPS（或读取时已被系统脱敏）→ sourceHasGps=false，转换正常完成
+        val dir = Files.createTempDirectory("vlc_nogps").toFile()
+        val (jpg, _) = makePair(dir, "IMG_8002")
+        val outDir = Files.createTempDirectory("vlc_nogps_out").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        assertFalse("源无 GPS 时 sourceHasGps 应为 false", result.sourceHasGps)
+        assertTrue("无 GPS 不应阻塞转换", File(result.path).exists())
+    }
+
     companion object {
         /** 28 字符 livephoto ID（'-<数字>' + '0' 填充） */
         private val TEST_LIVE_ID: String = "-1234567890".padEnd(28, '0')

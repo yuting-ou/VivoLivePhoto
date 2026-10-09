@@ -142,6 +142,88 @@ internal object JpegUtil {
         return 0 to 0
     }
 
+    /**
+     * 检测 JPEG 的 EXIF 中是否存在非空 GPS IFD。
+     *
+     * 背景：Android 10+（本项目 minSdk 34）在应用缺少 ACCESS_MEDIA_LOCATION 时，
+     * MediaProvider/FUSE 会在「读取层」实时改写媒体文件的 EXIF、剥离全部 GPS 标签，
+     * 应用拿到的是脱敏后的字节。本工具是字节级无损管道——读到的字节若已被脱敏，
+     * 转换产物同样无 GPS（不可事后恢复）。此检测用于把这一事实暴露给调用方展示。
+     *
+     * 注意：返回 false 仅代表「当前读到的字节」中无 GPS，不代表拍摄时未记录位置。
+     */
+    fun hasGpsExif(jpeg: ByteArray): Boolean {
+        return try {
+            for (seg in iterateSegments(jpeg)) {
+                val m = seg.marker.toInt() and 0xFF
+                if (m == 0xE1 && seg.payloadLen > exifPrefix.size &&
+                    BinaryUtils.arrayEquals(jpeg, seg.payloadStart, exifPrefix)
+                ) {
+                    val tiffStart = seg.payloadStart + exifPrefix.size
+                    return exifHasNonEmptyGpsIfd(jpeg, tiffStart, seg.payloadStart + seg.payloadLen)
+                }
+                if (m == 0xDA) return false
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 最小化 TIFF/EXIF 解析：IFD0 中 tag 0x8825（GPSInfo 指针）指向的 GPS IFD 非空
+     * 才判定为「含 GPS」。解析失败一律视为无 GPS（仅用于诊断提示，不阻塞转换）。
+     */
+    private fun exifHasNonEmptyGpsIfd(data: ByteArray, tiffStart: Int, tiffEnd: Int): Boolean {
+        if (tiffStart < 0 || tiffStart + 8 > tiffEnd || tiffEnd > data.size) return false
+        val little = when {
+            data[tiffStart] == 0x49.toByte() && data[tiffStart + 1] == 0x49.toByte() -> true  // "II"
+            data[tiffStart] == 0x4D.toByte() && data[tiffStart + 1] == 0x4D.toByte() -> false // "MM"
+            else -> return false
+        }
+
+        fun u16(off: Int): Int {
+            if (off < 0 || off + 2 > tiffEnd) return -1
+            return if (little)
+                (data[off].toInt() and 0xFF) or ((data[off + 1].toInt() and 0xFF) shl 8)
+            else
+                ((data[off].toInt() and 0xFF) shl 8) or (data[off + 1].toInt() and 0xFF)
+        }
+
+        fun u32(off: Int): Long {
+            if (off < 0 || off + 4 > tiffEnd) return -1L
+            return if (little)
+                (data[off].toInt() and 0xFF).toLong() or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 8) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 3].toInt() and 0xFF).toLong() shl 24)
+            else
+                ((data[off].toInt() and 0xFF).toLong() shl 24) or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 8) or
+                    (data[off + 3].toInt() and 0xFF).toLong()
+        }
+
+        val ifd0Offset = u32(tiffStart + 4).toInt()
+        if (ifd0Offset < 0) return false
+        val ifd0 = tiffStart + ifd0Offset
+        val count = u16(ifd0)
+        if (count <= 0) return false
+        var i = 0
+        while (i < count) {
+            val entry = ifd0 + 2 + i * 12
+            if (entry + 12 > tiffEnd) return false
+            if (u16(entry) == 0x8825) {
+                val gpsIfdOffset = u32(entry + 8).toInt()
+                if (gpsIfdOffset < 0) return false
+                val gpsCount = u16(tiffStart + gpsIfdOffset)
+                return gpsCount > 0
+            }
+            i++
+        }
+        return false
+    }
+
     internal class XmpSegment(val segStart: Int, val totalLen: Int, val xmpText: String)
 
     /** 定位 XMP APP1 段，返回 XmpSegment；无则 null。 */

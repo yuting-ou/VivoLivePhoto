@@ -84,6 +84,8 @@ class MainActivity : ComponentActivity() {
 
     // 权限
     private var showSettingsDialog by mutableStateOf(false)
+    // 位置权限缺失时的转换门禁弹窗（GPS 会被系统读取层剥离，需用户显式确认）
+    private var showLocationDialog by mutableStateOf(false)
     // 所有文件访问权限引导弹窗（删除原图 / 修复时间功能需要时提示）
     private var showAllFilesDialog by mutableStateOf(false)
     // 权限授予后要执行的动作（默认进入内置选择器）
@@ -143,17 +145,31 @@ class MainActivity : ComponentActivity() {
             }
             .any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
+    /**
+     * 位置权限（ACCESS_MEDIA_LOCATION）：缺失时系统（MediaStore/FUSE）会在读取层
+     * 实时剥离照片 GPS EXIF，字节级无损管道将原样保留脱敏结果——转换产物丢失地点
+     * 信息且无法事后找回。因此转换前必须显式确认，而不是静默继续。
+     */
+    private fun hasMediaLocationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** 位置权限缺失（Compose 状态：驱动主界面警示条与门禁弹窗） */
+    private var locationDenied by mutableStateOf(false)
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
+        locationDenied = !hasMediaLocationPermission()
         val granted = result.values.any { it }
         if (granted) {
             // 伴生 MP4 依赖完整视频读取权限；「选择照片」部分授权（VISUAL_USER_SELECTED）
             // 并不包含视频访问，此时会找不到伴生视频，须明确提示而非误报成功
             val videoGranted = result[Manifest.permission.READ_MEDIA_VIDEO] == true
-            ConvertCenter.statusText = if (videoGranted) "已获得读取照片和视频权限"
+            val locationHint = if (!hasMediaLocationPermission())
+                "；未授予「位置」权限：转换将丢失照片 GPS 地点信息" else ""
+            ConvertCenter.statusText = (if (videoGranted) "已获得读取照片和视频权限"
                          else "已授权照片，但缺少完整视频权限：无法找到双文件实况的伴生视频，" +
-                              "请到系统设置的权限页改为「允许所有照片和视频」"
+                              "请到系统设置的权限页改为「允许所有照片和视频」") + locationHint
             val action = pendingPermissionAction
             pendingPermissionAction = null
             (action ?: { openBuiltInPicker() })()
@@ -165,7 +181,14 @@ class MainActivity : ComponentActivity() {
     // 跳转系统设置后返回时刷新状态
     private val settingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { if (hasReadPermission()) ConvertCenter.statusText = "已获得读取照片和视频权限" }
+    ) {
+        locationDenied = !hasMediaLocationPermission()
+        if (hasReadPermission()) {
+            ConvertCenter.statusText = if (hasMediaLocationPermission())
+                "已获得读取照片和视频权限"
+            else "已获得媒体权限；未授予「位置」权限：转换将丢失照片 GPS 地点信息"
+        }
+    }
 
     // 删除原图：系统回收站工具（createTrashRequest）结果回调——整批仅一次请求
     private val deleteRequestLauncher = registerForActivityResult(
@@ -375,6 +398,8 @@ class MainActivity : ComponentActivity() {
                                 progressDetail = ConvertCenter.progressDetail,
                                 pendingRestoreCount = pendingRestoreCount,
                                 onRestoreOriginals = { restoreTrashedOriginals() },
+                                locationMissing = locationDenied && !ConvertCenter.isConverting,
+                                onGrantLocation = { requestReadPermissions { } },
                                 outputRelPath = outputRelPath,
                                 isMovingOutputs = isMovingOutputs,
                                 onEditOutputPath = {
@@ -441,6 +466,40 @@ class MainActivity : ComponentActivity() {
                         },
                         dismissButton = {
                             OutlinedButton(onClick = { showAllFilesDialog = false }) { Text("暂不") }
+                        }
+                    )
+                }
+
+                // 位置权限门禁弹窗：未授予时开始转换必丢 GPS，需用户显式确认
+                if (showLocationDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showLocationDialog = false },
+                        title = { Text("缺少「位置」权限") },
+                        text = {
+                            Text(
+                                "未授予「位置」权限时，Android 会在本应用读取照片时实时剥离 " +
+                                "GPS 位置信息（系统脱敏），转换后的照片将丢失地点信息，且事后无法找回。\n\n" +
+                                "强烈建议先授予「位置」权限再开始转换。"
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                showLocationDialog = false
+                                if (shouldShowRequestPermissionRationale(
+                                        Manifest.permission.ACCESS_MEDIA_LOCATION)) {
+                                    // 尚可弹系统授权框 → 重新申请，授权成功后自动继续
+                                    requestReadPermissions { proceedConvertAfterPermissionCheck() }
+                                } else {
+                                    // 已「不再询问」→ 引导去系统设置手动授予
+                                    openAppDetailSettings()
+                                }
+                            }) { Text("去授权") }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = {
+                                showLocationDialog = false
+                                proceedConvertAfterPermissionCheck(force = true)
+                            }) { Text("仍要转换") }
                         }
                     )
                 }
@@ -521,6 +580,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从系统设置授予/收回位置权限后返回时刷新警示条状态
+        locationDenied = !hasMediaLocationPermission()
     }
 
     override fun onStart() {
@@ -608,9 +673,23 @@ class MainActivity : ComponentActivity() {
 
     // ---------- 转换 ----------
 
-    /** 开始转换：状态与批次交由前台服务执行（切后台/旋转不中断，通知栏显示进度） */
+    /**
+     * 开始转换：状态与批次交由前台服务执行（切后台/旋转不中断，通知栏显示进度）。
+     * 位置权限门禁：缺失时系统在读取层剥离 GPS，转换必丢地点信息且不可恢复，
+     * 必须让用户知情并显式选择，而不是静默转换。
+     */
     private fun startConvert() {
+        if (!hasMediaLocationPermission()) {
+            showLocationDialog = true
+            return
+        }
         ConvertCenter.start(this)
+    }
+
+    /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才真正开始批次 */
+    private fun proceedConvertAfterPermissionCheck(force: Boolean = false) {
+        if (hasMediaLocationPermission() || force) ConvertCenter.start(this)
+        else showLocationDialog = true
     }
 
     // ---------- 修复文件时间 ----------

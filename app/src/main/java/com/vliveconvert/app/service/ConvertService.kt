@@ -1,5 +1,6 @@
 package com.vliveconvert.app.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentUris
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Environment
@@ -85,6 +87,8 @@ class ConvertService : Service() {
         val done = AtomicInteger(0)
         val ok = AtomicInteger(0)
         val fail = AtomicInteger(0)
+        // 源文件「读到的字节」不含 GPS 的张数（可能是拍摄时无位置，也可能是被系统脱敏）
+        val noGps = AtomicInteger(0)
 
         // 并发度按应用堆大小动态决定：字节级转换的内存峰值约为源文件的 3~5 倍，
         // 大堆设备最多 2 路、小堆设备串行；配合 largeHeap 与 Throwable 兜底防 OOM 闪退
@@ -96,7 +100,7 @@ class ConvertService : Service() {
             // 必须显式 IO：serviceScope 默认 Main 调度器，不指定会把转换跑在主线程（ANR）
             serviceScope.launch(Dispatchers.IO) {
                 sem.withPermit {
-                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal, ok, fail)
+                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal, ok, fail, noGps)
                     val d = done.incrementAndGet()
                     withContext(Dispatchers.Main) {
                         ConvertCenter.progress = d.toFloat() / total
@@ -110,8 +114,23 @@ class ConvertService : Service() {
         jobs.joinAll()
 
         val finalDest = if (moveToCamera) "DCIM/Camera" else outputRelPath
+        // 位置权限缺失时系统在读取层剥离 GPS（脱敏），转换产物必丢地点信息——
+        // 批次结束必须把「丢了几个」明确告诉用户，而不是静默完成
+        val locationGranted = try {
+            checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) { true }
+        val noGpsCount = noGps.get()
+        val gpsNote = when {
+            noGpsCount > 0 && !locationGranted ->
+                "；警告：$noGpsCount 张照片读取时无 GPS（未授予「位置」权限，系统已剥离位置信息），" +
+                    "授予后重新转换即可保留地点"
+            noGpsCount > 0 ->
+                "；$noGpsCount 张照片源文件本身不含 GPS 位置"
+            else -> ""
+        }
         val finalStatus = "转换完成：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-            "（输出目录：$finalDest）"
+            "（输出目录：$finalDest）$gpsNote"
         withContext(Dispatchers.Main) {
             ConvertCenter.isConverting = false
             ConvertCenter.progress = 0f
@@ -140,7 +159,8 @@ class ConvertService : Service() {
         outputRelPath: String,
         deleteOriginal: Boolean,
         ok: AtomicInteger,
-        fail: AtomicInteger
+        fail: AtomicInteger,
+        noGps: AtomicInteger
     ) {
         val app = applicationContext
         // 「移到相机相册 + 转换后删除原图」同时开启：
@@ -174,6 +194,8 @@ class ConvertService : Service() {
             val exportUri = MediaExport.exportAndVerify(
                 app, result, ts, outputRelPath, moveToCamera && !deferToCamera)
             ok.incrementAndGet()
+            // 源图读到的字节无 GPS（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
+            if (!result.sourceHasGps) noGps.incrementAndGet()
             if (deferToCamera) {
                 // 中转条目：删除原图确认完成后由 finalize 以原名移入相机相册
                 ConvertCenter.pendingFinalize.add(
@@ -185,7 +207,7 @@ class ConvertService : Service() {
                 deferToCamera -> "完成：待原图删除后以原名移入相机相册"
                 moveToCamera -> "完成：已导出到相册 DCIM/Camera"
                 else -> "完成：已导出到相册 $outputRelPath"
-            }
+            } + (if (!result.sourceHasGps) "（源文件无 GPS 位置数据）" else "")
             withContext(Dispatchers.Main) {
                 ConvertCenter.replaceItem(ci, ci.copy(status = statusText, done = true))
             }

@@ -101,7 +101,9 @@ internal object VivoSingle {
             "（图像 ${primary.size}B + 视频 ${video.size}B（含 lpex）" +
             (if (streamData.isNotEmpty()) " + streamdata ${streamData.size}B" else "") +
             " + footer ${footer.size}B）", "vivo")
-        return SingleWriteResult(outPath, segments)
+        return SingleWriteResult(
+            outPath, segments,
+            sourceHasGps = asset.extras["source_has_gps"] == true)
     }
 
     /**

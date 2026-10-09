@@ -48,7 +48,8 @@ fun PermissionScreen(
             "本应用需要读取您设备上的照片和视频：\n\n" +
                 "• 照片权限：扫描设备相册，识别其中的双文件实况照片\n" +
                 "• 视频权限：查找双文件实况附带的伴生视频\n" +
-                "• 位置权限：保留照片中的 GPS 位置元数据\n\n" +
+                "• 位置权限：强烈建议授予——缺失时系统会在读取照片时剥离 GPS 位置信息，" +
+                "转换后的照片将丢失地点信息且无法找回\n\n" +
                 "转换全程字节级无损，不重编码，不会上传任何数据。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

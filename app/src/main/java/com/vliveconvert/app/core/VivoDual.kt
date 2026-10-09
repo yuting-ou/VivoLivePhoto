@@ -111,6 +111,11 @@ internal object VivoDual {
         footer.json?.let { asset.extras["vivo_jpg_footer"] = it }
         mp4Footer?.json?.let { asset.extras["vivo_mp4_footer"] = it }
 
+        // 源 JPEG「读到的字节」是否含 GPS EXIF：
+        // 未授予 ACCESS_MEDIA_LOCATION 时，系统（MediaStore/FUSE）在读取层已把 GPS 剥离，
+        // 此处为 false——供上层向用户提示「转换产物将丢失地点信息」。
+        asset.extras["source_has_gps"] = JpegUtil.hasGpsExif(primary)
+
         // 由 imageTime（帧序号）反推封面时间戳
         val imageTimeVal = asset.imageTime
         val fps = asset.videoInfo["fps"] as? Double

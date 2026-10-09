@@ -16,8 +16,13 @@ internal class SegmentDigest(
     val md5Hex: String
 )
 
-/** 单文件写出结果：输出路径 + 分段摘要 */
-internal class SingleWriteResult(val path: String, val segments: List<SegmentDigest>)
+/** 单文件写出结果：输出路径 + 分段摘要 + 源图 GPS 状态（供上层提示地点信息丢失风险） */
+internal class SingleWriteResult(
+    val path: String,
+    val segments: List<SegmentDigest>,
+    /** 源 JPEG「读到的字节」是否含 GPS EXIF；false = 无位置，或已被系统脱敏（见 JpegUtil.hasGpsExif） */
+    val sourceHasGps: Boolean = false
+)
 
 /**
  * 输出自检器：对导出产物做流式 MD5 逐段校验（O(1) 内存）。
