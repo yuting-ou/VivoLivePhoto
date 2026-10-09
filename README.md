@@ -2,12 +2,12 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.4），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.5），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.4.apk`](./VivoLivePhoto-v1.7.4.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.5.apk`](./VivoLivePhoto-v1.7.5.apk) 下载，内容一致。
 
 ## 背景
 
@@ -103,6 +103,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.5
+
+第二轮到 UI 打磨（同样逐条看图确认）。
+
+- **三条提示合并为一张「提示卡片」**：原先三条提示各占一张不同底色的卡片，同时出现时
+  仍是三种色块并排。现统一为**中性底色的单一卡片**、行间用分隔线分组，
+  语义色只落在**圆点与动作文字**上——从「三条彩色横条」变成「一组提示」，安静且更像成品
+- **修复时间页由 3 列改为 2 列**：每格要放「文件名 + 现 + 目标」三行小字，3 列时格宽仅约
+  136dp、字号被迫压到 9sp 且文件名会被截断；2 列下格宽约 204dp，文件名完整显示、
+  字号提到 10sp，可读性明显更好
+- 验证：**68 组 JVM 单测全绿**（含 7 张界面渲染截图），Lint 无 error，
+  release 构建与签名校验通过
 
 ### v1.7.4
 

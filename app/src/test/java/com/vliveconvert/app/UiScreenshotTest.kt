@@ -133,7 +133,8 @@ class UiScreenshotTest {
         val items = listOf(
             mk(11, "IMG_20260831_134432.jpg", 1_754_000_000_000L),
             mk(12, "IMG_20260831_140512.jpg", 1_754_100_000_000L),
-            mk(13, "IMG_20260831_150200.jpg", 1_754_200_000_000L)
+            mk(13, "IMG_20260831_150200.jpg", 1_754_200_000_000L),
+            mk(14, "IMG_20260831_161500.jpg", 1_754_300_000_000L)
         )
         val scanner = SingleLiveScanner(MediaRepo(compose.activity.contentResolver))
         val st = scanner.stateOf(bucket)

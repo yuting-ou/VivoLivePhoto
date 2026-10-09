@@ -261,7 +261,9 @@ fun FixTimeScreen(
                 }
                 else -> LazyVerticalGrid(
                     state = rememberLazyGridState(),
-                    columns = GridCells.Fixed(3),
+                    // 2 列（而非 3 列）：每格要放「文件名 + 现 + 目标」三行小字，
+                    // 3 列时格宽仅约 136dp、文字被迫压到 9sp，偏小；2 列下约 204dp、可读性明显更好
+                    columns = GridCells.Fixed(2),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 2.dp),
@@ -305,7 +307,7 @@ fun FixTimeScreen(
                         }
                     }
                     if (scanning) {
-                        item(span = { GridItemSpan(3) }) {
+                        item(span = { GridItemSpan(2) }) {
                             Box(
                                 Modifier.fillMaxWidth().padding(vertical = 20.dp),
                                 contentAlignment = Alignment.Center
@@ -457,21 +459,21 @@ private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
             Text(
                 item.name,
                 color = Color.White,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "现 $currentText",
                 color = Color.White.copy(alpha = 0.72f),
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "→ $targetText",
                 color = if (targetText == "无时间") Color(0xFFFFCDD2) else Color.White,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 maxLines = 1
             )
         }

@@ -129,79 +129,59 @@ fun MainScreen(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        // ── 位置权限缺失警示条 ──
-        if (locationMissing) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    // 圆角内缩卡片（而非整幅通栏色带）：多条同时出现时才不刺眼、更像一组提示
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "未授予「位置」权限，转换会丢失 GPS 地点信息",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.weight(1f)
-                )
-                InlineTextButton(
-                    text = "去授权",
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    onClick = onGrantLocation
-                )
-            }
+        // ── 提示卡片：把多类提示收进同一张卡片，用分隔线分组 ──
+        // 语义色只落在「圆点 + 动作文字」上、底色统一为中性容器色：
+        // 这样三条同现时是「一组提示」，而不是三条不同颜色的色带横贯屏幕
+        val notices = buildList {
+            if (locationMissing) add(
+                Notice("未授予「位置」权限，转换会丢失 GPS 地点信息",
+                    "去授权", MaterialTheme.colorScheme.error, onGrantLocation))
+            if (reconvertCount > 0 && !isConverting) add(
+                Notice("$reconvertCount 张照片没有位置信息，授权后可一键找回",
+                    "重新转换", MaterialTheme.colorScheme.tertiary, onReconvertLostGps))
+            if (pendingRestoreCount > 0) add(
+                Notice("已删除的原图可恢复（$pendingRestoreCount 项，30 天内）",
+                    "恢复", MaterialTheme.colorScheme.primary, onRestoreOriginals))
         }
-
-        // ── 重新转换找回位置入口 ──
-        if (reconvertCount > 0 && !isConverting) {
-            Row(
+        if (notices.isNotEmpty()) {
+            Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.tertiaryContainer)
-                    .padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
             ) {
-                Text(
-                    "$reconvertCount 张照片没有位置信息，授权后可一键找回",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.weight(1f)
-                )
-                InlineTextButton(
-                    text = "重新转换",
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    onClick = onReconvertLostGps
-                )
-            }
-        }
-
-        // ── 恢复原图入口（回收站路径删除后显示，30 天内有效） ──
-        if (pendingRestoreCount > 0) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "已删除的原图可恢复（$pendingRestoreCount 项，30 天内）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.weight(1f)
-                )
-                InlineTextButton(
-                    text = "恢复",
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    onClick = onRestoreOriginals
-                )
+                notices.forEachIndexed { index, notice ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(start = 34.dp)
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(notice.accent)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            notice.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f).padding(vertical = 10.dp)
+                        )
+                        InlineTextButton(
+                            text = notice.action,
+                            contentColor = notice.accent,
+                            onClick = notice.onClick
+                        )
+                    }
+                }
             }
         }
 
@@ -560,3 +540,15 @@ private fun IndeterminateBar() {
 /** 转换中的项目不显示移除按钮 */
 private fun isBusyStatus(status: String): Boolean =
     status.startsWith("转换中") || status.startsWith("重新转换中")
+
+/**
+ * 主界面顶部的一条提示。
+ * 卡片底色统一为中性容器色，语义只落在 [accent]（圆点与动作文字）上——
+ * 多条同时出现时才是一组提示，而不是一片彩色色带。
+ */
+private class Notice(
+    val text: String,
+    val action: String,
+    val accent: Color,
+    val onClick: () -> Unit
+)
