@@ -160,4 +160,48 @@ class DuplicateOutputTest {
         assertEquals("无既往产物时应新建 1 个", 1, countIn(rel))
         assertTrue("文件名应为原名", countIn(rel, "IMG\\_FRESH.jpg") == 1)
     }
+
+    /**
+     * 嵌套括号名属于**另一个源**的产物，不得被误认作本源的既往产物。
+     *
+     * `IMG_N(1)(1).jpg` 的基名是 `IMG_N(1)`（另一张照片被 MediaStore 追加过序号），
+     * 它同样是单文件实况；若查询只用宽泛的 LIKE 匹配，stem=`IMG_N` 时会命中它并覆盖，
+     * 毁掉另一个源照片的转换结果。故候选名需精确校验为「原名」或「基名(数字).jpg」。
+     */
+    @Test
+    fun nestedParenNameBelongingToAnotherSourceIsNotOverwritten() {
+        val rel = "Pictures/TestNested"
+        val other = contentWithMotionPhoto(byteArrayOf(0x55))
+        val otherUri = putMedia(rel, "IMG_N(1)(1).jpg", other)
+
+        val result = makeResult(contentWithMotionPhoto(byteArrayOf(0x66)), "IMG_N")
+        val returned = MediaExport.exportAndVerify(
+            app, result, timestamp = 1_700_000_000_000L,
+            relPath = rel, useCameraDir = false
+        )
+
+        assertNotEquals("不得覆盖属于其它源的产物", otherUri, returned)
+        assertTrue("另一源的产物内容必须原样保留",
+            readBack(otherUri).contentEquals(other))
+        assertEquals("应新建本源的产物", 2, countIn(rel))
+    }
+
+    /** 序号形式的既往产物（IMG_N(1).jpg）应被原地覆盖 */
+    @Test
+    fun sequenceSuffixedPreviousOutputIsOverwritten() {
+        val rel = "Pictures/TestSeq"
+        val first = contentWithMotionPhoto(byteArrayOf(0x77.toByte()))
+        val firstUri = putMedia(rel, "IMG_M(1).jpg", first)
+
+        val second = contentWithMotionPhoto(byteArrayOf(0x88.toByte()))
+        val result = makeResult(second, "IMG_M")
+        val returned = MediaExport.exportAndVerify(
+            app, result, timestamp = 1_700_000_000_000L,
+            relPath = rel, useCameraDir = false
+        )
+
+        assertEquals("应原地覆盖，不新增记录", 1, countIn(rel))
+        assertEquals("应返回同一 URI", firstUri, returned)
+        assertTrue("内容应已替换", readBack(returned).contentEquals(second))
+    }
 }

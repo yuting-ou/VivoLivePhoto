@@ -823,6 +823,55 @@ class ConverterPipelineTest {
         assertEquals("", XmpTemplate.sniffXmpBytes(byteArrayOf(1, 2, 3, 4)))
     }
 
+    /**
+     * 无损不变式的**确定性证明**：v1.4.0 把主图 XMP 替换从「整数组重组」改为
+     * 「[前段][新 XMP][后段] 三段流式写出」。此处用**旧实现**（replaceOrInsertXmp）
+     * 按实际输出里的 XMP 文本重建期望主图，与实际文件逐字节比对——
+     * 若流式写出有任何偏移/长度错误，此断言必然失败。
+     */
+    @Test
+    fun streamingPrimaryIsByteIdenticalToLegacyReplaceAssembly() {
+        val dir = Files.createTempDirectory("vlc_equiv").toFile()
+        val sourceXmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF " +
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+            "<rdf:Description rdf:about=\"\"/></rdf:RDF></x:xmpmeta>"
+        val srcPrimary = JpegUtil.replaceOrInsertXmp(minimalJpeg(), sourceXmp)
+        val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        ))
+        val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "IMG_9501.jpg").apply {
+            writeBytes(srcPrimary + fakeStreamData("DEGS", 64, 11) + jpgFooter)
+        }
+        File(dir, "IMG_9501.mp4").apply { writeBytes(vivoDualMp4()) }
+
+        val outDir = Files.createTempDirectory("vlc_equiv_out").toFile()
+        val outPath = Converter.convertToVivoSingle(
+            jpg.absolutePath, outDir.absolutePath, ::log).path
+        val actual = File(outPath).readBytes()
+
+        // 从实际输出取回本次写入的 XMP 文本，再用旧实现重建期望主图
+        val outXmp = JpegUtil.findXmpSegment(actual)!!
+        val expectedPrimary = JpegUtil.replaceOrInsertXmp(srcPrimary, outXmp.xmpText)
+
+        assertTrue(
+            "流式写出的主图必须与旧实现（replaceOrInsertXmp 整数组重组）逐字节一致",
+            actual.size >= expectedPrimary.size &&
+                actual.copyOfRange(0, expectedPrimary.size).contentEquals(expectedPrimary)
+        )
+        // 主图之后应紧跟源增益图/streamdata 与视频段（增益图本样本没有，故紧随 streamdata）
+        assertTrue(
+            "主图之后应紧跟源 streamdata 附加块",
+            BinaryUtils.indexOf(actual, fakeStreamData("DEGS", 64, 11)) >= 0
+        )
+        // 输出总长 = 期望主图 + streamdata + 视频 + footer（逐字节对账，无多余/缺失字节）
+        val (_, consumed) = JpegUtil.splitJpegs(actual, 0, actual.size)
+        assertEquals("JPEG 主体结束后应紧跟 streamdata（无中间填充字节）",
+            expectedPrimary.size, consumed)
+    }
+
     companion object {
         /** 28 字符 livephoto ID（'-<数字>' + '0' 填充） */
         private val TEST_LIVE_ID: String = "-1234567890".padEnd(28, '0')

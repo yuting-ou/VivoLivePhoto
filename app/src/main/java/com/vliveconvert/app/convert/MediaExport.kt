@@ -51,7 +51,7 @@ internal object MediaExport {
 
         // 覆盖既有产物（显式指定优先；否则自动识别同源既往产物）
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
-            ?: findPreviousOutput(resolver, targetRelPath, stem)
+            ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath)
         if (previous != null) {
             overwriteExisting(resolver, previous, src, result, timestamp)?.let { return it }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
@@ -134,6 +134,18 @@ internal object MediaExport {
             fixTimestamps(resolver, old, timestamp)
             // 物理 mtime 与媒体库列同为拍摄时间（漏设会让时间漂移成写入时刻）
             fixPhysicalMtime(resolver, old, timestamp)
+            // SIZE 必须同步：原地覆盖没有走 IS_PENDING 流程，媒体库里的旧 SIZE 会与
+            // 实际文件不符——媒体库记录应准确描述刚写入的文件，否则部分相册/读取方
+            // 可能按旧长度读取
+            try {
+                resolver.update(
+                    old,
+                    ContentValues().apply {
+                        put(MediaStore.MediaColumns.SIZE, src.length())
+                    },
+                    null, null
+                )
+            } catch (_: Exception) {}
             val verified = try {
                 resolver.openInputStream(old)?.use {
                     OutputVerifier.verify(it, result.segments)
@@ -156,7 +168,7 @@ internal object MediaExport {
     private const val XMP_SNIFF_LIMIT = 512 * 1024
 
     /**
-     * 目标目录中「同一源照片的既往转换产物」：文件基名与源相同（含 MediaStore 自动追加的
+     * 目标目录中「同一源照片的既往转换产物」：文件名基名与源相同（原名或 MediaStore 追加的
      * `(n)` 形式）且本身是**单文件实况**。
      *
      * 为什么这样判：源双文件的 XMP 恰恰不含 MotionPhoto 标记（这正是本工具识别双文件的条件），
@@ -168,60 +180,90 @@ internal object MediaExport {
     private fun findPreviousOutput(
         resolver: android.content.ContentResolver,
         targetRelPath: String,
-        stem: String
+        stem: String,
+        sourcePath: String
     ): Uri? {
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val ids = mutableListOf<Long>()
         // LIKE 模式里的 `_` / `%` 是通配符，而 vivo 文件名形如 IMG_20260831_134354 本身就含 `_`，
-        // 不转义会匹配到无关文件（可能把别的照片误判为既往产物）。用 ESCAPE 精确匹配。
+        // 不转义会匹配到无关文件
         val escapedStem = stem
             .replace("\\", "\\\\")
             .replace("%", "\\%")
             .replace("_", "\\_")
+        // LIKE 无法表达「括号内必须是数字」，故查询先用宽模式缩小范围、再在代码里精确校验。
+        // 必要性：stem=`IMG_x` 时宽模式会匹配到 `IMG_x(1)(1).jpg`——那是另一个源
+        // （`IMG_x(1).jpg`）的产物，覆盖它会毁掉别的照片的转换结果。
+        val seqPattern = Regex(
+            "^" + Regex.escape(stem) + "\\((\\d+)\\)\\.jpg$", RegexOption.IGNORE_CASE
+        )
+        val exactName = "$stem.jpg"
+        val candidates = mutableListOf<Pair<Long, String>>() // id to _data
         try {
             resolver.query(
                 collection,
-                arrayOf(MediaStore.MediaColumns._ID),
+                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA),
                 // RELATIVE_PATH 按带/不带尾斜杠两种形态匹配（与 MainActivity.queryImagesIn 一致）：
                 // 真实设备通常规范化带尾斜杠，个别实现不带
                 "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?) AND (" +
                     "${MediaStore.MediaColumns.DISPLAY_NAME}=? OR " +
                     "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? ESCAPE '\\')",
-                arrayOf("$targetRelPath/", targetRelPath, "$stem.jpg", "$escapedStem(%"),
+                arrayOf("$targetRelPath/", targetRelPath, exactName, "$escapedStem(%"),
                 null
             )?.use { c ->
-                while (c.moveToNext()) ids.add(c.getLong(0))
+                while (c.moveToNext()) {
+                    candidates.add(c.getLong(0) to (c.getString(1) ?: ""))
+                }
             }
         } catch (_: Exception) {
             return null
         }
-        for (id in ids) {
-            val uri = ContentUris.withAppendedId(collection, id)
-            if (isSingleFileLivePhoto(resolver, uri)) return uri
+        for ((id, data) in candidates) {
+            // 源文件本身永远不是「既往产物」——同名时它占用着原名。
+            // 用路径直接排除，省掉对源文件（通常最大）的一次内容读取
+            if (data.isNotEmpty() && data == sourcePath) continue
+            if (!isSingleFileLivePhoto(resolver, ContentUris.withAppendedId(collection, id), exactName, seqPattern)) {
+                continue
+            }
+            return ContentUris.withAppendedId(collection, id)
         }
         return null
     }
 
-    /** 既有文件是否为单文件实况（XMP 含 MotionPhoto / MicroVideo 标记） */
+    /**
+     * 既有文件是否为「本工具产出的、属于同一源」的单文件实况：
+     * 文件名必须是原名或 `基名(数字).jpg`（精确校验，排除属于其它源的嵌套括号名），
+     * 且 XMP 含 MotionPhoto / MicroVideo 标记。
+     */
     private fun isSingleFileLivePhoto(
         resolver: android.content.ContentResolver,
-        uri: Uri
-    ): Boolean = try {
-        resolver.openInputStream(uri)?.use { ins ->
-            val buf = ByteArray(XMP_SNIFF_LIMIT)
-            var n = 0
-            while (n < buf.size) {
-                val r = ins.read(buf, n, buf.size - n)
-                if (r < 0) break
-                n += r
-            }
-            if (n <= 0) false
-            else XmpTemplate.parseMotionXmp(
-                XmpTemplate.sniffXmpBytes(if (n < buf.size) buf.copyOf(n) else buf)
-            ).isMotion
-        } ?: false
-    } catch (_: Exception) {
-        false
+        uri: Uri,
+        exactName: String,
+        seqPattern: Regex
+    ): Boolean {
+        // 先取文件名做精确校验（避免为不匹配的候选白读内容）
+        val name = try {
+            resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        } catch (_: Exception) { null } ?: return false
+        if (!name.equals(exactName, ignoreCase = true) && !seqPattern.matches(name)) return false
+
+        return try {
+            resolver.openInputStream(uri)?.use { ins ->
+                val buf = ByteArray(XMP_SNIFF_LIMIT)
+                var n = 0
+                while (n < buf.size) {
+                    val r = ins.read(buf, n, buf.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                if (n <= 0) false
+                else XmpTemplate.parseMotionXmp(
+                    XmpTemplate.sniffXmpBytes(if (n < buf.size) buf.copyOf(n) else buf)
+                ).isMotion
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** 把入库文件对应的物理文件 mtime 固化为拍摄时间（系统「修改时间」取自 mtime） */

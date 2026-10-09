@@ -68,6 +68,14 @@ class ConvertService : Service() {
 
     override fun onDestroy() {
         serviceScope.cancel()
+        // 兜底：批次未正常收尾时（例如服务被系统回收、协程在收尾的 withContext 处被取消），
+        // ConvertCenter.isConverting 可能仍停在 true —— 那样返回应用会一直显示「转换中」且
+        // 无法再发起批次。仅在「确实还在跑批次」时复位，避免误伤正常结束/新建批次。
+        if (running && ConvertCenter.isConverting) {
+            ConvertCenter.isConverting = false
+            ConvertCenter.progress = 0f
+            ConvertCenter.progressDetail = ""
+        }
         super.onDestroy()
     }
 
