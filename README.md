@@ -1,14 +1,19 @@
 # 影中影（Vivo Live Photo yuting改进版）
 
-把一段会动的时光，收进一张照片——vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
+**vivo 实况转换工具**：把 vivo 相机实况模式生成的两个文件（.jpg + .mp4）字节级无损合并成一个
+单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
-> 一张照片（影）里，封着一段影像（影）。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.7），
+> 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.8），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.7.apk`](./VivoLivePhoto-v1.7.7.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.8.apk`](./VivoLivePhoto-v1.7.8.apk) 下载，内容一致。
+>
+> **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
+> **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
+> 是因为旧版本同包名但签名不同；安装本版无需卸载任何已装应用。
 
 ## 截图
 
@@ -116,6 +121,25 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.8
+
+介绍直白化 + 全新图标 + 根治「安装包冲突 / 签名异常」。
+
+- **介绍改直白**：tagline 更新为「**vivo 实况转换 · 双文件无损合一**」——应用名仍是
+  「影中影」，但一句话说明工具用途，新用户一眼看懂；诗意句保留在 README 开头
+- **全新图标**：深墨蓝底上两张叠起的照片、前面那张中央一枚播放三角——
+  「双文件合一 + 照片里封着会动的影像」，与旧图标（光圈 + LivePhoto 字样）彻底告别；
+  随包提供 Android 13+ 主题图标（monochrome）单色层
+- **更换应用包名**：`com.vliveconvert.app` → `com.yutingou.yingzhongying`。
+  此前与原版 / 各改进版同包名，签名却各不相同，覆盖安装必报
+  「软件包与现有软件包存在冲突 / 开发者签名异常」；换包名后**互不冲突、可并存**，
+  无需卸载旧版即可安装
+- **正式签名入库**：release 不再挂 debug 签名（debug keystore 不入库，换环境构建即换钥匙，
+  正是签名异常的另一半根因）；专用 keystore 随仓库提交，此后任何环境构建的 APK 签名恒定，
+  可无缝覆盖升级
+- 验证：**69 组 JVM 单测全绿**（含 8 张界面/图标渲染），Lint 无 error，
+  release 构建与签名校验通过
 
 ### v1.7.7
 

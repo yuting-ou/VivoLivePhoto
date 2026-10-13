@@ -4,6 +4,7 @@
     <!-- 应用内统一品牌名（权限页 / 顶栏 / 设置页版本栏） -->
     <string name="app_display_name">影中影</string>
     <!-- 一句话定位（顶栏副标题 / 权限页副标题）：
-         一张照片（影）里封着一段影像（影），名字即产品结构——MP4 嵌在 JPEG 容器内 -->
-    <string name="app_tagline">把一段会动的时光，收进一张照片</string>
+         直白说明工具用途（vivo 实况转换），让新用户一眼看懂；
+         诗意版「把一段会动的时光，收进一张照片」保留在 README 开头 -->
+    <string name="app_tagline">vivo 实况转换 · 双文件无损合一</string>
 </resources>

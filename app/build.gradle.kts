@@ -10,16 +10,32 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.vliveconvert.app"
+        // 包名与 namespace（com.vliveconvert.app）解耦：改用独立包名后，
+        // 与原版 VLiveConvert / 各改进版（同包名不同签名）不再冲突——
+        // 修复「软件包与现有软件包存在冲突 / 签名异常」无法覆盖安装的问题
+        applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 29
-        versionName = "1.7.7"
+        versionCode = 30
+        versionName = "1.7.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    // 正式签名：keystore 随仓库提交（个人开源应用，密码即仓库明文）。
+    // 此前 release 挂 debug 签名，而 debug keystore 不入库——换机器/沙箱重建后
+    // 自动生成新钥匙，同一包名的先后产物签名不一致，用户无法覆盖安装。
+    // 签名随仓库恒定后，任何环境构建的 APK 都可无缝升级
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "yingzhongying2026"
+            keyAlias = "yingzhongying"
+            keyPassword = "yingzhongying2026"
         }
     }
 
@@ -33,9 +49,7 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt")
             )
-            // 本地测试：release 挂 debug 签名，assembleRelease 产物可直接安装；
-            // 正式发布时替换为正式签名配置
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

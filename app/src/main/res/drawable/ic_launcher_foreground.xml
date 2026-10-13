@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「影中影」图标前景（108dp 画布，内容收在中央 66dp 安全圆内）：
+     两张叠起的照片 = 双文件（jpg+mp4）合一；前面那张中央一枚播放三角 =
+     照片里封着会动的影像。暖白照片压深墨蓝底，像暗房里的一帧 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 后照片：半透明暖白（40%，不与前景抢注意力），微旋 -8°，露出「另一张」的层次 -->
+    <group
+        android:rotation="-8"
+        android:pivotX="58"
+        android:pivotY="49">
+        <path
+            android:fillColor="#66F5F1E8"
+            android:pathData="M45,34 H71 A5,5 0 0 1 76,39 V59 A5,5 0 0 1 71,64 H45 A5,5 0 0 1 40,59 V39 A5,5 0 0 1 45,34 Z" />
+    </group>
+
+    <!-- 前照片：暖白实底 -->
+    <path
+        android:fillColor="#F5F1E8"
+        android:pathData="M33,43 H71 A6,6 0 0 1 77,49 V69 A6,6 0 0 1 71,75 H33 A6,6 0 0 1 27,69 V49 A6,6 0 0 1 33,43 Z" />
+
+    <!-- 播放三角（品牌蓝，与前照片中心对齐，约占卡高 1/3）：照片在播放，即「实况」；
+         小尺寸（桌面 60pt）下仍需可辨，故不小于卡高 30% -->
+    <path
+        android:fillColor="#4A6CF7"
+        android:pathData="M48.35,51.19 L58.65,57.81 Q60.5,59 58.65,60.19 L48.35,66.81 Q46.5,68 46.5,65.8 L46.5,52.2 Q46.5,50 48.35,51.19 Z" />
+</vector>

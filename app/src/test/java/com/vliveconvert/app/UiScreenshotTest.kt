@@ -200,10 +200,38 @@ class UiScreenshotTest {
             PermissionScreen(
                 onRequest = {},
                 statusText = "",
-                appName = "Vivo Live Photo"
+                appName = "影中影"
             )
         }
         shot("permission")
+    }
+
+    /**
+     * 桌面图标（adaptive icon：底色 + 前景两层）。
+     * 直接把 mipmap 画到位图上，验证「两张叠照 + 播放三角」构图；
+     * 再用圆形遮罩出一版圆预览——应用圆形启动器的桌面（多数国产 ROM）即此观感。
+     */
+    @Test
+    fun shotLauncherIcon() {
+        val size = 432
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(0xFFEEEEEE.toInt())
+        val d = compose.activity.getDrawable(com.vliveconvert.app.R.mipmap.ic_launcher)!!
+        d.setBounds(0, 0, size, size)
+        d.draw(canvas)
+        // 圆形遮罩预览：位图内切圆以外的区域清透
+        val round = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val rc = Canvas(round)
+        val p = android.graphics.Paint().apply { isAntiAlias = true }
+        rc.drawBitmap(bmp, 0f, 0f, p)
+        p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        p.style = android.graphics.Paint.Style.STROKE
+        p.strokeWidth = size * 2f
+        rc.drawCircle(size / 2f, size / 2f, size / 2f, p)
+        val dir = File("build/ui-shots").apply { mkdirs() }
+        File(dir, "icon.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, "icon_round.png").outputStream().use { round.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     /** 空状态 */
