@@ -165,7 +165,7 @@ class UiScreenshotTest {
         render {
             SettingsScreen(
                 appName = "Vivo Live Photo",
-                versionName = "1.7.2",
+                versionName = "1.7.6",
                 outputRelPath = "Pictures/VLiveConvert",
                 moveToCamera = true,
                 deleteOriginal = true,
@@ -188,7 +188,7 @@ class UiScreenshotTest {
     @Test
     fun shotAbout() {
         render {
-            AboutScreen(appName = "Vivo Live Photo", versionName = "1.7.2", onBack = {})
+            AboutScreen(appName = "Vivo Live Photo", versionName = "1.7.6", onBack = {})
         }
         shot("about")
     }

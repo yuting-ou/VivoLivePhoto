@@ -1,5 +1,15 @@
 package com.vliveconvert.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -23,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -41,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -100,7 +113,9 @@ fun MainScreen(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .statusBarsPadding()
-                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                // end 4dp：齿轮在 48dp 触摸区内居中，自身留白 (48-22)/2=13dp，
+                // 4+13=17dp ≈ 标题左缘 16dp——与设置/修复页返回键（horizontal 4dp）同一套对齐
+                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
@@ -147,7 +162,8 @@ fun MainScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    // 16dp 与列表 / 摘要 / 底栏同一基线（原先 12dp，与全页不对齐）
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
             ) {
@@ -186,30 +202,40 @@ fun MainScreen(
         }
 
         // ── 状态摘要（长文案折叠，点击看详情） ──
-        if (statusText.isNotEmpty()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
-                    .minimumInteractiveComponentSize()
-                    .clickableNoRipple(onShowStatusDetail)
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    statusText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "详情 ›",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+        // 文案更新（如一次转换结束的「转换完成：…」）时柔和淡入上移，而非硬切
+        AnimatedContent(
+            targetState = statusText,
+            transitionSpec = {
+                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 3 })
+                    .togetherWith(fadeOut(tween(150)))
+            },
+            label = "statusSummary"
+        ) { text ->
+            if (text.isNotEmpty()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
+                        .minimumInteractiveComponentSize()
+                        .clickableNoRipple(onShowStatusDetail)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "详情 ›",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
@@ -218,7 +244,9 @@ fun MainScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+                    // end 6dp：「清空」在 48dp 触摸区内居中，自身留白约 10dp，6+10=16dp
+                    // 落到全页右基线（与左缘 16dp 对称）
+                    .padding(start = 16.dp, end = 6.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -268,87 +296,101 @@ fun MainScreen(
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                if (isConverting) {
-                    // 整体进度
-                    Row(
-                        Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            progressDetail,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            "${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    OutlinedButton(
-                        onClick = onCancelConvert,
-                        modifier = Modifier.fillMaxWidth().height(46.dp)
-                    ) { Text("取消转换") }
-                } else {
-                    // 设置摘要：一眼看清关键选项，点击进设置
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
-                            .minimumInteractiveComponentSize()
-                            .clickableNoRipple(onOpenSettings)
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "输出 ${if (moveToCamera) "DCIM/Camera" else outputRelPath}" +
-                                " · 删原图 ${if (deleteOriginal) "开" else "关"}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            "设置 ›",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = onAddMore,
-                            modifier = Modifier.weight(1f).height(48.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                // 「转换中 ↔ 完成」切换时交叉淡入淡出：进度条/取消键退场、主按钮进场，
+                // 完成的反馈落在动画上而不是瞬间跳变
+                Crossfade(targetState = isConverting, label = "bottomBar") { converting ->
+                    if (converting) {
+                        // 整体进度
+                        Column {
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    progressDetail,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "${(progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
                             )
-                            Spacer(Modifier.width(4.dp))
-                            Text("添加")
+                            Spacer(Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = onCancelConvert,
+                                modifier = Modifier.fillMaxWidth().height(46.dp)
+                            ) { Text("取消转换") }
                         }
-                        Button(
-                            onClick = onStartConvert,
-                            enabled = pendingCount > 0,
-                            modifier = Modifier.weight(1.4f).height(48.dp)
-                        ) {
-                            Text(
-                                if (pendingCount > 0) "开始转换（$pendingCount）"
-                                else "开始转换"
-                            )
+                    } else {
+                        Column {
+                            // 设置摘要：一眼看清关键选项，点击进设置
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
+                                    .minimumInteractiveComponentSize()
+                                    .clickableNoRipple(onOpenSettings),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "输出 ${if (moveToCamera) "DCIM/Camera" else outputRelPath}" +
+                                        " · 删原图 ${if (deleteOriginal) "开" else "关"}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "设置 ›",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // 添加收窄为方形图标按钮（空态中央已有大 ＋，列表头也有「清空」，
+                                // 图标足够达意），横向空间让给主操作——主次更分明
+                                OutlinedButton(
+                                    onClick = onAddMore,
+                                    modifier = Modifier.size(48.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = "添加",
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Button(
+                                    onClick = onStartConvert,
+                                    enabled = pendingCount > 0,
+                                    modifier = Modifier.weight(1f).height(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        if (pendingCount > 0) "开始转换（$pendingCount）"
+                                        else "开始转换"
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -455,11 +497,25 @@ private fun ConvertItemRow(
                     ci.done -> Triple("✓", status.success, status.onSuccess)
                     else -> null
                 }
+                // 角标弹入：状态翻到完成/失败/丢位置的一瞬间从 40% 缩放弹出
+                //（spring 回弹；初始组合即完成态时无动画，不影响静态截图）
+                val badgeScale by animateFloatAsState(
+                    targetValue = if (badge == null) 0.4f else 1f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "badgeScale"
+                )
                 if (badge != null) {
                     Box(
                         Modifier
                             .align(Alignment.BottomEnd)
                             .size(18.dp)
+                            .graphicsLayer {
+                                scaleX = badgeScale
+                                scaleY = badgeScale
+                            }
                             .clip(CircleShape)
                             .background(badge.second),
                         contentAlignment = Alignment.Center
@@ -512,13 +568,17 @@ private fun ConvertItemRow(
                 Spacer(Modifier.width(2.dp))
             }
             if (!busy) {
-                // 不限定 size：IconButton 默认 48dp，满足最小触摸目标（原先压到 34dp 过小）
+                // 不限定 size：IconButton 默认 48dp，满足最小触摸目标（原先压到 34dp 过小）。
+                // 图标在 48dp 触摸区内居中会显得「浮」（视觉右缩进 ≈25dp，卡片内容左缩进仅 10dp），
+                // 按视觉重心右移 10dp 贴齐卡片右缘内容线；触摸区不变
                 IconButton(onClick = onRemove) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "移除",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(17.dp)
+                        modifier = Modifier
+                            .size(17.dp)
+                            .offset(x = 10.dp)
                     )
                 }
             }

@@ -2,12 +2,24 @@
 
 vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.5），
+> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.6），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.5.apk`](./VivoLivePhoto-v1.7.5.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.6.apk`](./VivoLivePhoto-v1.7.6.apk) 下载，内容一致。
+
+## 截图
+
+| 主界面 | 转换中 | 空状态 |
+|---|---|---|
+| ![主界面](docs/screenshots/main_items.png) | ![转换中](docs/screenshots/main_converting.png) | ![空状态](docs/screenshots/main_empty.png) |
+
+| 设置 | 修复时间 |
+|---|---|
+| ![设置](docs/screenshots/settings.png) | ![修复时间](docs/screenshots/fixtime.png) |
+
+（截图由 JVM 单测真实渲染产出，与安装包同源；转换完成有角标弹入与底栏交叉过渡动效）
 
 ## 背景
 
@@ -103,6 +115,21 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.6
+
+视觉对齐 + 动效 + 截图进 README（逐条看图确认）。
+
+- **视觉对齐**：全页左右基线统一到 16dp——提示卡片 12→16dp、顶栏齿轮视觉右缘 21→17dp、
+  底栏设置摘要行 20→16dp（与列表文字同列）、列表头「清空」18→16dp；
+  列表行尾「移除 ×」在触摸区内按视觉重心右移，不再「浮」在行中间
+- **转换完成动效**：条目 ✓/!/✕ 角标 spring 弹入；状态摘要文案淡入上移（硬切→柔和过渡）；
+  底栏「转换中 ↔ 完成」交叉淡入淡出（进度条退场、主按钮进场）
+- **底栏按钮重构**：「添加」收窄为方形图标按钮（空态中央已有大 ＋，图标足够达意），
+  主按钮占满余宽并加播放图标——主次更分明；设置摘要行与列表文字同列对齐
+- **README 新增截图区**：截图由 JVM 单测真实渲染产出（`docs/screenshots/`），与安装包同源
+- 验证：**68 组 JVM 单测全绿**（含 7 张界面渲染截图），Lint 无 error，
+  release 构建与签名校验通过
 
 ### v1.7.5
 
