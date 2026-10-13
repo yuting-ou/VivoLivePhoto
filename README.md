@@ -1,13 +1,14 @@
-# Vivo Live Photo（yuting改进版）
+# 影中影（Vivo Live Photo yuting改进版）
 
-vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
+把一段会动的时光，收进一张照片——vivo 双文件实况 → 单文件实况的字节级无损转换工具（Android）。
 
-> 本仓库是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.6），
+> 一张照片（影）里，封着一段影像（影）。原名「Vivo Live Photo（yuting改进版）」，
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.7），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.6.apk`](./VivoLivePhoto-v1.7.6.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.7.apk`](./VivoLivePhoto-v1.7.7.apk) 下载，内容一致。
 
 ## 截图
 
@@ -115,6 +116,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.7
+
+更名「**影中影**」。
+
+- 一张照片（影）里封着一段影像（影）——名字即产品结构：MP4 本就嵌在 JPEG 容器内，
+  借「画中画」的语感零解释成本
+- 应用显示名、桌面图标名、顶栏 / 权限页 / 通知栏品牌名同步更新（仍统一取自
+  `R.string.app_display_name` 单一来源）；不再携带「vivo」字样与改进版后缀
+- tagline 更新：「vivo 双文件实况 → 单文件实况」→「**把一段会动的时光，收进一张照片**」
+- README 标题与开头同步换新；仓库与包名不变，历史变更记录中的旧名为当时事实、保留原样
+- 验证：**68 组 JVM 单测全绿**（含 7 张界面渲染截图），Lint 无 error，
+  release 构建与签名校验通过
 
 ### v1.7.6
 

@@ -71,15 +71,15 @@ class MainActivitySmokeTest {
         assertTrue("应包含第 3 版声明", text.contains("Version 3"))
     }
 
-    /** 应用内品牌名资源存在且与桌面名称区分（品牌统一后各处都取自该资源） */
+    /** 应用内品牌名资源存在且各处取自同一资源（更名「影中影」后仍统一取自该资源） */
     @Test
     fun appDisplayNameResourceMatchesTopBarText() {
         val app = ApplicationProvider.getApplicationContext<VliveApp>()
         val displayName = app.getString(R.string.app_display_name)
-        assertTrue("应用内品牌名应为 Vivo Live Photo", displayName == "Vivo Live Photo")
+        assertTrue("应用内品牌名应为「影中影」", displayName == "影中影")
         assertTrue(
-            "桌面图标名应保留「yuting改进版」以便与原版区分",
-            app.getString(R.string.app_name).contains("yuting")
+            "桌面图标名应为「影中影」（与原版 brovast/VLiveConvert 天然可区分）",
+            app.getString(R.string.app_name) == "影中影"
         )
     }
 }

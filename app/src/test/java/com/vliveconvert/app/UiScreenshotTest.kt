@@ -90,7 +90,7 @@ class UiScreenshotTest {
         render {
             MainScreen(
                 items = items,
-                appName = "Vivo Live Photo",
+                appName = "影中影",
                 statusText = statusText,
                 isConverting = isConverting,
                 progress = 0.42f,
@@ -164,8 +164,8 @@ class UiScreenshotTest {
     fun shotSettings() {
         render {
             SettingsScreen(
-                appName = "Vivo Live Photo",
-                versionName = "1.7.6",
+                appName = "影中影",
+                versionName = "1.7.7",
                 outputRelPath = "Pictures/VLiveConvert",
                 moveToCamera = true,
                 deleteOriginal = true,
@@ -188,7 +188,7 @@ class UiScreenshotTest {
     @Test
     fun shotAbout() {
         render {
-            AboutScreen(appName = "Vivo Live Photo", versionName = "1.7.6", onBack = {})
+            AboutScreen(appName = "影中影", versionName = "1.7.7", onBack = {})
         }
         shot("about")
     }
