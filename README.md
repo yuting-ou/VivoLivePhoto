@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.8），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.9），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.8.apk`](./VivoLivePhoto-v1.7.8.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.9.apk`](./VivoLivePhoto-v1.7.9.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,24 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.9（稳定版）
+
+修复「点击开始转换无反应」——以一条**真实点击全链路测试**（`ConvertFlowUiTest`，5 组用例）
+复现、修复并验证，任何一段断链都会被测试显形。
+
+- **预检弹窗不再异步**：「开始转换」点击后的影响面预检原先放在 IO 协程里、
+  经 `withContext(Main)` 回跳置弹窗状态——协程一旦被取消/异常（授权返回、页面重建等时序），
+  弹窗就**静默不出现**，用户视角即「点了没反应」。而预检全部是 stat 级操作（毫秒级），
+  现改为**主线程同步计算、同步弹窗**，链路上不再有可静默死亡的环节
+- **服务启动失败不再假死**：`startForegroundService` 在受限场景（Android 12+ 后台启动限制、
+  部分 ROM 管控）会抛异常——原先不接住的话「转换中」状态已置上而服务从未启动，界面永远无进度。
+  现失败时**回滚状态并给出可见的错误提示**；服务内 `startForeground` 受限同样接住并自杀复位
+- **新增 `ConvertFlowUiTest`（5 组用例）**：真实点击「开始转换」→ 门禁拦截 → 预检置上 →
+  前台服务启动 → 服务真实跑批至条目终态，全链路逐段断言（其中批次用例显式驱动服务执行，
+  不是只看 intent 记录）
+- 验证：**74 组 JVM 单测全绿**（含 8 张界面/图标渲染 + 5 组转换全链路），
+  Lint 无 error，release 构建与签名校验通过
 
 ### v1.7.8
 

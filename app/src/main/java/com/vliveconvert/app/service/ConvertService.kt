@@ -58,7 +58,18 @@ class ConvertService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildProgressNotification(0, 0, indeterminate = true))
+        // startForeground 受限时抛 ForegroundServiceStartNotAllowedException：
+        // 不接住会直接崩；接住后回滚转换状态并自杀，让界面回到可重试的干净状态
+        try {
+            startForeground(NOTIF_ID, buildProgressNotification(0, 0, indeterminate = true))
+        } catch (e: Exception) {
+            ConvertCenter.isConverting = false
+            ConvertCenter.progress = 0f
+            ConvertCenter.progressDetail = ""
+            ConvertCenter.statusText = "转换服务无法启动（${e.javaClass.simpleName}），请重试"
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_START && !running) {
             running = true
             serviceScope.launch(Dispatchers.IO) { runBatch() }

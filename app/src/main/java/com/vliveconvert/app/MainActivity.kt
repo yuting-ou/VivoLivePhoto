@@ -954,14 +954,14 @@ class MainActivity : ComponentActivity() {
             ConvertCenter.start(this)
             return
         }
-        lifecycleScope.launch(Dispatchers.IO) {
-            // 全部是 stat 级操作（存在性/大小/伴生视频），开销极小
-            val info = Preflight.compute(ConvertCenter.itemsSnapshot())
-            withContext(Dispatchers.Main) {
-                preflight = info
-                showPreflightDialog = true
-            }
-        }
+        // 必须在主线程同步计算并弹窗（v1.7.9 修复「点击开始转换无反应」）：
+        // 此前放在 lifecycleScope(IO) 里，经 withContext(Main) 回跳置弹窗状态——
+        // 协程一旦被取消或异常（授权返回/recreate 时序），弹窗就**静默不出现**，
+        // 用户视角即「点了没反应」。而 Preflight.compute 全部是 stat 级操作
+        // （存在性/大小/伴生视频，毫秒级），根本不需要离开主线程
+        val info = Preflight.compute(ConvertCenter.itemsSnapshot())
+        preflight = info
+        showPreflightDialog = true
     }
 
     /**

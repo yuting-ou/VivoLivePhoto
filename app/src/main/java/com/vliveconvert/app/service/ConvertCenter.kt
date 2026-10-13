@@ -106,9 +106,29 @@ object ConvertCenter {
         isConverting = true
         progress = 0f
         progressDetail = "已处理 0/${targets.size}"
-        context.startForegroundService(
-            Intent(context, ConvertService::class.java).setAction(ConvertService.ACTION_START))
+        if (!launchConvertService(context)) return false
         return true
+    }
+
+    /**
+     * 启动转换前台服务（主线程调用）。
+     * startForegroundService 在受限场景（Android 12+ 后台启动限制、部分 ROM 管控）
+     * 会抛 ForegroundServiceStartNotAllowedException——不接住的话 isConverting
+     * 已置 true 而服务从未启动，界面永远停在「转换中」且无进度（用户视角 = 假死）。
+     * 失败时回滚状态并给出可见的错误提示，绝不静默。
+     */
+    private fun launchConvertService(context: Context): Boolean {
+        return try {
+            context.startForegroundService(
+                Intent(context, ConvertService::class.java).setAction(ConvertService.ACTION_START))
+            true
+        } catch (e: Exception) {
+            isConverting = false
+            progress = 0f
+            progressDetail = ""
+            statusText = "无法启动转换服务（${e.javaClass.simpleName}），请回到应用后重试"
+            false
+        }
     }
 
     /**
@@ -130,8 +150,7 @@ object ConvertCenter {
         progress = 0f
         progressDetail = "已处理 0/${targets.size}"
         statusText = "正在重新转换 ${targets.size} 张照片以找回位置信息…"
-        context.startForegroundService(
-            Intent(context, ConvertService::class.java).setAction(ConvertService.ACTION_START))
+        if (!launchConvertService(context)) return 0
         return targets.size
     }
 
