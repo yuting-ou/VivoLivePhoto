@@ -88,10 +88,20 @@ internal object XmpTemplate {
     fun extractGpsAttributes(sourceXmp: String?): List<Pair<String, String>> {
         if (sourceXmp.isNullOrEmpty()) return emptyList()
         val regex = Regex("""\w+:(GPS[A-Za-z]+)\s*=\s*"([^"]*)"""")
-        return regex.findAll(sourceXmp)
+        val out = regex.findAll(sourceXmp)
             .map { it.groupValues[1] to it.groupValues[2] }
             .filter { it.second.isNotBlank() }
-            .toList()
+            .toMutableList()
+        if (out.isEmpty()) {
+            // 元素形态（部分机型不写属性形态）：<exif:GPSLatitude>37,42.1N</exif:GPSLatitude>。
+            // 提取后仍以**属性**形态注入输出模板（属性形态是 GCamera 约定的合法表达）
+            val elem = Regex("""<\w+:(GPS[A-Za-z]+)>([^<]+)</\w+:\1>""")
+            out += elem.findAll(sourceXmp)
+                .map { it.groupValues[1] to it.groupValues[2].trim() }
+                .filter { it.second.isNotBlank() }
+        }
+        // 同名键去重（属性+元素同时存在时只取先出现的），避免模板注入重复项
+        return out.distinctBy { it.first }
     }
 
     private fun xmlEscape(s: String): String = s

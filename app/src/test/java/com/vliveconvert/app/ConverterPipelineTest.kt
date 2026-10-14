@@ -667,6 +667,41 @@ class ConverterPipelineTest {
         assertTrue(outXmp.xmpText.contains("GCamera:MotionPhoto=\"1\""))
     }
 
+    @Test
+    fun xmpElementFormGpsSurvivesConversion() {
+        // 部分机型把 GPS 写成**元素**形态而非属性形态；提取必须照样认得，
+        // 并以属性形态注入输出（GCamera 约定的合法表达），位置信息不许丢
+        val dir = Files.createTempDirectory("vlc_xmpelem").toFile()
+        val sourceXmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF " +
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" " +
+            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">" +
+            "<rdf:Description rdf:about=\"\">" +
+            "<exif:GPSLatitude>39,54.6</exif:GPSLatitude>" +
+            "<exif:GPSLongitude>116,23.5</exif:GPSLongitude>" +
+            "</rdf:Description></rdf:RDF></x:xmpmeta>"
+        val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        ))
+        val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "IMG_8102.jpg").apply {
+            writeBytes(JpegUtil.replaceOrInsertXmp(minimalJpeg(), sourceXmp) +
+                fakeStreamData("DEGS", 64, 11) + jpgFooter)
+        }
+        File(dir, "IMG_8102.mp4").apply { writeBytes(vivoDualMp4()) }
+
+        val outDir = Files.createTempDirectory("vlc_xmpelem_out").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+        val (jpegs, _) = JpegUtil.splitJpegs(File(result.path).readBytes())
+        val outXmp = JpegUtil.findXmpSegment(jpegs[0])!!
+        assertTrue("输出 XMP 应以属性形态保留源 GPS 纬度",
+            outXmp.xmpText.contains("exif:GPSLatitude=\"39,54.6\""))
+        assertTrue("输出 XMP 应以属性形态保留源 GPS 经度",
+            outXmp.xmpText.contains("exif:GPSLongitude=\"116,23.5\""))
+        assertTrue("输出 XMP 应声明 exif 命名空间", outXmp.xmpText.contains("xmlns:exif="))
+    }
+
     // ------------------------------------------------ 内存优化的等价性回归 ----------
 
     @Test

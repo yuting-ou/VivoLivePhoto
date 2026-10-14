@@ -85,6 +85,17 @@ class ConvertService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Android 15+ 对 dataSync 前台服务有 6 小时/日配额：超时后系统只给几秒钟宽限。
+     * 立刻收摊：停批次、复位状态、持久化队列让用户回到应用可续转——
+     * 不处理的话系统直接杀进程，用户视角就是"转着转着没了"且无任何提示
+     */
+    override fun onTimeout(startId: Int, fgiType: Int) {
+        serviceScope.cancel()
+        ConvertCenter.abortForSystemLimit(applicationContext)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         // 兜底：批次未正常收尾时（例如服务被系统回收、协程在收尾的 withContext 处被取消），

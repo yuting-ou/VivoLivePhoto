@@ -157,6 +157,28 @@ internal fun backRevealScreen(
  *  官方 platform-samples 用 PathInterpolator(0,0,0,1) 缓出——起点跟手、收尾加速入位 */
 internal val PredictiveEase = CubicBezierEasing(0f, 0f, 0f, 1f)
 
+/**
+ * 修复时间的收尾汇总。半途警告必须聚合后一次说清——此前逐项覆盖 fixStatus，
+ * 只留最后一条，前 N 条用户永远看不到（v1.7.23 扫查遗留项）。
+ * 点名最多 3 个，多了以「等」收尾，防止文案无限长
+ */
+internal fun fixTimeSummary(
+    ok: Int, skip: Int, mtimeWarn: List<String>, mediaFail: List<String>
+): String = buildString {
+    append("修复完成：成功 $ok 项，跳过 $skip 项")
+    if (skip > 0) append("（文件名中无时间信息或不可写）")
+    if (mtimeWarn.isNotEmpty()) {
+        append("；${mtimeWarn.size} 项媒体库时间已更新但物理 mtime 未生效：")
+        append(mtimeWarn.take(3).joinToString("、"))
+        if (mtimeWarn.size > 3) append(" 等")
+    }
+    if (mediaFail.isNotEmpty()) {
+        append("；${mediaFail.size} 项媒体库更新失败（物理时间可能已改）：")
+        append(mediaFail.take(3).joinToString("、"))
+        if (mediaFail.size > 3) append(" 等")
+    }
+}
+
 /** 一次续接动画的记账：目标是多少（1f=弹出 / 0f=收回）、用多长时间。 */
 internal data class BackAnim(val target: Float, val durationMs: Int)
 
@@ -264,6 +286,10 @@ class MainActivity : ComponentActivity() {
     private var pendingDeleteCount = 0
     /** 本次待写入回收站的 URI（确认成功后转持久化恢复记录） */
     private var lastTrashUris: List<String> = emptyList()
+    // 回收站删除上下文跨重建（savedInstanceState 键）
+    private val KEY_TRASH_URIS = "trash_uris"
+    private val KEY_TRASH_BASE = "trash_base_status"
+    private val KEY_TRASH_COUNT = "trash_count"
     /** 回收站确认弹窗是否已在途（防止 onStart 重复拉起） */
     private var trashRequestInFlight = false
     /** 回收站中的原图记录数（未授权所有文件访问的删除路径），应用内可恢复（30 天内） */
@@ -319,6 +345,16 @@ class MainActivity : ComponentActivity() {
         if (backAnim != null) return
         backEdgeSign = 1f
         backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // 系统确认弹窗悬着时的删除上下文必须跨重建（见 onCreate 的恢复端）
+        if (lastTrashUris.isNotEmpty()) {
+            outState.putStringArrayList(KEY_TRASH_URIS, ArrayList(lastTrashUris))
+            outState.putString(KEY_TRASH_BASE, deleteBaseStatus)
+            outState.putInt(KEY_TRASH_COUNT, pendingDeleteCount)
+        }
     }
 
     /** 弹掉当前最上面那一层（预测性返回与普通返回共用同一份决策） */
@@ -559,6 +595,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 回收站确认弹窗期间 Activity 重建（旋转/主题/后台回收）：删除上下文在
+        // 实例字段里，不恢复的话结果回调落在新实例上 lastTrashUris 为空 →
+        // 恢复记录不入库（「恢复原图」入口失效）。结果回调发生在 START，
+        // onCreate 里恢复来得及
+        if (savedInstanceState != null) {
+            deleteBaseStatus = savedInstanceState.getString(KEY_TRASH_BASE, "")
+            pendingDeleteCount = savedInstanceState.getInt(KEY_TRASH_COUNT, 0)
+            lastTrashUris = savedInstanceState.getStringArrayList(KEY_TRASH_URIS) ?: emptyList()
+        }
 
         // 启动时清理上次残留的暂存产物 + MediaStore 半成品记录；
         // 恢复上次未完成的转换队列（进程被杀时可续转）
@@ -1482,6 +1528,10 @@ class MainActivity : ComponentActivity() {
             var ok = 0
             var skip = 0
             val fixed = mutableListOf<MediaItem>()
+            // 半途状态必须聚合后一次说清：逐项覆盖 fixStatus 只留最后一条，
+            // 用户永远看不到前 N 条警告（v1.7.23 扫查遗留项）
+            val mtimeWarn = mutableListOf<String>()   // 物理时间未生效，但媒体库时间已更新
+            val mediaFail = mutableListOf<String>()   // 媒体库更新失败（物理时间可能已改）
             for ((idx, item) in targets.withIndex()) {
                 // 解析失败必须计入 skip 而不是抛出：协程一旦异常终止，收尾的
                 // `isFixing = false` 就被跳过，整页从此静默失灵
@@ -1511,13 +1561,12 @@ class MainActivity : ComponentActivity() {
                         )
                         ok++
                         fixed.add(item)
-                        if (!mtimeOk) {
-                            withContext(Dispatchers.Main) {
-                                fixStatus = "部分文件 mtime 修改未生效（已更新媒体库时间）：${item.name}"
-                            }
-                        }
+                        if (!mtimeOk) mtimeWarn.add(item.name)
                     } catch (_: Exception) {
+                        // 走到这里时物理 mtime 可能已改、媒体库没改——不能再混进
+                        // "跳过"里装没事，要单独点名
                         skip++
+                        mediaFail.add(item.name)
                     }
                 }
                 withContext(Dispatchers.Main) {
@@ -1534,8 +1583,7 @@ class MainActivity : ComponentActivity() {
                     singleLiveScanner.stateOf(item.bucketId)
                         .results.removeAll { it.id == item.id }
                 }
-                fixStatus = "修复完成：成功 $ok 项，跳过 $skip 项" +
-                    (if (skip > 0) "（文件名中无时间信息或不可写）" else "")
+                fixStatus = fixTimeSummary(ok, skip, mtimeWarn, mediaFail)
             }
         }
     }
@@ -1733,9 +1781,19 @@ class MainActivity : ComponentActivity() {
      * DATE_ADDED 读不到或不可判定时一律保留：漏清理只是多留一条记录，误删丢的是照片。
      */
     private fun cleanupPendingMediaStore() {
+        // 两个集合都清：Images（转换导出残留）+ Downloads（崩溃日志导出残留）。
+        // IS_PENDING 行只对本应用可见、却永久占存储
         try {
-            val collection =
-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            cleanupPendingRows(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
+            cleanupPendingRows(
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
+        } catch (_: Exception) {}
+    }
+
+    /** 清掉指定集合里早于本进程启动的 IS_PENDING 半成品行 */
+    private fun cleanupPendingRows(collection: Uri) {
+        try {
             val ids = mutableListOf<Long>()
             contentResolver.query(
                 collection,

@@ -3,6 +3,7 @@ package com.vliveconvert.app
 import android.app.Application
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import java.io.File
@@ -106,6 +107,7 @@ internal object CrashLog {
         var already = 0
         for (f in files) {
             if (f.name in done) { already++; continue }
+            var uri: Uri? = null
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
@@ -113,12 +115,12 @@ internal object CrashLog {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/VLiveConvert")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                val uri = resolver.insert(
+                uri = resolver.insert(
                     MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
                     ?: continue
                 resolver.openOutputStream(uri, "w")?.use { out ->
                     f.inputStream().use { it.copyTo(out) }
-                } ?: continue
+                } ?: throw java.io.IOException("输出流打开失败")
                 resolver.update(
                     uri,
                     ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
@@ -126,7 +128,9 @@ internal object CrashLog {
                 done.add(f.name)
                 exported++
             } catch (_: Exception) {
-                // 单个失败不影响其余导出
+                // 单个失败不影响其余导出；但 IS_PENDING 半成品行必须删掉——
+                // 它只对本应用可见却永久占存储（此前残留行没有任何清理通道）
+                try { uri?.let { resolver.delete(it, null, null) } } catch (_: Exception) {}
             }
         }
         if (exported > 0) {

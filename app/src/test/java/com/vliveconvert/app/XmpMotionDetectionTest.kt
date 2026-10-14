@@ -30,6 +30,31 @@ class XmpMotionDetectionTest {
             attrs + """></rdf:RDF></x:xmpmeta>"""
 
     @Test
+    fun extractGpsAttributes_supportsElementForm() {
+        // 部分机型把 GPS 写成元素形态；v1.7.24 前只认属性形态 → 位置信息随模板替换丢失
+        val xmp = "<exif:GPSLatitude>39,54.6</exif:GPSLatitude>" +
+            "<exif:GPSLongitude>116,23.5</exif:GPSLongitude>"
+        val got = XmpTemplate.extractGpsAttributes(xmp)
+        assertTrue("元素形态 GPS 应被提取", got.contains("GPSLatitude" to "39,54.6"))
+        assertTrue(got.contains("GPSLongitude" to "116,23.5"))
+    }
+
+    @Test
+    fun extractGpsAttributes_dedupesWhenBothFormsPresent() {
+        val xmp = "exif:GPSLatitude=\"1,2.0\" <exif:GPSLatitude>3,4.0</exif:GPSLatitude>"
+        val got = XmpTemplate.extractGpsAttributes(xmp)
+        assertTrue("同名键只保留先出现的，防模板注入重复项",
+            got.count { it.first == "GPSLatitude" } == 1)
+        assertTrue(got.first().second == "1,2.0")
+    }
+
+    @Test
+    fun extractGpsAttributes_ignoresBlankValues() {
+        assertTrue(XmpTemplate.extractGpsAttributes("exif:GPSLatitude=\"\"").isEmpty())
+        assertTrue(XmpTemplate.extractGpsAttributes(null).isEmpty())
+    }
+
+    @Test
     fun distinguishesConvertedOutputsFromOrdinaryPhotos() {
         val dir = Files.createTempDirectory("vlc_xmp").toFile()
         val motion = File(dir, "IMG_MOTION.jpg").apply {

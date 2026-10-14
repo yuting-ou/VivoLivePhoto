@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.23），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.24），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.23.apk`](./VivoLivePhoto-v1.7.23.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.24.apk`](./VivoLivePhoto-v1.7.24.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,37 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.24（已知限制收口五项）
+
+按同一套路数把此前「查实但未动」的限制清掉五项，每项带测试：
+
+1. **【回收站弹窗重建丢上下文】** 系统确认弹窗悬着时 Activity 重建（旋转/主题/后台回收），
+   删除上下文原是实例字段——结果回调落在新实例上 `lastTrashUris` 为空 →
+   **恢复记录不入库，「恢复原图」入口对这批删除永久失效**。
+   现在经 `onSaveInstanceState` 跨重建，`TrashStateRecreationTest` 用
+   `recreate()` 证明三个字段全部幸存（变异：回滚写入当场红）
+2. **【修复时间半途态只留最后一条警告】** 物理时间改了但媒体库没更新、或反之，
+   此前逐项覆盖 `fixStatus` 只留最后一条。改为聚合汇总（点名最多 3 项，多了「等」），
+   并把「媒体库更新失败」从"跳过"里单拎出来——它的物理时间**可能已改**，装没事会误导
+3. **【崩溃日志导出残留半成品】** 导出中途失败时 `IS_PENDING` 行留在 Downloads 集合，
+   只对本应用可见却永久占存储且从未被清理。现在失败即删该行；冷启动清理也扩到
+   Downloads 通道（与 Images 同一判据：早于本进程启动）
+4. **【超长批次被系统强杀无提示】** Android 15+ 对 dataSync 前台服务有 6 小时/日配额，
+   超时系统回调 `onTimeout` 后只给几秒宽限。现在接住：停批次、复位状态、**队列落盘**、
+   状态文案讲清楚「已中止并保存队列，点开始转换可续转」——此前是直接被杀且无提示
+5. **【元素形态 XMP GPS 丢失】** 部分机型把 GPS 写成 `<exif:GPSLatitude>…</exif:GPSLatitude>`
+   元素形态而非属性形态，此前提取只认属性 → 位置随模板替换丢失。现在两种形态都认
+   （同名键去重），提取后仍以属性形态注入输出。管线级用例证明元素形态 GPS
+   端到端幸存于转换产物
+
+剩余已知限制仅一项：**两个不同目录的同名双文件先后转入同一输出目录时后者覆盖前者产物**
+（精确判别需在输出里携带源指纹，会改输出字节、动真样本回归，仍单独处理）。
+
+- 验证：**141 组** JVM 单测（仅 APFS 大小写那条必红）；新增 11 组：
+  重建幸存、中止兜底、汇总真值表 ×4、extractGps 真值表 ×3、元素 GPS 管线级 ×1；
+  变异 2 发全中（回滚 onSaveInstanceState 写入、abort 变 no-op，各被对应用例击杀）；
+  Lint 0 error；R8 + apksigner 通过
 
 ### v1.7.23（导出崩溃日志：弹窗反馈 + 去重）
 

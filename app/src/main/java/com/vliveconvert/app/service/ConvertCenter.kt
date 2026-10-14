@@ -201,6 +201,21 @@ object ConvertCenter {
         return targets.size
     }
 
+    /**
+     * 系统强制中止（Android 15+ dataSync 6 小时配额，onTimeout 回调）：
+     * 状态复位 + 队列落盘。队列是"进程被杀可续转"的唯一凭据，
+     * 这里不落盘，用户点「开始转换」就只能从零再来
+     */
+    fun abortForSystemLimit(context: Context) {
+        if (!isConverting) return
+        isConverting = false
+        progress = 0f
+        progressDetail = ""
+        statusText = "系统限制了长时间后台转换（Android 15+ 配额），已中止并保存队列；" +
+            "回到应用点「开始转换」可从断点继续"
+        persistQueue(context, itemsSnapshot())
+    }
+
     /** 可重转条目数（已完成但丢位置的）：主界面「重新转换找回位置」入口的计数 */
     fun reconvertCandidates(): List<ConvertItem> =
         items.filter { it.done && it.lostGps && !it.failed }
