@@ -228,6 +228,50 @@ class ConverterPipelineTest {
     }
 
     @Test
+    fun stagingOutputKeepsItsOwnMtime() {
+        // 残留清理按「mtime < 进程启动」判旧。转换产物若被改写成源照片的拍摄时间
+        // （必然在过去），Activity 重建时在途产物会被当残留删掉——暂存文件必须保留
+        // 自己的创建时刻，相册日期由 MediaExport 显式写 DATE_MODIFIED 负责
+        val dir = Files.createTempDirectory("vlc_mtime").toFile()
+        val (jpg, _) = makePair(dir, "IMG_4001")
+        val old = System.currentTimeMillis() - 86_400_000L * 30   // 30 天前
+        assertTrue("前置：源文件 mtime 应已置于过去", jpg.setLastModified(old))
+
+        val outDir = Files.createTempDirectory("vlc_mtime_out").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+
+        assertTrue(
+            "暂存产物的 mtime 不得被改写成源照片时间（会被残留清理误删）",
+            File(result.path).lastModified() >= old + 60_000L
+        )
+    }
+
+    @Test
+    fun largeFooterJsonStillDetected() {
+        // footer JSON 超过固定 8KB 尾窗（人像实况 faceInfo 多人可触界）时，
+        // 检测必须仍判真——否则该照片在选择器里被静默漏收
+        val dir = Files.createTempDirectory("vlc_bigfooter").toFile()
+        val stem = "IMG_5001"
+        val bigFields = linkedMapOf<String, Any?>(
+            "com.android.camera.imageTime" to 12L,
+            "com.android.camera.livephoto" to TEST_LIVE_ID,
+            "version" to 2107
+        )
+        // 塞一个 >8KB 的字段，让 JSON 总长明显越过固定窗口
+        bigFields["com.android.camera.faceInfo"] = "x".repeat(12_000)
+        val json = FooterUtil.buildFooterJson(bigFields)
+        assertTrue("前置：footer JSON 应已超过 8KB", json.size > 8192)
+        val footer = FooterUtil.buildFooter(json, TEST_LIVE_ID, FooterUtil.vivoPrefix)
+        val jpg = File(dir, "$stem.jpg").apply {
+            writeBytes(minimalJpeg() + fakeStreamData("DEGS", 64, 11) +
+                FooterUtil.vivoPrefix + footer)
+        }
+        File(dir, "$stem.mp4").apply { writeBytes(vivoDualMp4()) }
+
+        assertTrue("大 footer 的双文件实况不应被漏收", VivoDual.isVivoDualFile(jpg.absolutePath))
+    }
+
+    @Test
     fun convertDualToSingleProducesValidStructure() {
         val dir = Files.createTempDirectory("vlc_conv").toFile()
         val (jpg, _) = makePair(dir, "IMG_3001")

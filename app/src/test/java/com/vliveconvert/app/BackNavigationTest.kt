@@ -3,6 +3,7 @@ package com.vliveconvert.app
 import android.Manifest
 import androidx.compose.runtime.MutableState
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -77,6 +78,20 @@ class BackNavigationTest {
         compose.waitForIdle()
     }
 
+    /**
+     * 等待一个由 IO 协程回主线程置上的标志（如进入选择器：先查相册再 showPicker=true）。
+     * Robolectric 的 Dispatchers.IO 跑在真实线程上，mainClock 推不动它，只能真等。
+     */
+    private fun awaitFlag(desc: String, timeoutMs: Long = 5000, probe: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            compose.waitForIdle()
+            if (probe()) return
+            Thread.sleep(50)
+        }
+        throw AssertionError("等待超时：$desc")
+    }
+
     /** 走真实点击到关于页：主页 → 设置 › → 关于与开源许可 */
     private fun openAboutFromSettings() {
         compose.onNodeWithText("设置 ›").performClick()
@@ -120,5 +135,32 @@ class BackNavigationTest {
         assertEquals("第一次返回必须关掉修复时间页", false, flag("showFixTime"))
         assertTrue("且应停在设置页", flag("showSettings"))
         compose.onNodeWithText("转换后处理").assertExists()
+    }
+
+    /** 选择器页：一次返回回主页（走的是新的 PredictiveBackHandler 弹层路径） */
+    @Test
+    fun backFromPicker_landsOnMainInOnePress() {
+        compose.onNodeWithContentDescription("添加照片").performClick()
+        // 进入选择器是「IO 查相册 → 回主线程置标志」，推不动虚拟时钟，只能真等
+        awaitFlag("点击 ＋ 后应进入选择器页") { flag("showPicker") }
+
+        pressBack()
+
+        assertEquals("第一次返回必须关掉选择器页", false, flag("showPicker"))
+        compose.onNodeWithText("还没有选择照片").assertExists()
+    }
+
+    /** 设置页：一次返回回主页 */
+    @Test
+    fun backFromSettings_landsOnMainInOnePress() {
+        compose.onNodeWithText("设置 ›").performClick()
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        assertTrue("前置条件：应已在设置页", flag("showSettings"))
+
+        pressBack()
+
+        assertEquals("第一次返回必须关掉设置页", false, flag("showSettings"))
+        compose.onNodeWithText("还没有选择照片").assertExists()
     }
 }

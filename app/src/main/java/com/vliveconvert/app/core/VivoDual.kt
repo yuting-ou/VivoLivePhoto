@@ -60,13 +60,21 @@ internal object VivoDual {
             val size = f.length()
             // 尾部窗口读取用 seek 而非 FileInputStream.skip：skip 的契约允许「少跳」，
             // 一旦发生窗口就会错位、footer 解析失败，该照片会被静默判为非双文件而漏收。
-            val tailLen = minOf(8192L, size).toInt()
-            if (tailLen <= 0) return false
+            //
+            // 窗口**自适应放大**：footer JSON 可能比固定 8KB 长（人像实况 faceInfo 多人时
+            // 最易触界），而 parseFooter 对「窗口太短」与「不是双文件」都返回 null、无法区分
+            // ——固定窗口会把大 footer 的真双文件漏收进选择器。parseFooter 按 marker 从后
+            // 向前定位，放大窗口不改变锚点，只可能让 jsonStart 从负变合法
             RandomAccessFile(f, "r").use { raf ->
-                raf.seek(size - tailLen)
-                val tail = ByteArray(tailLen)
-                raf.readFully(tail)
-                FooterUtil.parseFooter(tail)?.livephotoId != null
+                for (window in longArrayOf(8192L, 32768L, 131072L, size)) {
+                    val tailLen = minOf(window, size).toInt()
+                    if (tailLen <= 0) return false
+                    raf.seek(size - tailLen)
+                    val tail = ByteArray(tailLen)
+                    raf.readFully(tail)
+                    if (FooterUtil.parseFooter(tail)?.livephotoId != null) return true
+                }
+                false
             }
         } catch (e: Exception) {
             false

@@ -54,6 +54,8 @@ class ConvertService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var running = false
+    // 批次收尾期间收到的新 START：排队等本批收尾后补跑（见 onStartIntent 的 QUEUE 分支）
+    @Volatile private var pendingStart = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -70,9 +72,15 @@ class ConvertService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == ACTION_START && !running) {
-            running = true
-            serviceScope.launch(Dispatchers.IO) { runBatch() }
+        when (onStartIntent(intent?.action, running)) {
+            StartDecision.RUN_NOW -> {
+                running = true
+                serviceScope.launch(Dispatchers.IO) { runBatch() }
+            }
+            // 收尾窗口（删原图/移文件可达数十秒）里 isConverting 已复位、界面已可点
+            // 「开始转换」——此刻的新启动若直接丢弃，用户会永远停在「转换中」
+            StartDecision.QUEUE -> pendingStart = true
+            StartDecision.IGNORE -> {}
         }
         return START_NOT_STICKY
     }
@@ -184,7 +192,13 @@ class ConvertService : Service() {
         // 清理暂存目录
         try { tempDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
         running = false
-        stopSelf()
+        if (pendingStart) {
+            pendingStart = false
+            running = true
+            serviceScope.launch(Dispatchers.IO) { runBatch() }
+        } else {
+            stopSelf()
+        }
     }
 
     /** 转换单张：detect → read → write → 导出 + 写后自检 → 标记结果 */
@@ -470,4 +484,14 @@ class ConvertService : Service() {
         private const val NOTIF_ID = 100
         private const val NOTIF_DONE_ID = 101
     }
+}
+
+
+/** 服务收到 intent 时怎么办：只有 START 且空闲才立即起批次；收尾中的 START 排队。 */
+internal enum class StartDecision { RUN_NOW, QUEUE, IGNORE }
+
+internal fun onStartIntent(action: String?, running: Boolean): StartDecision = when {
+    action != ConvertService.ACTION_START -> StartDecision.IGNORE
+    running -> StartDecision.QUEUE
+    else -> StartDecision.RUN_NOW
 }

@@ -26,6 +26,12 @@ import java.util.Collections
  */
 object ConvertCenter {
 
+    /** 本进程启动时刻：残留清理的判据必须锚定**进程**。Activity 旋转/重建不换进程，
+     *  若用「Activity 实例的创建时间」当判据，重建瞬间在途的暂存产物与 pending 行
+     *  会被误判成上次残留而删掉（v1.7.19 修） */
+    val processStartMs: Long = System.currentTimeMillis()
+
+
     /** 转换队列（含每项状态），UI 与服务共同读写（写均发生在主线程） */
     val items = mutableStateListOf<ConvertItem>()
 
@@ -78,10 +84,24 @@ object ConvertCenter {
 
     /** 把快照落盘（纯 IO 操作，只接收不可变快照，绝不读 Compose 状态） */
     fun persistQueue(context: Context, snapshot: List<ConvertItem>) {
-        try {
-            File(context.filesDir, QUEUE_FILE).writeText(QueueJson.toJson(snapshot))
-        } catch (_: Exception) {}
+        // 原子写：writeText 是「截断+写」，两个写者（并行完成的服务 job、Activity 侧）
+        // 一交错就会把文件写坏，冷启动 fromJson 解析失败 → 整个队列静默丢弃。
+        // 先写临时文件再 rename（同目录 rename 是原子的），并对写者加锁串行化
+        synchronized(persistLock) {
+            try {
+                val target = File(context.filesDir, QUEUE_FILE)
+                val tmp = File(context.filesDir, "$QUEUE_FILE.tmp")
+                tmp.writeText(QueueJson.toJson(snapshot))
+                if (!tmp.renameTo(target)) {
+                    // 极端情况下 rename 失败（如目标被占用）：退回直接写，至少不比以前差
+                    target.writeText(QueueJson.toJson(snapshot))
+                    tmp.delete()
+                }
+            } catch (_: Exception) {}
+        }
     }
+
+    private val persistLock = Any()
 
     /** 清空队列文件（用户「清空」时调用） */
     fun clearQueue(context: Context) {
@@ -172,7 +192,12 @@ object ConvertCenter {
         progress = 0f
         progressDetail = "已处理 0/${targets.size}"
         statusText = "正在重新转换 ${targets.size} 张照片以找回位置信息…"
-        if (!launchConvertService(context)) return 0
+        if (!launchConvertService(context)) {
+            // 服务没起来：条目刚被改成「重新转换中…」（busy 态、无移除按钮、转圈），
+            // 若不回滚会一直卡到下一次成功批次才被覆盖——恢复原条目
+            targets.forEach { replaceItem(it, it) }
+            return 0
+        }
         return targets.size
     }
 

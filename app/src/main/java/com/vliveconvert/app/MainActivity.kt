@@ -10,13 +10,16 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -48,6 +52,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.vliveconvert.app.R
@@ -106,6 +112,42 @@ internal fun pickScreen(
 }
 
 /**
+ * 预测性返回的「弹哪一层」决策。优先级必须与 [pickScreen] **完全一致**——
+ * 渲染在哪一层、返回就关哪一层，两者一旦分叉就是 v1.7.16 那个「按了没反应」的变体。
+ * （BackNavigationTest + BackDecisionTest 用 16 种标志组合把这条钉死。）
+ */
+internal enum class BackDecision { CLOSE_ABOUT, CLOSE_FIXTIME, CLOSE_PICKER, CLOSE_SETTINGS }
+
+internal fun backDecision(
+    showAbout: Boolean,
+    showFixTime: Boolean,
+    showPicker: Boolean,
+    showSettings: Boolean
+): BackDecision? = when {
+    showAbout -> BackDecision.CLOSE_ABOUT
+    showFixTime -> BackDecision.CLOSE_FIXTIME
+    showPicker -> BackDecision.CLOSE_PICKER
+    showSettings -> BackDecision.CLOSE_SETTINGS
+    else -> null
+}
+
+/** 弹掉这一层之后露出哪一层：**不要硬编码**——直接让 pickScreen 在弹层后的标志上算。
+ *  硬编码曾经对 (picker=true, settings=true) 给出 Main，而 pickScreen 弹层后渲染的是
+ *  设置页；该组合今天不可达，但 v1.7.16 的教训就是别赌「今天不可达」。 */
+internal fun backRevealScreen(
+    showAbout: Boolean,
+    showFixTime: Boolean,
+    showPicker: Boolean,
+    showSettings: Boolean
+): Screen? = when (backDecision(showAbout, showFixTime, showPicker, showSettings)) {
+    BackDecision.CLOSE_ABOUT -> pickScreen(true, false, showFixTime, showPicker, showSettings)
+    BackDecision.CLOSE_FIXTIME -> pickScreen(true, showAbout, false, showPicker, showSettings)
+    BackDecision.CLOSE_PICKER -> pickScreen(true, showAbout, showFixTime, false, showSettings)
+    BackDecision.CLOSE_SETTINGS -> pickScreen(true, showAbout, showFixTime, showPicker, false)
+    null -> null
+}
+
+/**
  * 「转换完成」节拍的最短可见时长（墙钟毫秒）。
  * 用 delay 而不是动画时长：动画受系统 `animator_duration_scale` 支配，
  * 一旦被关闭，完成反馈就再次塌成「一闪」。
@@ -134,7 +176,9 @@ class MainActivity : ComponentActivity() {
      * 本次进程启动时刻（ms）。冷启动清理用它区分「上次残留」与「本次正在生成的产物」：
      * 清理跑在 IO 协程上，与用户第一次点「开始转换」之间没有互斥，只认时间不认状态才安全。
      */
-    private val launchedAtMs = System.currentTimeMillis()
+    // 残留判据的时间锚点必须锚定**进程**而不是本 Activity 实例（旋转/重建不换进程，
+    // 实例时间会把在途产物误判成残留），见 ConvertCenter.processStartMs
+    private val launchedAtMs = ConvertCenter.processStartMs
 
     // 内置选择器
     private lateinit var mediaRepo: MediaRepo
@@ -193,6 +237,12 @@ class MainActivity : ComponentActivity() {
     private var skipPreflightNext by mutableStateOf(false)
     // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
     private var showAbout by mutableStateOf(false)
+
+    // 预测性返回（Android 14+ 手势）：拖动进度实时驱动顶层页缩放/位移/圆角。
+    // Animatable 而不是普通状态：拖动中 snapTo 逐帧跟手，取消时 animateTo 平滑收回
+    private val backProgressAnim = Animatable(0f)
+    // 手势从哪条边发起：左缘 → 顶层页向右让位（+1），右缘 → 向左（-1），0 = 无手势
+    private var backEdgeSign by mutableFloatStateOf(0f)
 
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
@@ -328,8 +378,27 @@ class MainActivity : ComponentActivity() {
         } else {
             // 用户取消删除：原图保留，同名冲突成为真实冲突——中转产物不再自动落地，
             // 保留在输出目录，由用户决定（后续可用顶栏「移到相机」移动，会带序号）
-            synchronized(ConvertCenter.pendingFinalize) { ConvertCenter.pendingFinalize.clear() }
-            ConvertCenter.statusText = "$deleteBaseStatus；已取消删除原图，转换结果保留在输出目录 $outputRelPath"
+            val cancelled = synchronized(ConvertCenter.pendingFinalize) {
+                val snapshot = ConvertCenter.pendingFinalize.toList()
+                ConvertCenter.pendingFinalize.clear()
+                snapshot
+            }
+            // 条目行内还写着「待原图删除后以原名移入相机相册」，这个事件已被用户取消、
+            // 永远不会发生——把状态同步改写，别让列表挂着一条假承诺
+            var rewritten = 0
+            for (e in cancelled) {
+                ConvertCenter.items.firstOrNull { it.item.key == e.itemKey }?.let { cur ->
+                    ConvertCenter.replaceItem(
+                        cur,
+                        cur.copy(status = "完成：原图已保留，产物在输出目录 $outputRelPath"))
+                    rewritten++
+                }
+            }
+            if (rewritten > 0) {
+                ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+            }
+            ConvertCenter.statusText =
+                "$deleteBaseStatus；已取消删除原图，转换结果保留在输出目录 $outputRelPath"
         }
         ConvertCenter.pendingTrashUris.clear()
     }
@@ -461,20 +530,49 @@ class MainActivity : ComponentActivity() {
 
                 // 系统返回键/侧滑返回：必须关掉「当前画面上最上面那一层」。
                 //
-                // OnBackPressedDispatcher 反向遍历回调 —— **后注册的优先级更高**，
-                // 所以这里的书写顺序要与 pickScreen 的渲染优先级**完全相反**：
-                // 父页面写在前面，嵌套页写在最后。
+                // v1.7.19 起用 PredictiveBackHandler 取代四个页面级 BackHandler：
+                // 它把「返回决策」「手势进度动画」「弹层动作」收进同一个回调，
+                // 决策经 backDecision() 与 pickScreen() 共享同一份优先级（16 种标志
+                // 组合由测试钉死），不再存在两套顺序需要人工保持相反的问题。
                 //
                 // 曾经写错成 about→settings→fixTime→picker：从设置页进「关于与开源许可」时
                 // showAbout 与 showSettings 同时为真，第一次返回关掉的是**看不见的设置页**，
                 // 画面仍是关于页（用户视角「按了没反应」），第二次返回才轮到关于页、
                 // 直接落回主页（用户视角「第二次才返回，而且跳过了二级菜单」）。
-                BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中吞掉返回，防止误退 */ }
+                //
+                // 转换中吞掉返回（防误退）；主页无层可弹 → 不拦截，
+                // 让系统做跨任务/回到桌面的预测性返回动画（enableOnBackInvokedCallback 已开）。
+                BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
                 BackHandler(enabled = showStatusDetail) { showStatusDetail = false }
-                BackHandler(enabled = showSettings) { showSettings = false }
-                BackHandler(enabled = showPicker) { showPicker = false }
-                BackHandler(enabled = showFixTime) { showFixTime = false }
-                BackHandler(enabled = showAbout) { showAbout = false }
+                PredictiveBackHandler(
+                    enabled = hasReadPermission() && !ConvertCenter.isConverting &&
+                        (showAbout || showFixTime || showPicker || showSettings)
+                ) { progress ->
+                    try {
+                        progress.collect { event ->
+                            backEdgeSign = when (event.swipeEdge) {
+                                BackEventCompat.EDGE_LEFT -> 1f
+                                BackEventCompat.EDGE_RIGHT -> -1f
+                                else -> backEdgeSign
+                            }
+                            backProgressAnim.snapTo(event.progress)
+                        }
+                        // 手势提交：进度归零、按共享决策弹掉顶层。
+                        // 页面切换动画交给 AnimatedContent 的既有过渡，别在这里再补一段
+                        backProgressAnim.snapTo(0f)
+                        when (backDecision(showAbout, showFixTime, showPicker, showSettings)) {
+                            BackDecision.CLOSE_ABOUT -> showAbout = false
+                            BackDecision.CLOSE_FIXTIME -> showFixTime = false
+                            BackDecision.CLOSE_PICKER -> showPicker = false
+                            BackDecision.CLOSE_SETTINGS -> showSettings = false
+                            null -> {}
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // 手势取消：平滑收回，且**必须重抛**——取消不等于「已处理返回」
+                        lifecycleScope.launch { backProgressAnim.animateTo(0f, tween(180)) }
+                        throw e
+                    }
+                }
 
                 Box(
                     Modifier
@@ -489,25 +587,9 @@ class MainActivity : ComponentActivity() {
                         showPicker,
                         showSettings
                     )
-                    AnimatedContent(
-                        targetState = targetScreen,
-                        transitionSpec = {
-                            // 主页 → 选择器/修复时间：新界面自右滑入；
-                            // 返回：新界面（主页）自左淡入、旧界面滑回右侧，符合系统返回方向
-                            if (targetState == Screen.Main && initialState != Screen.Main) {
-                                (slideInHorizontally(tween(300)) { -it / 4 } +
-                                        fadeIn(tween(300))) togetherWith
-                                        (slideOutHorizontally(tween(300)) { it } +
-                                                fadeOut(tween(220)))
-                            } else {
-                                (slideInHorizontally(tween(300)) { it } +
-                                        fadeIn(tween(300))) togetherWith
-                                        (slideOutHorizontally(tween(300)) { -it / 4 } +
-                                                fadeOut(tween(220)))
-                            }
-                        },
-                        label = "screenTransition"
-                    ) { screen ->
+                    // 页面内容抽成可复用的 lambda：预测性返回进行时，
+                    // 底层还要再画一份「返回目标页」作为被揭开的下一层
+                    val renderScreen: @Composable (Screen) -> Unit = { screen ->
                         when (screen) {
                             Screen.Permission -> PermissionScreen(
                                 onRequest = { requestReadPermissions(null) },
@@ -612,6 +694,54 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+                    }
+
+                    // 预测性返回进行中：先画返回目标页（静止的底层，被顶层页让位后露出来）。
+                    // 选择器/修复时间的父页是设置页、它们的 DisposableEffect 不会被双重触发，
+                    // 因为双渲染只发生在「返回方向」，扫描页永远是顶层而不是底层
+                    if (backProgressAnim.value > 0f) {
+                        val reveal = backRevealScreen(showAbout, showFixTime, showPicker, showSettings)
+                        if (reveal != null && reveal != targetScreen) {
+                            Box(Modifier.fillMaxSize()) { renderScreen(reveal) }
+                        }
+                    }
+
+                    // 顶层页跟手让位：缩放 + 向手势发起边平移 + 圆角，Material 预测性返回的样子。
+                    // 读 backProgressAnim.value 写在 graphicsLayer 里 = 延迟读，只有拖动才重绘
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val p = backProgressAnim.value
+                                if (p > 0f) {
+                                    scaleX = 1f - 0.10f * p
+                                    scaleY = 1f - 0.10f * p
+                                    translationX = backEdgeSign * p * 26.dp.toPx()
+                                    shadowElevation = 18.dp.toPx() * p
+                                    shape = RoundedCornerShape(28.dp * p)
+                                    clip = true
+                                }
+                            }
+                    ) {
+                        AnimatedContent(
+                            targetState = targetScreen,
+                            transitionSpec = {
+                                // 主页 → 选择器/修复时间：新界面自右滑入；
+                                // 返回：新界面（主页）自左淡入、旧界面滑回右侧，符合系统返回方向
+                                if (targetState == Screen.Main && initialState != Screen.Main) {
+                                    (slideInHorizontally(tween(300)) { -it / 4 } +
+                                            fadeIn(tween(300))) togetherWith
+                                            (slideOutHorizontally(tween(300)) { it } +
+                                                    fadeOut(tween(220)))
+                                } else {
+                                    (slideInHorizontally(tween(300)) { it } +
+                                            fadeIn(tween(300))) togetherWith
+                                            (slideOutHorizontally(tween(300)) { -it / 4 } +
+                                                    fadeOut(tween(220)))
+                                }
+                            },
+                            label = "screenTransition"
+                        ) { screen -> renderScreen(screen) }
                     }
                 }
 

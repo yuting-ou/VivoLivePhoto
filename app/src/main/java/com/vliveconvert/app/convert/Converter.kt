@@ -39,12 +39,10 @@ internal object Converter {
         val stem = src.nameWithoutExtension
         val result = VivoSingle.write(asset, outDir, stem, log)
 
-        // 保留源文件的修改时间（原文件名中的时间信息不丢失）
-        try {
-            File(result.path).setLastModified(src.lastModified())
-        } catch (e: Exception) {
-            /* 时间戳复制失败不阻塞转换 */
-        }
+        // 注意：这里**不能** setLastModified(源照片时间)。相册里的日期由 MediaExport
+        // 显式写入 DATE_MODIFIED，暂存文件的 mtime 没有任何消费者；而 MainActivity 的
+        // 残留清理按 mtime < 进程启动时间判旧——把暂存文件改成拍摄时间（必然在过去），
+        // Activity 重建时就会把正在转换的产物当残留删掉（v1.7.19 修）
         return result
     }
 }
