@@ -52,7 +52,8 @@ fun SettingsScreen(
     onOpenFixTime: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
-    onOpenAbout: () -> Unit
+    onOpenAbout: () -> Unit,
+    statusText: String = ""
 ) {
     Column(
         Modifier
@@ -79,6 +80,19 @@ fun SettingsScreen(
                 "设置",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        // 设置页的动作反馈就地显示——v1.7.20 前反馈只写主页状态栏，
+        // 用户在设置页点「导出崩溃日志」什么也看不见（=「点了没反应」）
+        if (statusText.isNotEmpty()) {
+            Text(
+                statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
 
@@ -147,14 +161,14 @@ fun SettingsScreen(
                 ActionRow("修复文件时间", onOpenFixTime)
                 CardDivider()
                 ActionRow("把输出移到相机相册", onMoveOutputsToCamera, enabled = !isBusy)
-                if (crashLogCount > 0) {
-                    CardDivider()
-                    ActionRow(
-                        "导出崩溃日志（$crashLogCount）",
-                        onExportCrashLogs,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
+                CardDivider()
+                // 常驻：曾用 if (count>0) 包住——闪退后想导日志，若此页组合时还没有日志
+                // （或刷新前），这行根本不存在 =「点击不了」。0 份点了就明说
+                ActionRow(
+                    "导出崩溃日志（$crashLogCount）",
+                    onExportCrashLogs,
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
 
             Spacer(Modifier.height(16.dp))

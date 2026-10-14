@@ -48,6 +48,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.withTimeout
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
@@ -290,6 +292,10 @@ class MainActivity : ComponentActivity() {
     private val backProgressAnim = Animatable(0f)
     // 手势从哪条边发起：左缘 → 顶层页向右让位（+1），右缘 → 向左（-1），0 = 无手势
     private var backEdgeSign by mutableFloatStateOf(0f)
+    // 非空 = 有一段续接动画要跑（1f=提交续完，0f=取消收回）。**只记账不执行**：
+    // animateTo 必须在组合内的 LaunchedEffect 里跑（那里才有 MonotonicFrameClock），
+    // 放进 handler 块或 lifecycleScope，真机上卡死/崩溃（v1.7.20 事故）
+    private var backAnimTarget by mutableStateOf<Float?>(null)
     // 手势提交后的弹层要**跳过** AnimatedContent 的滑动过渡（揭底层已在原地，
     // 再滑一次就是双重运动）。普通字段而不是状态：只在过渡创建的那一刻被读一次
     private var predictiveCommitArmed = false
@@ -613,6 +619,10 @@ class MainActivity : ComponentActivity() {
                         var sawGesture = false
                         progress.collect { event ->
                             sawGesture = true
+                            // 新手势进来：掐掉任何没跑完的续接动画（LaunchedEffect 随键重启），
+                            // 并复位提交标记（上个提交遗留的 true 不许污染下一次过渡）
+                            backAnimTarget = null
+                            predictiveCommitArmed = false
                             backEdgeSign = when (event.swipeEdge) {
                                 BackEventCompat.EDGE_LEFT -> 1f
                                 BackEventCompat.EDGE_RIGHT -> -1f
@@ -622,24 +632,43 @@ class MainActivity : ComponentActivity() {
                         }
                         if (!sawGesture || backProgressAnim.value <= 0f) {
                             // 桌面按钮返回：没有手势进度，直接弹层，走既有的滑动过渡
+                            predictiveCommitArmed = false
                             popTopLayer()
                         } else {
-                            // 手势提交：让位动画**续完**而不是归零重播——官方
-                            // platform-samples 的做法是 controller.animateToEnd()：
-                            // 顶层从当前进度继续缩到位、揭底层迎到全尺寸，然后瞬间换层。
-                            // 第一版是 snapTo(0) + 重播 300ms 滑动，衔接处肉眼可见地跳一下
-                            predictiveCommitArmed = true
-                            backProgressAnim.animateTo(1f, tween(150))
-                            popTopLayer()
-                            backProgressAnim.snapTo(0f)
-                            predictiveCommitArmed = false
+                            // 手势提交：只**记账**（回填续接目标），动画由组合内的
+                            // LaunchedEffect 执行——官方实现的块跑在 rememberCoroutineScope()
+                            // 里（自带帧时钟），但取消路径曾挂在 lifecycleScope（没有帧时钟，
+                            // 真机上永久挂起）。统一都交给组合
+                            backAnimTarget = 1f
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
-                        // 手势取消：两层一起平滑收回（官方样本是瞬间复位，这里收得更顺），
-                        // 且**必须重抛**——取消不等于「已处理返回」
-                        lifecycleScope.launch { backProgressAnim.animateTo(0f, tween(200)) }
+                        // 手势取消：记一个"收回"目标后必须重抛——取消不等于「已处理返回」
+                        backAnimTarget = 0f
                         throw e
                     }
+                }
+
+                // 预测性返回的续接动画：唯一允许 animateTo 的地方（组合上下文自带帧时钟）。
+                // 目标 1f = 提交：让位动画续完 → 换层（跳过滑动过渡）→ 归零复位；
+                // 目标 0f = 取消：两层一起平滑收回。
+                // withTimeout 兜底：提交瞬间若页面已退到后台、帧时钟不吐帧，
+                // 宁可让页面直接就位，也不能把返回链路挂死（v1.7.20 卡死的形状）
+                LaunchedEffect(backAnimTarget) {
+                    val target = backAnimTarget ?: return@LaunchedEffect
+                    try {
+                        withTimeout(600) {
+                            backProgressAnim.animateTo(
+                                target, tween(if (target == 1f) 150 else 200))
+                        }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        backProgressAnim.snapTo(target)
+                    }
+                    if (target == 1f) {
+                        predictiveCommitArmed = true
+                        popTopLayer()
+                        backProgressAnim.snapTo(0f)
+                    }
+                    backAnimTarget = null
                 }
 
                 Box(
@@ -655,6 +684,11 @@ class MainActivity : ComponentActivity() {
                         showPicker,
                         showSettings
                     )
+// armed 必须等「换层重组把 transitionSpec 评估完」之后才能复位——
+                // 复位太早（弹层后立刻置 false）会让短路根本不生效；挂在 targetScreen 上
+                // 最可靠：换层组合时 armed 仍为 true，组合完成后再清掉，不污染后续过渡
+                LaunchedEffect(targetScreen) { predictiveCommitArmed = false }
+
                     // 页面内容抽成可复用的 lambda：预测性返回进行时，
                     // 底层还要再画一份「返回目标页」作为被揭开的下一层
                     val renderScreen: @Composable (Screen) -> Unit = { screen ->
@@ -688,6 +722,7 @@ class MainActivity : ComponentActivity() {
                             Screen.Settings -> SettingsScreen(
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
+                                statusText = ConvertCenter.statusText,
                                 outputRelPath = outputRelPath,
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,
@@ -1612,11 +1647,16 @@ class MainActivity : ComponentActivity() {
     /** 把本地崩溃日志导出到 Download/VLiveConvert，便于反馈定位 */
     private fun exportCrashLogs() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val n = CrashLog.exportToDownloads(applicationContext)
+            // 必须兜底：这里在 IO 协程里，未捕获异常 = 直接闪退（用户正想导出的就是崩溃日志）
+            val outcome = runCatching { CrashLog.exportToDownloads(applicationContext) }
             withContext(Dispatchers.Main) {
-                ConvertCenter.statusText = if (n > 0)
-                    "已导出 $n 个崩溃日志到 Download/VLiveConvert（可反馈给开发者）"
-                else "没有可导出的崩溃日志"
+                ConvertCenter.statusText = outcome.fold(
+                    onSuccess = { n ->
+                        if (n > 0) "已导出 $n 个崩溃日志到 Download/VLiveConvert（可反馈给开发者）"
+                        else "没有可导出的崩溃日志"
+                    },
+                    onFailure = { e -> "导出失败（${e.javaClass.simpleName}），可尝试重启后再导" }
+                )
                 crashLogCount = CrashLog.count(this@MainActivity)
             }
         }

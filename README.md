@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.20），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.21），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.20.apk`](./VivoLivePhoto-v1.7.20.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.21.apk`](./VivoLivePhoto-v1.7.21.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,36 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.21（真机卡死闪退修复 + 崩溃日志可导出）
+
+**真机报「直接卡死、崩溃；点『导出崩溃日志』无反应、点击不了」。无 adb 在手，按代码逐面排查后修掉四处，其中两处正是「点了没反应/卡死」的形状：**
+
+1. **【卡死】取消路径的动画跑在没有帧时钟的协程里**。手势拖到一半松手（= 取消，
+   真机上最频繁的操作）会把收回动画丢进 `lifecycleScope`——那里没有
+   `MonotonicFrameClock`，`animateTo` 会**永久挂起**。查证：androidx 1.13.0 的
+   `PredictiveBackHandler` 块本身跑在 `rememberCoroutineScope()`（自带帧时钟，提交路径
+   其实是安全的），但取消路径是我在 lifecycleScope 里另起的。现在**所有续接动画统一
+   交给组合内的 `LaunchedEffect`**，handler 只记账（回填目标值）不执行；
+   并加 `withTimeout(600)` 兜底——万一提交瞬间页面已退后台、帧时钟不吐帧，
+   页面直接就位，绝不把返回链路挂死
+2. **【点击不了】「导出崩溃日志」整行被 `if (crashLogCount > 0)` 包住**：此页组合时
+   还没有日志（或计数未刷新），这行**根本不存在**——闪退后想导日志的人面对的是一行
+   不存在的入口。改为常驻，0 份也能点、点了明说
+3. **【闪退】导出在 IO 协程里没有任何兜底**：任何未捕获异常 = 应用再次崩溃——
+   用户点的恰恰是崩溃日志入口，等于死循环。加 `runCatching`，失败明说
+4. **【点了没反应】设置页的动作反馈只写主页状态栏**，人在设置页什么也看不见。
+   设置页顶栏下就地显示反馈（全页所有动作受益），导出加失败文案
+
+另修：提交短路标记 `predictiveCommitArmed` 曾在重组评估前就被复位（短路根本没生效），
+现在等换层组合评估完 `transitionSpec` 之后再清（挂在 `targetScreen` 上）。
+
+**如果 v1.7.21 仍有卡死/闪退**：现在「导出崩溃日志」保证可点、可出文件——
+导出的 `crash_*.txt`（在 Download/VLiveConvert）就是定位真凶所需的全部证据，发我即可。
+
+- 验证：**130 组** JVM 单测（仅 APFS 大小写那条必红），新增 2 组端到端
+  （真点导出行 → 反馈出现在**设置页内**、无日志时有明说）、Lint 0 error、
+  R8 + apksigner 通过；出厂 APK 字节扫查确认新代码在包内
 
 ### v1.7.20（预测性返回 · 重做）
 
