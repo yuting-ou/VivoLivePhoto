@@ -1,10 +1,8 @@
-<?xml version="1.0" encoding="utf-8"?><!-- 「影中影」图标背景层（108dp 全幅，会被启动器裁成圆/方/球形）。
+<?xml version="1.0" encoding="utf-8"?><!-- 「影中影」图标背景层（108dp 全幅，v1.8 全新方向）。
 
-     亮面版：底色是「一张白纸」，玻璃靠边与投影立住，而不是靠明暗反差。
-     VectorDrawable 没有高斯模糊，所以仍一律用渐变叠体积：
-       · 1 层对角线性底（左上偏白、右下偏冷灰），定住光源方向（与前景所有高光同向）
-       · 1 层左上白光晕 = 光源本身；1 层右下极淡品牌蓝 = 玻璃把环境色吸进去
-       · 角上只留 3% 的冷灰压边。**亮底不能压暗角**，压了会显脏，这是与暗面版最大的区别 -->
+     v1.8 与旧款**彻底断开**：不再做玻璃/暗房/纸面的材质叙事，改走平面极简——
+     饱和品牌蓝实底（#415FFF，与主题 LightPrimary 同源），只用一道对角微渐变
+     提供光感，铺渐变、辉光、暗角一律不要。材质留给系统，符号自己立住 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -12,61 +10,15 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 1 · 对角底色：暖白 → 冷灰白 -->
     <path android:pathData="M0,0 H108 V108 H0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="14" android:startY="8"
-                android:endX="94" android:endY="100">
-                <item android:offset="0.0" android:color="#FFFBFDFF" />
-                <item android:offset="0.5" android:color="#FFEFF4FB" />
-                <item android:offset="1.0" android:color="#FFDCE5F1" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- 2 · 左上光源晕 -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="28" android:centerY="20"
-                android:gradientRadius="74"
-                android:tileMode="clamp">
-                <item android:offset="0.0" android:color="#B3FFFFFF" />
-                <item android:offset="0.55" android:color="#40FFFFFF" />
-                <item android:offset="1.0" android:color="#00FFFFFF" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- 3 · 右下极淡品牌蓝（玻璃吸进去的环境色） -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="88" android:centerY="94"
-                android:gradientRadius="60"
-                android:tileMode="clamp">
-                <item android:offset="0.0" android:color="#2E415FFF" />
-                <item android:offset="0.6" android:color="#145C79E8" />
-                <item android:offset="1.0" android:color="#00000000" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- 4 · 角上极轻的冷灰压边：亮底只压 3%，多一分就脏 -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="54" android:centerY="55"
-                android:gradientRadius="66"
-                android:tileMode="clamp">
-                <item android:offset="0.0" android:color="#00000000" />
-                <item android:offset="0.7" android:color="#00000000" />
-                <item android:offset="1.0" android:color="#0A5A6E86" />
+                android:startX="12" android:startY="6"
+                android:endX="96" android:endY="102">
+                <item android:offset="0.0" android:color="#FF5A78FF" />
+                <item android:offset="0.55" android:color="#FF415FFF" />
+                <item android:offset="1.0" android:color="#FF3450EE" />
             </gradient>
         </aapt:attr>
     </path>
