@@ -279,11 +279,22 @@ class UiScreenshotTest {
     }
 
     /**
-     * v1.8 全新平面图标的可读性下限：蓝底上只靠两个白色元素立形——照片框 + 冲框播放形。
-     * 钉两个关系（48px 渲染、显示坐标采样）：
-     *   1) 框的描边必须显著亮于底色（符号在蓝底上立得住）
-     *   2) 播放形必须显著亮于底色（主符号不糊）
-     * 采样系换算见 adaptive-icon 图层→显示 1.5× 裁切（显示 = 54 + (图层 − 54) × 1.5），
+     * 玻璃材质真正的风险不在大图，在桌面/通知栏那么小的时候被抗锯齿洗平。
+     *
+     * 亮面版把这条断言的**逻辑整个翻了过来**：暗面版靠「卡面比底色亮」立形，
+     * 白纸底上这一条根本不成立。原本想改成钉「卡缘那道折射暗线」，但实测把它否了：
+     * 2dp 的边在 48px 下只有约 0.9px，3×3 邻域一平均就带不动轮廓。
+     * 所以亮版的分离由**玻璃比纸面沉一档的调子差**承担，边线只服务大尺寸观感。
+     *
+     * 采样系必须写清楚，这里踩过一次坑：**下面全是"显示坐标"，不是图层坐标**。
+     * AdaptiveIconDrawable 会把 108dp 图层**放大 1.5 倍**绘制，只有图层中央 72dp
+     * （图层坐标 18..90）落在显示范围内，其余被裁掉。拿 XML 里的图层坐标直接采样，
+     * 会整批落到卡缘甚至卡外——亮版第一版断言就是这么"量"出「化掉」的假结论的。
+     * 换算：显示 = 54 + (图层 − 54) × 1.5。
+     *
+     * 钉两个关系：
+     *   1) 卡面必须暗于纸面（玻璃不从白底里"化"掉）
+     *   2) 播放形必须显著暗于卡面（亮底上它是实心蓝，不再是挖空，但它仍是唯一锚点）
      * 每个采样点取 3×3 邻域均值——单像素会被抗锯齿边缘骗过去。
      */
     @Test
@@ -310,16 +321,16 @@ class UiScreenshotTest {
             return sum / 9.0
         }
 
-        val ground = luminance(54f, 12f)     // 蓝底：框上方
-        val stroke = luminance(51f, 31.5f)   // 框顶边描边中点（图层 52,39）
-        val mark = luminance(55.5f, 54f)     // 播放形身体（图层 55,54）
+        val paper = luminance(6f, 58f)       // 纸面：显示范围最左，卡外
+        val body = luminance(30f, 58f)       // 卡面：图层 38dp 处，落在前卡内、三角左侧
+        val mark = luminance(53.5f, 58f)     // 播放形中心（图层约 53.7dp，三角质心）
 
-        println("ICON-CONTRAST ground=$ground stroke=$stroke mark=$mark")
+        println("ICON-CONTRAST paper=$paper body=$body mark=$mark")
 
-        assertTrue("48px 时框描边必须亮于蓝底至少 80（实际 stroke=$stroke ground=$ground），否则框立不住",
-            stroke > ground + 80)
-        assertTrue("48px 时播放形必须亮于蓝底至少 80（实际 mark=$mark ground=$ground），否则主符号糊掉",
-            mark > ground + 80)
+        assertTrue("48px 时卡面必须暗于纸面至少 12（实际 body=$body paper=$paper），否则卡片从白底里化掉",
+            body < paper - 12)
+        assertTrue("48px 时播放形必须暗于卡面至少 40（实际 body=$body mark=$mark），否则图标没有锚点",
+            body > mark + 40)
     }
 
     /**

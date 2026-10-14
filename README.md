@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.0），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.1），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.0.apk`](./VivoLivePhoto-v1.8.0.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.1.apk`](./VivoLivePhoto-v1.8.1.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,16 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.1（撤下未获确认的图标）
+
+**v1.8.0 的新图标在未经确认的情况下直接上架，是我的流程错误。** 已撤下，
+本版恢复 v1.7.24 的图标（液态玻璃 · 亮面），其余内容与 v1.8.0 完全一致。
+
+规矩已经改掉：今后任何视觉/审美类改动（图标、配色、动效观感），**渲染图先给用户过目、
+确认之后才允许发布**。
+
+（v1.8.0 图标的设计过程记录保留在下方变更记录里，作为"先过目再上架"这条规矩的 cost。）
 
 ### v1.8.0（全新图标 · 稳定版）
 
