@@ -1,37 +1,147 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 「影中影」图标前景（108dp 画布，内容收在中央 66dp 安全圆内）。
+<?xml version="1.0" encoding="utf-8"?><!-- 「影中影」图标前景（108dp 画布，内容收在中央安全区内）。
 
-     几何全部由一个基准推出，不是各处手写：
-       · 前卡 48×32（3:2 照片比例），圆角 6dp
-       · 后卡同一尺寸，向右上方各偏 5dp、旋转 -6°，**只描边**（3dp、55% 暖白）
-         ⇒ 露出的正是右上角两条边，读作「后面还有一张」，而不是一坨灰
-       · 播放三角**挖空**（与前卡同一条 path + evenOdd）透出底色
-         ⇒ 图标只剩「暗房里的一帧」这一个动作；后卡改描边的原因也在此：
-           若它实心铺在前卡底下，挖空处会透出那片灰而不是深色底（第一版就踩了）
-       · 三角圆角 ≈ 卡片一半；其包围盒中心 (53.5,58) 相对卡片中心右移 1.5dp，
-         因为右指三角形的视觉重心偏左，按边框居中会看起来左坠 -->
+     材质：液态玻璃。VectorDrawable 没有高斯模糊也没有真实折射，所以"玻璃"只能靠亮度分布
+     来伪造。改了四版才站住，中途分别塌成"上亮下暗的塑料板""厚边铬合金框"，以及一版
+     "中段只留 20% 透明"——最后那版被 iconSmallSizeContrast 直接打回：48px 下整块卡与底色
+     糊成一片。据此定出四条判据：
+       1. **斜向扫光**是决定性的那一条：一道沿对角方向走的柔光带（线性渐变两头透明、
+          中段亮），没有它，再准的亮度也只是一块灰板
+       2. 边要**薄而极亮**（2dp、近白、两端亮中段静）：厚而匀的边是金属框，玻璃的边是一条线
+       3. "通透"与"26px 还认得出"是**互相冲突**的，取的是折中：中段留约 55%，
+          玻璃叙事全部交给边、扫光与高光，而不是交给低透明度
+       4. 所有附加光（扫光、底角聚光）都必须**复用 body 的 pathData**，
+          独立图形会溢出玻璃边界糊成脏斑——第一版就栽在聚光上
+
+     几何基准沿用 v1.7.14 批准的方案（只换材质，概念与构图不动）：
+       · 前卡 48×32（3:2 照片比例），外角 r6、内角 r4.5
+       · 后卡同尺寸、右移上移各 5dp、旋转 -6°：这次连它一起做成玻璃片
+         （低透实心 + 细亮边）。第二版只画开放式 L 时，它读作"一根弯折的铁丝"而不是"另一张"
+       · 播放三角仍是**挖空**（evenOdd 透出深色底）：小尺寸下最强的对比来源，
+         v1.7.14 已验证 26px 靠它认形，换材质不许换掉它
+       · 三角包围盒中心 x≈53.75，比卡片中心 52 右移 1.5dp：右指三角视觉重心偏左 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 后卡：只露右上角两条边的描边 -->
+    <!-- 后卡：一块垫在后面的玻璃片，只露右上角 -->
     <group
         android:rotation="-6"
         android:pivotX="57"
         android:pivotY="53">
         <path
-            android:strokeColor="#8CF5F1E8"
-            android:strokeWidth="3"
+            android:fillColor="#0FFFFFFF"
+            android:pathData="M37.5,37 H76.5 A4.5,4.5 0 0 1 81,41.5 V64.5 A4.5,4.5 0 0 1 76.5,69 H37.5 A4.5,4.5 0 0 1 33,64.5 V41.5 A4.5,4.5 0 0 1 37.5,37 Z" />
+        <path
+            android:strokeColor="#59D9EBFA"
+            android:strokeWidth="2.6"
             android:fillColor="#00000000"
             android:pathData="M37.5,37 H76.5 A4.5,4.5 0 0 1 81,41.5 V64.5 A4.5,4.5 0 0 1 76.5,69 H37.5 A4.5,4.5 0 0 1 33,64.5 V41.5 A4.5,4.5 0 0 1 37.5,37 Z" />
     </group>
 
-    <!-- 前卡 + 挖空的播放三角 -->
+    <!-- 前卡玻璃的"面"：顶亮、中段仍留得住形、底边再捞一道 -->
     <path
-        android:fillColor="#F5F1E8"
+        android:fillType="evenOdd"
+        android:pathData="M34.5,44 H69.5 A4.5,4.5 0 0 1 74,48.5 V67.5 A4.5,4.5 0 0 1 69.5,72 H34.5 A4.5,4.5 0 0 1 30,67.5 V48.5 A4.5,4.5 0 0 1 34.5,44 Z
+                          M49.3,51.8 L58.3,57 Q60,58 58.3,59 L49.3,64.2 Q47,65.6 47,63 L47,53 Q47,50.4 49.3,51.8 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="52" android:startY="44"
+                android:endX="52" android:endY="72">
+                <item android:offset="0.0" android:color="#E6F4FBFF" />
+                <item android:offset="0.18" android:color="#A8DCEBF6" />
+                <item android:offset="0.5" android:color="#8CD3E5F2" />
+                <item android:offset="0.82" android:color="#9FDBEAF5" />
+                <item android:offset="1.0" android:color="#CCE8F4FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 斜向扫光：两头透明、中段亮的对角渐变，裁在面里。玻璃之所以是玻璃就靠这一条 -->
+    <path
+        android:fillType="evenOdd"
+        android:pathData="M34.5,44 H69.5 A4.5,4.5 0 0 1 74,48.5 V67.5 A4.5,4.5 0 0 1 69.5,72 H34.5 A4.5,4.5 0 0 1 30,67.5 V48.5 A4.5,4.5 0 0 1 34.5,44 Z
+                          M49.3,51.8 L58.3,57 Q60,58 58.3,59 L49.3,64.2 Q47,65.6 47,63 L47,53 Q47,50.4 49.3,51.8 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="28" android:startY="42"
+                android:endX="78" android:endY="76">
+                <item android:offset="0.0" android:color="#00FFFFFF" />
+                <item android:offset="0.26" android:color="#00FFFFFF" />
+                <item android:offset="0.44" android:color="#4DD9EEFB" />
+                <item android:offset="0.53" android:color="#73FFFFFF" />
+                <item android:offset="0.63" android:color="#1AE8F4FF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 底角聚光：同样复用面的 pathData，光不许跑出玻璃 -->
+    <path
+        android:fillType="evenOdd"
+        android:pathData="M34.5,44 H69.5 A4.5,4.5 0 0 1 74,48.5 V67.5 A4.5,4.5 0 0 1 69.5,72 H34.5 A4.5,4.5 0 0 1 30,67.5 V48.5 A4.5,4.5 0 0 1 34.5,44 Z
+                          M49.3,51.8 L58.3,57 Q60,58 58.3,59 L49.3,64.2 Q47,65.6 47,63 L47,53 Q47,50.4 49.3,51.8 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="63" android:centerY="68"
+                android:gradientRadius="20"
+                android:tileMode="clamp">
+                <item android:offset="0.0" android:color="#33FFFFFF" />
+                <item android:offset="0.5" android:color="#14C9E0F5" />
+                <item android:offset="1.0" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 前卡玻璃的"边"：2dp 薄环，左上与右下两端亮、中段静 -->
+    <path
         android:fillType="evenOdd"
         android:pathData="M34,42 H70 A6,6 0 0 1 76,48 V68 A6,6 0 0 1 70,74 H34 A6,6 0 0 1 28,68 V48 A6,6 0 0 1 34,42 Z
-                          M50,52.9 L58.2,57.6 Q59.5,58 58.2,58.4 L50,63.1 Q47.5,64.5 47.5,61.9 L47.5,54.1 Q47.5,51.5 50,52.9 Z" />
+                          M34.5,44 H69.5 A4.5,4.5 0 0 1 74,48.5 V67.5 A4.5,4.5 0 0 1 69.5,72 H34.5 A4.5,4.5 0 0 1 30,67.5 V48.5 A4.5,4.5 0 0 1 34.5,44 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="28" android:startY="42"
+                android:endX="76" android:endY="74">
+                <item android:offset="0.0" android:color="#FFFFFEFD" />
+                <item android:offset="0.22" android:color="#CCEDF7FF" />
+                <item android:offset="0.52" android:color="#4DD5E6F2" />
+                <item android:offset="0.78" android:color="#A6E0EFFA" />
+                <item android:offset="1.0" android:color="#F5FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 顶边镜面高光 -->
+    <path android:pathData="M37.6,45.4 H64.4 A0.6,0.6 0 0 1 65,46 A0.6,0.6 0 0 1 64.4,46.6 H37.6 A0.6,0.6 0 0 1 37,46 A0.6,0.6 0 0 1 37.6,45.4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="37" android:startY="46"
+                android:endX="65" android:endY="46">
+                <item android:offset="0.0" android:color="#00FFFFFF" />
+                <item android:offset="0.36" android:color="#F2FFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 底边折射亮带：偏右亮 -->
+    <path android:pathData="M39.6,69.9 H66.4 A0.5,0.5 0 0 1 66.9,70.4 A0.5,0.5 0 0 1 66.4,70.9 H39.6 A0.5,0.5 0 0 1 39.1,70.4 A0.5,0.5 0 0 1 39.6,69.9 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="39" android:startY="70.4"
+                android:endX="67" android:endY="70.4">
+                <item android:offset="0.0" android:color="#00FFFFFF" />
+                <item android:offset="0.55" android:color="#73DCEAF6" />
+                <item android:offset="1.0" android:color="#B3FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

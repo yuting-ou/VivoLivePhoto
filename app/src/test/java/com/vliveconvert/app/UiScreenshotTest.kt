@@ -19,6 +19,7 @@ import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -247,6 +248,63 @@ class UiScreenshotTest {
                 small.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
         }
+
+        // 单色层单独出图：Android 13+ 主题图标只取它的 alpha，彩色层的全部渐变会被抹平。
+        // 玻璃塌成剪影之后还认不认得出「一张卡 + 一个挖空三角」，只能这样看见。
+        for (px in listOf(432, 48)) {
+            val mono = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+            val mc = Canvas(mono)
+            mc.drawColor(0xFF2B3A4A.toInt())
+            val md = compose.activity.getDrawable(com.vliveconvert.app.R.drawable.ic_launcher_monochrome)!!
+            md.setBounds(0, 0, px, px)
+            md.draw(mc)
+            File(dir, "icon_monochrome_${px}px.png").outputStream().use {
+                mono.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+    }
+
+    /**
+     * 玻璃材质真正的风险不在大图，在桌面/通知栏那么小的时候被抗锯齿洗平：
+     * 半透明的面 + 1px 级的高光，缩到 48px 很容易变成一块没有边界的灰。
+     *
+     * 所以这条不靠「我看过了」，直接量像素，钉住两个对比关系：
+     *   1) 卡面必须显著亮于暗房底色（玻璃还立得住）
+     *   2) 挖空三角必须显著暗于卡面（图标的「动作」还在）
+     * 每个采样点取 3×3 邻域均值——单像素会被抗锯齿边缘骗过去。
+     */
+    @Test
+    fun iconSmallSizeContrast() {
+        val px = 48
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(0xFFEEEEEE.toInt())
+        val d = compose.activity.getDrawable(com.vliveconvert.app.R.mipmap.ic_launcher)!!
+        d.setBounds(0, 0, px, px)
+        d.draw(canvas)
+
+        val scale = px / 108f
+        fun luminance(xDp: Float, yDp: Float): Double {
+            var sum = 0.0
+            for (dx in -1..1) for (dy in -1..1) {
+                val x = (xDp * scale + dx).toInt().coerceIn(0, px - 1)
+                val y = (yDp * scale + dy).toInt().coerceIn(0, px - 1)
+                val c = bmp.getPixel(x, y)
+                sum += 0.2126 * android.graphics.Color.red(c) +
+                        0.7152 * android.graphics.Color.green(c) +
+                        0.0722 * android.graphics.Color.blue(c)
+            }
+            return sum / 9.0
+        }
+
+        val bg = luminance(10f, 100f)      // 暗房底：左下角落在渐变最暗的一端
+        val body = luminance(36f, 52f)     // 卡面：避开三角与顶边高光条
+        val hole = luminance(53.5f, 58f)   // 播放三角挖空的中心
+
+        assertTrue("48px 时卡面必须亮于底色至少 40（实际 body=$body bg=$bg），否则玻璃被洗平了",
+            body > bg + 40)
+        assertTrue("48px 时挖空三角必须暗于卡面至少 40（实际 body=$body hole=$hole），否则认不出播放形",
+            body > hole + 40)
     }
 
     /** 空状态 */
