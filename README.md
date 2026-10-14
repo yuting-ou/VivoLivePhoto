@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.22），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.23），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.22.apk`](./VivoLivePhoto-v1.7.22.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.23.apk`](./VivoLivePhoto-v1.7.23.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,23 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.23（导出崩溃日志：弹窗反馈 + 去重）
+
+**用户实测：「点了 N 次，看了一下文件夹——导了几十份崩溃日志了。」三个坑一起修：**
+
+1. **【几十份重复】点一次导全部、再点又全量导出**。MediaStore 对同名文件自动追加
+   `(1)` `(2)` 序号，连点 N 次就是几十份。现在**按文件名去重**：已导出的名字记在本地，
+   并在每次导出前把 `Download/VLiveConvert` 里已存在的同名文件一并计入——
+   升级后第一次点也不会再复制。重复点击的弹窗明说「没有新日志：N 份此前已导出过」
+2. **【反馈不可见】完成提示写在设置页顶栏一小块**，用户看半天注意不到。
+   改为**弹窗**：导出几份、跳过几份、有没有失败，一眼看清，点「知道了」关
+3. **【没有点击反馈感】设置页所有行用的是无涟漪点击**（`clickableNoRipple`）。
+   改回标准 `clickable`（带涟漪；M3 Card 会把内容裁进圆角，涟漪不会溢出卡片）
+
+- 验证：130 组 JVM 单测。`CrashLogExportTest` 重写为弹窗断言并新增
+  **连点两次的去重端到端**（第一次「已导出 1 份新日志」→ 再点 →
+  「没有新日志：1 份此前已导出过」）；Lint 0 error；R8 + apksigner 通过
 
 ### v1.7.22（动画不再依赖 ROM 派发事件）
 

@@ -3,6 +3,7 @@ package com.vliveconvert.app
 import android.Manifest
 import androidx.compose.runtime.MutableState
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -23,13 +24,14 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 /**
- * 崩溃日志导出：真实点击 + 就地反馈。
+ * 崩溃日志导出：真实点击 + 弹窗反馈 + 去重。
  *
- * 两个缺陷在这里收口：
- * 1. 【闪退】导出跑在 IO 协程里但没有任何兜底，任何未捕获异常 = 应用直接崩溃
- *    （用户点的恰恰是「崩溃日志」入口——闪退后想反馈，结果又闪退，死循环）
- * 2. 【点了没反应】动作反馈写主页状态栏，用户人在设置页 → 什么也看不见。
- *    v1.7.21 起设置页就地显示 statusText，本用例断言反馈节点出现在**设置页内**
+ * 用户实测踩到的三个坑在这里收口：
+ * 1. 【闪退】导出在 IO 协程里没有任何兜底 → 未捕获异常 = 再次闪退（死循环）
+ * 2. 【点了没反应 ×2】反馈写在顶栏小字里看半天注意不到；行本身没有涟漪反馈感
+ * 3. 【几十份重复】点一次导出全部、再点又全量导出——MediaStore 对同名文件
+ *    自动追加 "(1)" "(2)" 序号，连点 N 次攒几十份。现在按文件名去重：
+ *    已导过的不再写，弹窗明说「没有新日志」
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w400dp-h2400dp",
@@ -72,54 +74,57 @@ class CrashLogExportTest {
         compose.waitForIdle()
     }
 
-    /** 等待 IO 协程回主线程置上的状态文案（推不动虚拟时钟，只能真等） */
-    private fun awaitStatus(timeoutMs: Long = 5000, probe: (String) -> Boolean): String {
+    /** 等弹窗出现（IO 协程回主线程置状态，推不动虚拟时钟，只能真等） */
+    private fun awaitDialog(part: String, timeoutMs: Long = 5000) {
         val deadline = System.currentTimeMillis() + timeoutMs
-        var current = ""
         while (System.currentTimeMillis() < deadline) {
             compose.waitForIdle()
-            activity.runOnUiThread { current = ConvertCenter.statusText }
+            val hits = compose.onAllNodesWithText(part, substring = true).fetchSemanticsNodes()
+            if (hits.isNotEmpty()) return
             Thread.sleep(50)
-            if (probe(current)) return current
         }
-        throw AssertionError("等待超时：statusText=「$current」")
+        throw AssertionError("等待弹窗超时：未出现包含「$part」的文案")
     }
 
     private fun openSettings() {
         compose.onNodeWithText("设置 ›").performClick()
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
+        assertTrue("前置：应已在设置页", flag("showSettings"))
+    }
+
+    private fun tapExportRow() {
+        compose.onNodeWithText("导出崩溃日志", substring = true).performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.waitForIdle()
     }
 
     @Test
-    fun exportRowSpeaksInPlace_withLogs() {
-        // 造一份假崩溃日志（正是应用闪退后会留下的东西）
+    fun exportSpeaksInDialog_andDeduplicatesOnSecondTap() {
         val dir = File(activity.filesDir, "crash").apply { mkdirs() }
         File(dir, "crash_123.txt").writeText("app: test\nfake stack")
-        assertEquals(1, com.vliveconvert.app.CrashLog.count(activity))
 
         openSettings()
-        assertTrue("前置：应已在设置页", flag("showSettings"))
-        compose.onNodeWithText("导出崩溃日志", substring = true).assertExists()
-        compose.onNodeWithText("导出崩溃日志", substring = true).performClick()
+        tapExportRow()
+        awaitDialog("已导出 1 份新日志")
 
-        val status = awaitStatus { it.contains("导出") }
-        assertTrue(
-            "导出反馈必须出现在设置页内（写在主页 = 用户看不见 = 点了没反应）: $status",
-            status.contains("已导出") || status.contains("导出失败")
-        )
-        compose.onNodeWithText(status).assertExists()
+        // 关掉弹窗再点一次——正是用户「连点 N 次」的动作；
+        // 期望明说没有新日志，而不是再写一份 (1) 重复文件
+        compose.onNodeWithText("知道了").performClick()
+        compose.waitForIdle()
+        tapExportRow()
+        awaitDialog("没有新日志：1 份此前已导出过")
+
+        compose.onNodeWithText("知道了").performClick()
+        compose.waitForIdle()
     }
 
     @Test
-    fun exportRowSpeaksInPlace_withoutLogs() {
+    fun exportSpeaksInDialog_withoutLogs() {
         openSettings()
-        assertTrue("前置：应已在设置页", flag("showSettings"))
-        compose.onNodeWithText("导出崩溃日志", substring = true).assertExists()
-        compose.onNodeWithText("导出崩溃日志", substring = true).performClick()
-
-        val status = awaitStatus { it.contains("导出") }
-        assertEquals("没有可导出的崩溃日志", status)
-        compose.onNodeWithText(status).assertExists()
+        tapExportRow()
+        awaitDialog("还没有崩溃日志可导出")
+        compose.onNodeWithText("知道了").performClick()
+        compose.waitForIdle()
     }
 }

@@ -335,6 +335,8 @@ class MainActivity : ComponentActivity() {
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
     private var showOutputPathDialog by mutableStateOf(false)
+    // 崩溃日志导出结果的弹窗文案；null = 不弹。用弹窗而不是顶栏小字（用户反馈过看不见）
+    private var crashExportMessage by mutableStateOf<String?>(null)
     private var outputPathInput by mutableStateOf("")
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
@@ -1099,6 +1101,19 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // 崩溃日志导出结果：弹窗（v1.7.23）。此前反馈写在顶栏小字里，
+                // 用户看半天注意不到，连点 N 次导出几十份重复文件
+                crashExportMessage?.let { msg ->
+                    AlertDialog(
+                        onDismissRequest = { crashExportMessage = null },
+                        title = { Text("导出崩溃日志") },
+                        text = { Text(msg) },
+                        confirmButton = {
+                            Button(onClick = { crashExportMessage = null }) { Text("知道了") }
+                        }
+                    )
+                }
+
                 // 输出目录修改弹窗
                 if (showOutputPathDialog) {
                     AlertDialog(
@@ -1671,12 +1686,20 @@ class MainActivity : ComponentActivity() {
             // 必须兜底：这里在 IO 协程里，未捕获异常 = 直接闪退（用户正想导出的就是崩溃日志）
             val outcome = runCatching { CrashLog.exportToDownloads(applicationContext) }
             withContext(Dispatchers.Main) {
-                ConvertCenter.statusText = outcome.fold(
-                    onSuccess = { n ->
-                        if (n > 0) "已导出 $n 个崩溃日志到 Download/VLiveConvert（可反馈给开发者）"
-                        else "没有可导出的崩溃日志"
+                // 反馈用**弹窗**而不是状态栏小字——用户明确反馈过：顶上那一小块
+                // 看半天注意不到，连点 N 次导出几十份重复
+                crashExportMessage = outcome.fold(
+                    onSuccess = { r ->
+                        when {
+                            !r.hasAnyLog -> "还没有崩溃日志可导出。应用闪退时会自动留一份在这里。"
+                            r.exported == 0 -> "没有新日志：${r.already} 份此前已导出过，" +
+                                "不重复写 Download/VLiveConvert。"
+                            else -> "已导出 ${r.exported} 份新日志到 Download/VLiveConvert。" +
+                                (if (r.already > 0) "（跳过已导出的 ${r.already} 份）" else "") +
+                                "\n可直接发给开发者定位问题。"
+                        }
                     },
-                    onFailure = { e -> "导出失败（${e.javaClass.simpleName}），可尝试重启后再导" }
+                    onFailure = { e -> "导出失败（${e.javaClass.simpleName}），可尝试重启后再导。" }
                 )
                 crashLogCount = CrashLog.count(this@MainActivity)
             }

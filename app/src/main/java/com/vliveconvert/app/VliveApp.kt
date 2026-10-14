@@ -26,6 +26,8 @@ internal object CrashLog {
 
     private const val DIR = "crash"
     private const val KEEP = 10 // 只保留最近 10 份
+    private const val PREFS = "vliveconvert"
+    private const val KEY_EXPORTED = "crash_exported_names"
 
     fun install(app: Application) {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -64,17 +66,46 @@ internal object CrashLog {
         0
     }
 
-    /** 把全部崩溃日志导出到 Download/VLiveConvert（MediaStore 标准写入，无需权限） */
-    fun exportToDownloads(context: Context): Int {
+    /** 一次导出的结果：exported=本次新导出份数；already=此前已导出、本次跳过份数 */
+    data class CrashExport(val exported: Int, val already: Int, val hasAnyLog: Boolean)
+
+    /**
+     * 把崩溃日志导出到 Download/VLiveConvert（MediaStore 标准写入，无需权限）。
+     *
+     * **按文件名去重**：MediaStore 对同名 DISPLAY_NAME 会自动追加 "(1)" "(2)" 序号，
+     * 用户连点 N 次就会攒出几十份重复文件（v1.7.22 及之前正是如此）。
+     * 已导出的名字记在 SharedPreferences，第二次点只导新出现的崩溃。
+     */
+    fun exportToDownloads(context: Context): CrashExport {
         val files = try {
-            File(context.filesDir, DIR).listFiles()?.sortedBy { it.name } ?: return 0
+            File(context.filesDir, DIR).listFiles()?.sortedBy { it.name }
+                ?: return CrashExport(0, 0, false)
         } catch (_: Exception) {
-            return 0
+            return CrashExport(0, 0, false)
         }
-        if (files.isEmpty()) return 0
+        if (files.isEmpty()) return CrashExport(0, 0, false)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val done = (prefs.getStringSet(KEY_EXPORTED, emptySet()) ?: emptySet()).toMutableSet()
         val resolver = context.contentResolver
+        // 预填设备上已存在的同名文件（v1.7.22 及之前连点攒下的几十份重复）：
+        // 升级后第一次点也不再复制。查不到（影子环境/ROM 差异）就退回仅靠本地记录
+        try {
+            resolver.query(
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?)",
+                arrayOf("Download/VLiveConvert/", "Download/VLiveConvert"),
+                null
+            )?.use { c ->
+                val nameIdx = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                while (c.moveToNext()) done.add(c.getString(nameIdx))
+            }
+        } catch (_: Exception) {
+        }
         var exported = 0
+        var already = 0
         for (f in files) {
+            if (f.name in done) { already++; continue }
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
@@ -92,11 +123,15 @@ internal object CrashLog {
                     uri,
                     ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
                     null, null)
+                done.add(f.name)
                 exported++
             } catch (_: Exception) {
                 // 单个失败不影响其余导出
             }
         }
-        return exported
+        if (exported > 0) {
+            prefs.edit().putStringSet(KEY_EXPORTED, done).apply()
+        }
+        return CrashExport(exported, already, true)
     }
 }
