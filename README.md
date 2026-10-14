@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.1），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.2），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.1.apk`](./VivoLivePhoto-v1.8.1.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.2.apk`](./VivoLivePhoto-v1.8.2.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,25 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.2（图标定稿 · 苹果式 Liquid Glass）
+
+**经四轮渲染、逐轮给用户过目确认后的图标定稿**（v1.8.0 未确认即上架的教训之后，
+本轮 A/B/C/D 四候选 + E/E2/E3/E4 四轮迭代全部先出图再改）。
+
+定稿 = **A 的亮 × B 的暗合体 + 苹果 Liquid Glass 语言**：
+
+- 底色对角渐变：左上近白 → 右下深墨蓝，一张图里同时有明暗两种氛围
+- 玻璃改**清透**而非乳白：白雾降到 10%–25%，底色明暗直接从卡后透出来；
+  玻璃身里一层极淡品牌蓝做"增饱和"（苹果玻璃的色彩签名）
+- **正胶囊形**（外 r16，直边消失）+ 卡片下悬浮软阴影
+- 苹果签名细节：贴顶的脆亮 rim 光（细白线 + 柔光双层）、底缘内侧厚度暗线、沉底光池
+- 波浪光带收敛到只剩一丝（苹果的高光很克制）
+
+验证：141 组单测、小尺寸对比断言按新配色重写并实测
+（底 219 / 玻璃身 156 / 播放形 106 / 后卡 182，三条关系各留 ~40% 余量；
+播放形采样点曾错到三角上缘之外，修正为质心 (50.8,57.7)）、Lint 0 error、
+R8 + apksigner 通过、432/48/26px + 圆遮罩 + 单色剪影逐帧看过（单色层同步胶囊几何）。
 
 ### v1.8.1（撤下未获确认的图标）
 

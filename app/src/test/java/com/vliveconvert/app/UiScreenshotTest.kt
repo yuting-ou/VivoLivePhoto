@@ -292,9 +292,10 @@ class UiScreenshotTest {
      * 会整批落到卡缘甚至卡外——亮版第一版断言就是这么"量"出「化掉」的假结论的。
      * 换算：显示 = 54 + (图层 − 54) × 1.5。
      *
-     * 钉两个关系：
-     *   1) 卡面必须暗于纸面（玻璃不从白底里"化"掉）
-     *   2) 播放形必须显著暗于卡面（亮底上它是实心蓝，不再是挖空，但它仍是唯一锚点）
+     * 钉三个关系（E4 苹果式清透玻璃）：
+     *   1) 播放形必须显著暗于玻璃身（主符号锚点）
+     *   2) 玻璃身必须与底色可辨（清透 ≠ 隐形）
+     *   3) 后卡必须与底色可辨（"两张卡"的构图还在）
      * 每个采样点取 3×3 邻域均值——单像素会被抗锯齿边缘骗过去。
      */
     @Test
@@ -321,16 +322,20 @@ class UiScreenshotTest {
             return sum / 9.0
         }
 
-        val paper = luminance(6f, 58f)       // 纸面：显示范围最左，卡外
-        val body = luminance(30f, 58f)       // 卡面：图层 38dp 处，落在前卡内、三角左侧
-        val mark = luminance(53.5f, 58f)     // 播放形中心（图层约 53.7dp，三角质心）
+        val ground = luminance(54f, 12f)     // 底色：主符号上方（图层约 54,26）
+        val body = luminance(45f, 50f)       // 玻璃身左半（图层 48,50，避开三角与 rim 光）
+        val mark = luminance(49.5f, 60f)     // 播放形质心（图层 50.8,57.7；(55,54) 在三角上缘之外）
+        val back = luminance(86f, 38f)       // 后卡右上角（图层 75.3,42.7）
 
-        println("ICON-CONTRAST paper=$paper body=$body mark=$mark")
+        println("ICON-CONTRAST ground=$ground body=$body mark=$mark back=$back")
 
-        assertTrue("48px 时卡面必须暗于纸面至少 12（实际 body=$body paper=$paper），否则卡片从白底里化掉",
-            body < paper - 12)
-        assertTrue("48px 时播放形必须暗于卡面至少 40（实际 body=$body mark=$mark），否则图标没有锚点",
-            body > mark + 40)
+        // E4（苹果式清透玻璃）的三个对比关系，阈值实测后各留 ~40% 余量：
+        assertTrue("48px 时播放形必须暗于玻璃身至少 25（实际 body=$body mark=$mark），否则主符号糊掉",
+            body > mark + 25)
+        assertTrue("48px 时玻璃身必须与底色可辨（实际 body=$body ground=$ground）",
+            kotlin.math.abs(body - ground) > 12)
+        assertTrue("48px 时后卡必须可辨（实际 back=$back ground=$ground）",
+            kotlin.math.abs(back - ground) > 10)
     }
 
     /**
