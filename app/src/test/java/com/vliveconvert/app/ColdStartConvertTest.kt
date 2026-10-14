@@ -181,6 +181,27 @@ class ColdStartConvertTest {
         clickStartExpectFeedback("开始转换")
     }
 
+    /**
+     * 反馈者强调「**每次**」都这样（机型 OriginOS 6 / Android 16），说明是确定性的、不是竞态。
+     * 最可能的确定性形状就是上面那条：他反复用同一张照片试，而旧队列里已有它的完成记录。
+     * 这条钉住反面：旧队列 + **新**照片必须照常能转——否则是我的修复把恢复流程带坏了。
+     */
+    @org.junit.Test
+    fun coldStart_leftoverQueuePlusNewPhoto_startConvertWorks() {
+        val yesterday = sampleItem("IMG_OLD_DONE")
+        activity.runOnUiThread {
+            ConvertCenter.items.add(
+                ConvertItem(item = yesterday, status = "完成：已导出到输出目录", done = true))
+        }
+        compose.waitForIdle()
+
+        addThroughPicker("IMG_BRAND_NEW")
+        compose.onNodeWithText("开始转换（1）").assertExists()
+        clickStartExpectFeedback("开始转换（1）")
+        assertTrue("待转换的应只有新加那张",
+            ConvertCenter.items.count { !it.done && !it.failed } == 1)
+    }
+
     // ---------- 路径 3：与「关选择器」同一帧提交入队（撞转场） ----------
 
     /**
