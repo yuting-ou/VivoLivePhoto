@@ -972,7 +972,11 @@ class MainActivity : ComponentActivity() {
 
     /** 选择器确认：把选中的双文件实况加入转换列表（按 id 去重） */
     private fun addPickedItems(picked: List<MediaItem>) {
-        if (picked.isEmpty()) return
+        if (picked.isEmpty()) {
+            // 「添加」不再置灰，所以这里必须说话，否则又变成一个点了没反应的按钮
+            ConvertCenter.statusText = "先勾选要添加的照片"
+            return
+        }
         var added = 0
         for (item in picked) {
             if (ConvertCenter.items.any { it.item.id == item.id }) continue

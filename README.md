@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.13），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.14），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.13.apk`](./VivoLivePhoto-v1.7.13.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.14.apk`](./VivoLivePhoto-v1.7.14.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,61 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.14（稳定版）
+
+**一、把「点了没反应」这一类彻底扫了一遍**
+
+上一版修的是「修复文件时间」的入口顺序，但入口通了不等于页面能用。这次给**每一个入口**
+加了真实点击的扫查用例（`ToolReachabilityTest`）：设置页每一行、选择器、修复时间页内部、
+状态详情、主页主按钮——断言每一击都必须产生可观察结果（界面切换／弹窗置上／提示说话）。
+
+扫出来三处新的静默控制，全部修掉：
+
+- 修复时间页的「修复所选时间」：`enabled = selected.isNotEmpty() && !isFixing`，
+  没勾选时是个点不动的哑按钮 ⇒ 改为始终可点，由 `startFixTimes` 说明原因
+- 选择器页的「添加」：同样的 `enabled = selected.isNotEmpty()` ⇒ 改为始终可点，
+  `addPickedItems` 在空选择时给出「先勾选要添加的照片」
+- 「把输出移到相机相册」的忙分支此前**没有任何用例真正打到**（见下）
+
+**二、自曝：我的第一版扫查里有两条是空过用例**
+
+变异检查（把修好的代码退回缺陷版本，看用例是否变红）当场抓到：
+
+- `picker_addWithNothingSelected_speaks` 写了 `if (!showPicker) return` —— 前置条件不满足时
+  整条静默通过，把「添加」退回置灰它照样绿
+- `settingsRow_moveOutputs_speaks...` 走的是正常分支，根本没碰到 `isConverting` 那道守卫
+
+两条都已补硬（去掉提前 return；新增一条正面打忙分支的用例）。补完后 5 个变异全部被捕获，
+且 4 条对照用例（关于／状态详情／缺权限引导／正常移动）保持绿——不是"整体变严"。
+
+**三、启动图标几何精修**
+
+同一概念（两张叠起的照片 + 播放形），但把造型规矩立起来：
+
+- 播放三角改成**挖空**（与前卡同一条 path + `evenOdd`）透出深墨蓝底，图标由三色降为双色；
+  副产品是 monochrome 主题图标层天然成立，不必另设计
+- 后卡改为**只露右上角两条边的描边**（向右上方各偏 5dp、旋转 -6°）。第一版曾把后卡做成
+  实心 45% 透明，渲染出来是一大块脏灰、而且把挖空处染成灰色 —— 看图后推翻重做
+- 父子圆角：卡片 6dp、后卡 4.5dp、三角 3dp，由一个基准推出
+- 光学居中：右指三角形视觉重心偏左，包围盒中心相对卡片中心右移 1.5dp
+- 去掉图标里的品牌蓝（应用内仍保留该色）
+- 渲染用例扩到 **432 / 108 / 48 / 26 四个尺寸**：图标成不成立只看它在桌面和通知栏
+  那么大时还认不认得出，只出大图等于没验
+- 删除仓库根目录的 `ico.png`（v1.7.8 之前的旧方向，紫蓝渐变 + 光圈 + "LivePhoto" 文字，
+  带文字不能当图标，留着误导后来的人）
+
+**四、测试基建**
+
+- 新增 `ShadowExternalStorageAccess`：Robolectric 未实现
+  `Environment.isExternalStorageManager()`（真调抛 `ArrayIndexOutOfBoundsException`，已证实），
+  导致「修复文件时间」的授权／未授权两条分支在测试里都走不到。补上后可分别断言
+- 「输出目录」编辑框单独放默认视口：含文本框的 `AlertDialog` 在自定义视口下会让 Compose
+  测试 60 秒进不了 idle（用裸 Activity 渲染同样内容也复现，属测试框架限制而非产品缺陷，
+  故未记在产品账上，也没有为绕开它而删掉这条覆盖）
+
+验证：108 组 JVM 单测（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS 大小写
+不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.13（稳定版）
 

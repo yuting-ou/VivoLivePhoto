@@ -282,8 +282,8 @@ fun PickerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Button(
-                    onClick = { onConfirm(selected.toList()) },
-                    enabled = selected.isNotEmpty()
+                    onClick = { onConfirm(selected.toList()) }
+                    // 不置灰：一张没勾就点「添加」时由 addPickedItems 说明原因
                 ) { Text("添加") }
             }
         }

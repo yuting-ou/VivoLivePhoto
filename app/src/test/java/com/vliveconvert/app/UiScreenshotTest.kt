@@ -233,6 +233,20 @@ class UiScreenshotTest {
         val dir = File("build/ui-shots").apply { mkdirs() }
         File(dir, "icon.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         File(dir, "icon_round.png").outputStream().use { round.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        // 小尺寸实测：图标成不成立，最终看桌面（~48–72px）与通知栏（~26px）那么大时
+        // 还认不认得出「一张照片里挖出一个播放形」。只出 432px 大图等于没验。
+        for (px in listOf(108, 48, 26)) {
+            val small = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+            val sc = Canvas(small)
+            sc.drawColor(0xFFEEEEEE.toInt())
+            val sd = compose.activity.getDrawable(com.vliveconvert.app.R.mipmap.ic_launcher)!!
+            sd.setBounds(0, 0, px, px)
+            sd.draw(sc)
+            File(dir, "icon_${px}px.png").outputStream().use {
+                small.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
     }
 
     /** 空状态 */

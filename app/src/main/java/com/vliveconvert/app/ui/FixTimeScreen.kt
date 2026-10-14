@@ -342,8 +342,9 @@ fun FixTimeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Button(
-                        onClick = { onFix(selected.toList()) },
-                        enabled = selected.isNotEmpty() && !isFixing
+                        onClick = { onFix(selected.toList()) }
+                        // 不置灰：没勾选就点「修复」时由 startFixTimes 说明原因，
+                        // 而不是把点击吞掉（与主按钮同一套纪律）
                     ) { Text(if (isFixing) "修复中…" else "修复所选时间") }
                 }
             }
