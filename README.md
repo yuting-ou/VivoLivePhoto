@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.21），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.22），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.21.apk`](./VivoLivePhoto-v1.7.21.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.22.apk`](./VivoLivePhoto-v1.7.22.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,26 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.22（动画不再依赖 ROM 派发事件）
+
+**真机上「动画效果呢？」——因为此前的动画全部依赖系统下发手势进度事件，
+而 OriginOS 这类 ROM 很可能根本不给第三方应用派发**：没有事件，代码走普通返回分支，
+你看到的就是老的滑动过渡。
+
+现在**动画不再依赖 ROM**：
+
+- 有进度事件（AOSP 14+ 等）：跟手指走，松手续完——原行为不变
+- 没有进度事件：**自驱动**把同一套双层动画从 0 完整播到 1 再换层
+  （缩 0.88 → 横移 1/14 窗宽 → 上浮 → 32dp 圆角 → 尾段淡出，底层页迎上来）
+- 页内的返回按钮（设置/关于/修复时间/选择器顶栏）也改走同一套动画——
+  按钮返回不该比手势返回少一段；动画进行中忽略重复点击，防连跳两层
+
+时长常量化：续完 150ms、自驱动 240ms、取消收回 200ms——要调手感就改这三处。
+
+- 验证：130 组 JVM 单测（`BackNavigationTest` 现在走的就是自驱动路径：
+  无手势事件 → 240ms 完整编排 → 短路换层，端到端成立）；Lint 0 error；
+  R8 + apksigner 通过
 
 ### v1.7.21（真机卡死闪退修复 + 崩溃日志可导出）
 

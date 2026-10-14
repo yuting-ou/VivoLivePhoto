@@ -157,6 +157,16 @@ internal fun backRevealScreen(
  *  官方 platform-samples 用 PathInterpolator(0,0,0,1) 缓出——起点跟手、收尾加速入位 */
 internal val PredictiveEase = CubicBezierEasing(0f, 0f, 0f, 1f)
 
+/** 一次续接动画的记账：目标是多少（1f=弹出 / 0f=收回）、用多长时间。 */
+internal data class BackAnim(val target: Float, val durationMs: Int)
+
+// 手势提交后的续完：从当前进度到位，要短——手已经松了
+internal const val COMMIT_FINISH_MS = 150
+// 无进度事件时的自驱动整段播放 + 页内返回按钮：完整编排，稍长
+internal const val SELF_DRIVEN_POP_MS = 240
+// 取消收回
+internal const val CANCEL_RETURN_MS = 200
+
 /** 顶层页（正在退出的那个）的手势变换。
  *  官方规范的原版参数（缩 0.9、移 1/20 窗宽）在全屏页面之间**读不出来**——
  *  逐帧渲染验收时两页几乎都还是满幅，观感只是"抖了一下"（用户原话：不好看）。
@@ -292,13 +302,24 @@ class MainActivity : ComponentActivity() {
     private val backProgressAnim = Animatable(0f)
     // 手势从哪条边发起：左缘 → 顶层页向右让位（+1），右缘 → 向左（-1），0 = 无手势
     private var backEdgeSign by mutableFloatStateOf(0f)
-    // 非空 = 有一段续接动画要跑（1f=提交续完，0f=取消收回）。**只记账不执行**：
-    // animateTo 必须在组合内的 LaunchedEffect 里跑（那里才有 MonotonicFrameClock），
-    // 放进 handler 块或 lifecycleScope，真机上卡死/崩溃（v1.7.20 事故）
-    private var backAnimTarget by mutableStateOf<Float?>(null)
+    // 非空 = 有一段续接动画要跑。**只记账不执行**：animateTo 必须在组合内的
+    // LaunchedEffect 里跑（那里才有 MonotonicFrameClock），放进 handler 块或
+    // lifecycleScope，真机上卡死/崩溃（v1.7.20 事故）
+    private var backAnim by mutableStateOf<BackAnim?>(null)
     // 手势提交后的弹层要**跳过** AnimatedContent 的滑动过渡（揭底层已在原地，
     // 再滑一次就是双重运动）。普通字段而不是状态：只在过渡创建的那一刻被读一次
     private var predictiveCommitArmed = false
+
+    /**
+     * 页内返回按钮走的路径：自驱动播放同一套双层动画后弹层。
+     * 与手势共用一套数学——按钮返回不该比手势返回少一段动画。
+     * backAnim 非空时忽略重复点击（动画进行中再弹一次会连跳两层）
+     */
+    private fun animateBackPop() {
+        if (backAnim != null) return
+        backEdgeSign = 1f
+        backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS)
+    }
 
     /** 弹掉当前最上面那一层（预测性返回与普通返回共用同一份决策） */
     private fun popTopLayer() {
@@ -621,7 +642,7 @@ class MainActivity : ComponentActivity() {
                             sawGesture = true
                             // 新手势进来：掐掉任何没跑完的续接动画（LaunchedEffect 随键重启），
                             // 并复位提交标记（上个提交遗留的 true 不许污染下一次过渡）
-                            backAnimTarget = null
+                            backAnim = null
                             predictiveCommitArmed = false
                             backEdgeSign = when (event.swipeEdge) {
                                 BackEventCompat.EDGE_LEFT -> 1f
@@ -631,19 +652,20 @@ class MainActivity : ComponentActivity() {
                             backProgressAnim.snapTo(event.progress)
                         }
                         if (!sawGesture || backProgressAnim.value <= 0f) {
-                            // 桌面按钮返回：没有手势进度，直接弹层，走既有的滑动过渡
-                            predictiveCommitArmed = false
-                            popTopLayer()
+                            // ROM 不派发进度事件（OriginOS 等一大批国产 ROM 如此）时，
+                            // 手势提交到这里一个事件都没有——**自驱动**把同一套双层动画
+                            // 从 0 播到 1 再换层，保证任何设备上都有预测性返回的观感。
+                            // 边信息缺失按左缘处理（与既有滑出方向一致）
+                            backEdgeSign = 1f
+                            backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS)
                         } else {
                             // 手势提交：只**记账**（回填续接目标），动画由组合内的
-                            // LaunchedEffect 执行——官方实现的块跑在 rememberCoroutineScope()
-                            // 里（自带帧时钟），但取消路径曾挂在 lifecycleScope（没有帧时钟，
-                            // 真机上永久挂起）。统一都交给组合
-                            backAnimTarget = 1f
+                            // LaunchedEffect 执行——从当前进度续完，跟手感
+                            backAnim = BackAnim(1f, COMMIT_FINISH_MS)
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         // 手势取消：记一个"收回"目标后必须重抛——取消不等于「已处理返回」
-                        backAnimTarget = 0f
+                        backAnim = BackAnim(0f, CANCEL_RETURN_MS)
                         throw e
                     }
                 }
@@ -653,22 +675,21 @@ class MainActivity : ComponentActivity() {
                 // 目标 0f = 取消：两层一起平滑收回。
                 // withTimeout 兜底：提交瞬间若页面已退到后台、帧时钟不吐帧，
                 // 宁可让页面直接就位，也不能把返回链路挂死（v1.7.20 卡死的形状）
-                LaunchedEffect(backAnimTarget) {
-                    val target = backAnimTarget ?: return@LaunchedEffect
+                LaunchedEffect(backAnim) {
+                    val anim = backAnim ?: return@LaunchedEffect
                     try {
-                        withTimeout(600) {
-                            backProgressAnim.animateTo(
-                                target, tween(if (target == 1f) 150 else 200))
+                        withTimeout(anim.durationMs + 450L) {
+                            backProgressAnim.animateTo(anim.target, tween(anim.durationMs))
                         }
                     } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                        backProgressAnim.snapTo(target)
+                        backProgressAnim.snapTo(anim.target)
                     }
-                    if (target == 1f) {
+                    if (anim.target == 1f) {
                         predictiveCommitArmed = true
                         popTopLayer()
                         backProgressAnim.snapTo(0f)
                     }
-                    backAnimTarget = null
+                    backAnim = null
                 }
 
                 Box(
@@ -702,7 +723,7 @@ class MainActivity : ComponentActivity() {
                                 albums = pickerAlbums,
                                 scanner = scanner,
                                 scannerScope = lifecycleScope,
-                                onBack = { showPicker = false },
+                                onBack = { animateBackPop() },
                                 onConfirm = { picked ->
                                     showPicker = false
                                     addPickedItems(picked)
@@ -716,7 +737,7 @@ class MainActivity : ComponentActivity() {
                                 progress = fixProgress,
                                 statusText = fixStatus,
                                 selectionReset = fixSelectionReset,
-                                onBack = { showFixTime = false },
+                                onBack = { animateBackPop() },
                                 onFix = { selected -> startFixTimes(selected) }
                             )
                             Screen.Settings -> SettingsScreen(
@@ -728,7 +749,7 @@ class MainActivity : ComponentActivity() {
                                 deleteOriginal = deleteOriginal,
                                 crashLogCount = crashLogCount,
                                 isBusy = ConvertCenter.isConverting || isMovingOutputs || isFixing,
-                                onBack = { showSettings = false },
+                                onBack = { animateBackPop() },
                                 onEditOutputPath = {
                                     outputPathInput = outputRelPath
                                     showOutputPathDialog = true
@@ -755,7 +776,7 @@ class MainActivity : ComponentActivity() {
                             Screen.About -> AboutScreen(
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
-                                onBack = { showAbout = false }
+                                onBack = { animateBackPop() }
                             )
                             Screen.Main -> MainScreen(
                                 items = ConvertCenter.items.toList(),
