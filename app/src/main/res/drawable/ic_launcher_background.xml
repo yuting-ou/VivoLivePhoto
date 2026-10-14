@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?><!-- 「影中影」图标背景层（108dp 全幅，会被启动器裁成圆/方/球形）。
 
-     液态玻璃的"液"来自底色本身：一块被侧光照到的暗房。VectorDrawable 没有高斯模糊，
-     所以这里一律用渐变叠出体积，而不是画模糊：
-       · 1 层对角线性底（左上亮、右下沉），定住光源方向（与前景所有高光同向）
-       · 2 层径向辉光（左上冷白、右下品牌蓝 #415FFF），提供"光在介质里走了一段"的错觉
-       · 1 层径向暗角压回中心，避免小尺寸时整块发灰 -->
+     亮面版：底色是「一张白纸」，玻璃靠边与投影立住，而不是靠明暗反差。
+     VectorDrawable 没有高斯模糊，所以仍一律用渐变叠体积：
+       · 1 层对角线性底（左上偏白、右下偏冷灰），定住光源方向（与前景所有高光同向）
+       · 1 层左上白光晕 = 光源本身；1 层右下极淡品牌蓝 = 玻璃把环境色吸进去
+       · 角上只留 3% 的冷灰压边。**亮底不能压暗角**，压了会显脏，这是与暗面版最大的区别 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -12,61 +12,61 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 1 · 对角底色 -->
+    <!-- 1 · 对角底色：暖白 → 冷灰白 -->
     <path android:pathData="M0,0 H108 V108 H0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
                 android:startX="14" android:startY="8"
                 android:endX="94" android:endY="100">
-                <item android:offset="0.0" android:color="#FF22384D" />
-                <item android:offset="0.45" android:color="#FF152334" />
-                <item android:offset="1.0" android:color="#FF070C12" />
+                <item android:offset="0.0" android:color="#FFFBFDFF" />
+                <item android:offset="0.5" android:color="#FFEFF4FB" />
+                <item android:offset="1.0" android:color="#FFDCE5F1" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- 2a · 左上冷白辉光（主光源） -->
+    <!-- 2 · 左上光源晕 -->
     <path android:pathData="M0,0 H108 V108 H0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="radial"
-                android:centerX="30" android:centerY="22"
-                android:gradientRadius="72"
+                android:centerX="28" android:centerY="20"
+                android:gradientRadius="74"
                 android:tileMode="clamp">
-                <item android:offset="0.0" android:color="#3CC9E4F5" />
-                <item android:offset="0.5" android:color="#159FC4DE" />
+                <item android:offset="0.0" android:color="#B3FFFFFF" />
+                <item android:offset="0.55" android:color="#40FFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3 · 右下极淡品牌蓝（玻璃吸进去的环境色） -->
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="88" android:centerY="94"
+                android:gradientRadius="60"
+                android:tileMode="clamp">
+                <item android:offset="0.0" android:color="#2E415FFF" />
+                <item android:offset="0.6" android:color="#145C79E8" />
                 <item android:offset="1.0" android:color="#00000000" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- 2b · 右下品牌蓝辉光（对侧补色，玻璃里偏蓝是折射的结果） -->
+    <!-- 4 · 角上极轻的冷灰压边：亮底只压 3%，多一分就脏 -->
     <path android:pathData="M0,0 H108 V108 H0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="radial"
-                android:centerX="86" android:centerY="92"
-                android:gradientRadius="58"
-                android:tileMode="clamp">
-                <item android:offset="0.0" android:color="#3D415FFF" />
-                <item android:offset="0.55" android:color="#1A3C63D8" />
-                <item android:offset="1.0" android:color="#00000000" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- 3 · 中心暗角：把注意力收回中岛，防止 26px 时糊成一片灰 -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="54" android:centerY="56"
+                android:centerX="54" android:centerY="55"
                 android:gradientRadius="66"
                 android:tileMode="clamp">
                 <item android:offset="0.0" android:color="#00000000" />
-                <item android:offset="0.62" android:color="#00000000" />
-                <item android:offset="1.0" android:color="#73040A11" />
+                <item android:offset="0.7" android:color="#00000000" />
+                <item android:offset="1.0" android:color="#0A5A6E86" />
             </gradient>
         </aapt:attr>
     </path>
