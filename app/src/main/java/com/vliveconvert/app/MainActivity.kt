@@ -459,14 +459,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // 系统返回键/侧滑返回：选择器与修复时间界面返回主页，主页保持默认退出行为；
-                // 转换中吞掉返回，防止误退
-                BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
+                // 系统返回键/侧滑返回：必须关掉「当前画面上最上面那一层」。
+                //
+                // OnBackPressedDispatcher 反向遍历回调 —— **后注册的优先级更高**，
+                // 所以这里的书写顺序要与 pickScreen 的渲染优先级**完全相反**：
+                // 父页面写在前面，嵌套页写在最后。
+                //
+                // 曾经写错成 about→settings→fixTime→picker：从设置页进「关于与开源许可」时
+                // showAbout 与 showSettings 同时为真，第一次返回关掉的是**看不见的设置页**，
+                // 画面仍是关于页（用户视角「按了没反应」），第二次返回才轮到关于页、
+                // 直接落回主页（用户视角「第二次才返回，而且跳过了二级菜单」）。
+                BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中吞掉返回，防止误退 */ }
                 BackHandler(enabled = showStatusDetail) { showStatusDetail = false }
-                BackHandler(enabled = showAbout) { showAbout = false }
                 BackHandler(enabled = showSettings) { showSettings = false }
-                BackHandler(enabled = showFixTime) { showFixTime = false }
                 BackHandler(enabled = showPicker) { showPicker = false }
+                BackHandler(enabled = showFixTime) { showFixTime = false }
+                BackHandler(enabled = showAbout) { showAbout = false }
 
                 Box(
                     Modifier

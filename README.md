@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.15），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.16），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.15.apk`](./VivoLivePhoto-v1.7.15.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.16.apk`](./VivoLivePhoto-v1.7.16.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,34 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.16（返回层级）
+
+**「关于与开源许可」页按返回第一次没反应，第二次直接跳回主页——现在第一次就退回二级菜单。**
+
+`OnBackPressedDispatcher` 是**反向遍历**回调的，也就是**后注册的优先级更高**。
+而返回处理的书写顺序曾经和渲染优先级（`pickScreen`）不一致：
+
+```kotlin
+BackHandler(enabled = showAbout)     { showAbout = false }     // 先注册 ⇒ 优先级反而最低
+BackHandler(enabled = showSettings)  { showSettings = false }
+```
+
+从设置页进「关于与开源许可」时 `showAbout` 与 `showSettings` **同时为真**，第一次返回
+关掉的是**屏幕上根本看不见的设置页**——画面仍然是关于页，用户视角就是「按了没反应」；
+第二次返回才轮到关于页，而它下面直接就是主页，于是「第二次才返回，并且跳过了二级菜单」。
+这不是卡死，是返回键关错了层。
+
+- 把注册顺序整体倒过来，并写明规则：**父页面写在前面、嵌套页写在最后**，
+  必须与 `pickScreen` 的渲染优先级**完全相反**（两者一旦不同步就是同一类 bug）
+- 层级统一为：转换中（吞掉返回防误退）→ 状态详情 → 设置 → 选择器 → 修复文件时间 → 关于
+- 新增 `BackNavigationTest` 2 组用例：走**真实点击**进关于页／修复时间页，再按系统返回，
+  断言第一次返回就落在设置页（而不是继续往下掉一级），并断言第二次才退出设置页
+- 变异检查：把顺序退回旧写法，关于页那条当场变红
+  （`第一次返回必须关掉关于页 expected:<false> but was:<true>`）；
+  修复时间那条保持绿——它在旧顺序下本来就压过设置页，不该被这次变异影响，属预期
+- 验证：112 组 JVM 单测（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS
+  大小写不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.15（数据正确性）
 
