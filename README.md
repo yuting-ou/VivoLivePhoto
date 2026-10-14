@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.11），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.12），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.11.apk`](./VivoLivePhoto-v1.7.11.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.12.apk`](./VivoLivePhoto-v1.7.12.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,33 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.12（稳定版）
+
+「点开始转换那里**闪一下、没有动效**」——这一版把它的成因查到了底，并在真机上取证。
+
+**排查过程（结论是推翻前一轮的说法得出的）**：用 adb 连真机读到
+`animator_duration_scale = window = transition = 1.0`，即手机**没有**关动画，
+我上一轮"系统缩放为 0"的猜测当场作废；`dumpsys gfxinfo` 显示 58 帧 / **0 janky** /
+90 分位 6ms，也不是卡顿。真正原因是：**单张照片约 300ms 就转完，
+「转换中」这个状态的存活时间短于底栏过渡时长本身** —— 动画来不及播完，
+观感只剩原地一闪。
+
+- **完成态加最短可见时长**：批次结束时进度先停在 100% +「已处理 N/N」，底栏再多停留
+  450ms 才退回主按钮。刻意用墙钟 `delay` 而不是加长动画：动画时长受系统缩放支配，
+  一旦被关掉反馈又会归零；delay 不受影响
+- **底栏不再高度跳变**：`Crossfade` 换成 `AnimatedContent + SizeTransform`，
+  并给「完成节拍」态留一块与「取消转换」等高的占位。变异检查实测到位移量：
+  去掉占位后进度条在两态间跳 **355px → 401px**，现在这条位移被测试钉成 0
+- **删除原图时，「以后不再提示」一律失效**：这一批是不可逆的原始文件删除，
+  跳过确认会让它变成「一次单击、零提示、直接删照片」。不删原图的普通转换
+  仍然照旧享受跳过。确认框里这种情况也不再显示「以后不再提示」这个选项——
+  摆一个不生效的选项等于承诺做不到的事
+- 新增 `ConvertFeedbackTest`（4，含端到端：真实批次跑完后节拍必须由服务自己举起）
+  与 `BottomBarLayoutTest`（1，量像素）；4 个变异全部被对应用例捕获，
+  且「不删原图仍可跳过」这条对照组保持绿
+- 验证：97 组 JVM 单测（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS
+  大小写不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.11（稳定版）
 

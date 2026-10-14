@@ -165,8 +165,12 @@ class ConvertService : Service() {
             (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote
         withContext(Dispatchers.Main) {
             ConvertCenter.isConverting = false
-            ConvertCenter.progress = 0f
-            ConvertCenter.progressDetail = ""
+            // 收尾不要把进度清零：先停在 100% + 「已处理 N/N」，由「完成节拍」停留一会儿再清空。
+            // 否则单张转换时底栏刚从「转换中」切回来就立刻跳走，用户看不到任何结果反馈
+            ConvertCenter.progress = 1f
+            ConvertCenter.progressDetail =
+                "已处理 ${ok.get() + fail.get()}/${ok.get() + fail.get()}"
+            ConvertCenter.finishedBeat = true
             ConvertCenter.statusText = finalStatus
         }
         persistQueueSnapshot()

@@ -82,6 +82,13 @@ import java.io.IOException
 private enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
 
 /**
+ * 「转换完成」节拍的最短可见时长（墙钟毫秒）。
+ * 用 delay 而不是动画时长：动画受系统 `animator_duration_scale` 支配，
+ * 一旦被关闭，完成反馈就再次塌成「一闪」。
+ */
+private const val FINISHED_BEAT_MS = 450L
+
+/**
  * 一条 `IS_PENDING=1` 的导出记录是否属于「本次启动之前」的残留。
  *
  * 冷启动清理与用户第一批转换之间没有互斥（清理在 IO 协程上跑，产物导出期间同样是
@@ -417,6 +424,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 「转换完成」节拍：让 100% 的完成态至少停留 FINISHED_BEAT_MS 再退回主按钮。
+                // 单张照片转换只需 ~300ms，短于底栏过渡时长，不停一拍用户只看到「闪一下」
+                androidx.compose.runtime.LaunchedEffect(ConvertCenter.finishedBeat) {
+                    if (ConvertCenter.finishedBeat) {
+                        kotlinx.coroutines.delay(FINISHED_BEAT_MS)
+                        ConvertCenter.finishedBeat = false
+                        ConvertCenter.progress = 0f
+                        ConvertCenter.progressDetail = ""
+                    }
+                }
+
                 // 系统返回键/侧滑返回：选择器与修复时间界面返回主页，主页保持默认退出行为；
                 // 转换中吞掉返回，防止误退
                 BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
@@ -526,6 +544,7 @@ class MainActivity : ComponentActivity() {
                                 appName = getString(R.string.app_display_name),
                                 statusText = ConvertCenter.statusText,
                                 isConverting = ConvertCenter.isConverting,
+                                finishedBeat = ConvertCenter.finishedBeat,
                                 progress = ConvertCenter.progress,
                                 progressDetail = ConvertCenter.progressDetail,
                                 pendingRestoreCount = pendingRestoreCount,
@@ -611,16 +630,26 @@ class MainActivity : ComponentActivity() {
                                         if (hasLoc) null else MaterialTheme.colorScheme.error
                                     )
                                     Spacer(Modifier.height(10.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Checkbox(
-                                            checked = skipPreflightNext,
-                                            onCheckedChange = { skipPreflightNext = it }
-                                        )
+                                    if (deleteOriginal) {
+                                        // 不给「不再提示」这个选项：勾了它也不会生效，
+                                        // 摆出来等于承诺一件做不到的事
                                         Text(
-                                            "以后不再提示",
+                                            "本批会删除原图（不可逆），因此每次都需要确认。",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.error
                                         )
+                                    } else {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(
+                                                checked = skipPreflightNext,
+                                                onCheckedChange = { skipPreflightNext = it }
+                                            )
+                                            Text(
+                                                "以后不再提示",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             },
@@ -978,8 +1007,11 @@ class MainActivity : ComponentActivity() {
      * 位置信息是否会保留。用户可在弹窗内勾选「不再提示」。
      */
     private fun showPreflightThenConvert() {
-        if (getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                .getBoolean("skip_preflight", false)) {
+        // 「删除原图」开着时，「以后不再提示」一律失效：这一批是不可逆的原始文件删除，
+        // 跳过确认后就成了「一次单击、零提示、直接删照片」——真机上确实这样删掉过用户的原图
+        val skip = getSharedPreferences("vliveconvert", MODE_PRIVATE)
+            .getBoolean("skip_preflight", false) && !deleteOriginal
+        if (skip) {
             ConvertCenter.start(this)
             return
         }

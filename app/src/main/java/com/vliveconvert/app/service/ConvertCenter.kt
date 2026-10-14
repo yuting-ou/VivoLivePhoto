@@ -32,6 +32,16 @@ object ConvertCenter {
     var isConverting by mutableStateOf(false)
     var progress by mutableFloatStateOf(0f)
     var progressDetail by mutableStateOf("")
+    /**
+     * 「转换完成」节拍：批次结束后让完成态再停留一会儿（由 Activity 用 delay 清除）。
+     *
+     * 动因（真机实测）：勾了「以后不再提示」后，点击到完成之间没有任何中间态，
+     * 一张照片约 300ms 就转完——而底栏交叉过渡本身要 200ms，
+     * 「转换中」态的存活时间短于动画时长，用户看不到动效，只感到原地一闪。
+     * 这里刻意用 delay（墙钟）而不是动画时长来实现：动画时长受系统
+     * `animator_duration_scale` 支配，被关掉时反馈会再次归零。
+     */
+    var finishedBeat by mutableStateOf(false)
     /** 应用级状态行（权限提示 / 转换进度 / 完成摘要共用） */
     var statusText by mutableStateOf("")
 

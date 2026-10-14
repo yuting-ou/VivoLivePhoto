@@ -1,7 +1,7 @@
 package com.vliveconvert.app.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -77,6 +77,8 @@ fun MainScreen(
     appName: String,
     statusText: String,
     isConverting: Boolean,
+    /** 批次刚结束的「完成节拍」：底栏在此状态下再多停一会儿（见 ConvertCenter.finishedBeat） */
+    finishedBeat: Boolean,
     progress: Float,
     progressDetail: String,
     pendingRestoreCount: Int,
@@ -296,10 +298,19 @@ fun MainScreen(
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                // 「转换中 ↔ 完成」切换时交叉淡入淡出：进度条/取消键退场、主按钮进场，
-                // 完成的反馈落在动画上而不是瞬间跳变
-                Crossfade(targetState = isConverting, label = "bottomBar") { converting ->
-                    if (converting) {
+                // 三态：2 转换中 / 1 完成节拍 / 0 空闲。
+                // 用 AnimatedContent + SizeTransform 而不是 Crossfade：底栏各态高度不同
+                // （进度+取消 ≈ 88dp，摘要+按钮 ≈ 74dp），Crossfade 期间容器按最高子项定尺寸，
+                // 切换瞬间整块高度跳变，观感就是「原地闪一下」；SizeTransform 让尺寸随动画平滑过渡
+                AnimatedContent(
+                    targetState = if (isConverting) 2 else if (finishedBeat) 1 else 0,
+                    transitionSpec = {
+                        (fadeIn(tween(220)) togetherWith fadeOut(tween(180))) using
+                            SizeTransform(clip = false)
+                    },
+                    label = "bottomBar"
+                ) { barState ->
+                    if (barState >= 1) {
                         // 整体进度
                         Column {
                             Row(
@@ -327,10 +338,16 @@ fun MainScreen(
                                     .clip(RoundedCornerShape(3.dp))
                             )
                             Spacer(Modifier.height(10.dp))
-                            OutlinedButton(
-                                onClick = onCancelConvert,
-                                modifier = Modifier.fillMaxWidth().height(46.dp)
-                            ) { Text("取消转换") }
+                            if (barState == 2) {
+                                OutlinedButton(
+                                    onClick = onCancelConvert,
+                                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                                ) { Text("取消转换") }
+                            } else {
+                                // 完成节拍：留一块与取消键等高的空位，
+                                // 免得 2→1 时高度又跳一次
+                                Spacer(Modifier.fillMaxWidth().height(46.dp))
+                            }
                         }
                     } else {
                         Column {

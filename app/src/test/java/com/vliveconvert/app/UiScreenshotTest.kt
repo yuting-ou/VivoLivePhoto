@@ -93,6 +93,7 @@ class UiScreenshotTest {
                 appName = "影中影",
                 statusText = statusText,
                 isConverting = isConverting,
+                finishedBeat = false,
                 progress = 0.42f,
                 progressDetail = "已处理 5/12",
                 pendingRestoreCount = pendingRestoreCount,
