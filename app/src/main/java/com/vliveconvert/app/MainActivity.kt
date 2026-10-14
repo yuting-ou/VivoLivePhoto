@@ -19,7 +19,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -147,6 +150,50 @@ internal fun backRevealScreen(
     null -> null
 }
 
+/** 预测性返回的进度插值：decelerate（缓出）。
+ *  系统回程手势的 progress 是线性的，直接用会觉得"跟手但生硬"；
+ *  官方 platform-samples 用 PathInterpolator(0,0,0,1) 缓出——起点跟手、收尾加速入位 */
+internal val PredictiveEase = CubicBezierEasing(0f, 0f, 0f, 1f)
+
+/** 顶层页（正在退出的那个）的手势变换。
+ *  官方规范的原版参数（缩 0.9、移 1/20 窗宽）在全屏页面之间**读不出来**——
+ *  逐帧渲染验收时两页几乎都还是满幅，观感只是"抖了一下"（用户原话：不好看）。
+ *  本版参数：缩 1→0.88、横移 1/14 窗宽、上浮 1/60 高度、圆角渐起、
+ *  **尾段 25% 整页淡出**——提交瞬间页面已经透明，换层没有"消失感" */
+internal data class PredictiveOutgoing(
+    val scale: Float, val shiftFraction: Float, val liftFraction: Float,
+    val cornerFraction: Float, val alpha: Float
+)
+
+internal fun predictiveOutgoing(progress: Float): PredictiveOutgoing {
+    val raw = progress.coerceIn(0f, 1f)
+    val p = PredictiveEase.transform(raw)
+    // 淡出门槛必须锚定**原始**进度（最后 25% 手指行程）。套在缓出之后的进度上时，
+    // 缓出把前段推得太靠前：手指才到 70% 页面已经几乎全透明（测试抓的）
+    val fade = ((raw - 0.75f) / 0.25f).coerceIn(0f, 1f)
+    return PredictiveOutgoing(
+        scale = 1f - 0.12f * p,
+        shiftFraction = p / 14f,
+        liftFraction = p / 60f,
+        cornerFraction = p,
+        alpha = 1f - fade,
+    )
+}
+
+/** 底层页（被揭开的返回目标）的手势变换：从 0.90 缩放、反向平移 1/16 窗宽、
+ *  65% 透明度**迎上来**。第一版它完全静止——顶层动 10% 它不动，整个手势
+ *  看起来就像页面轻微抖了一下；深度感来自两层**相向运动** */
+internal data class PredictiveIncoming(val scale: Float, val shiftFraction: Float, val alpha: Float)
+
+internal fun predictiveIncoming(progress: Float): PredictiveIncoming {
+    val p = PredictiveEase.transform(progress.coerceIn(0f, 1f))
+    return PredictiveIncoming(
+        scale = 0.90f + 0.10f * p,
+        shiftFraction = (1f - p) / 16f,
+        alpha = 0.65f + 0.35f * p,
+    )
+}
+
 /**
  * 「转换完成」节拍的最短可见时长（墙钟毫秒）。
  * 用 delay 而不是动画时长：动画受系统 `animator_duration_scale` 支配，
@@ -243,6 +290,20 @@ class MainActivity : ComponentActivity() {
     private val backProgressAnim = Animatable(0f)
     // 手势从哪条边发起：左缘 → 顶层页向右让位（+1），右缘 → 向左（-1），0 = 无手势
     private var backEdgeSign by mutableFloatStateOf(0f)
+    // 手势提交后的弹层要**跳过** AnimatedContent 的滑动过渡（揭底层已在原地，
+    // 再滑一次就是双重运动）。普通字段而不是状态：只在过渡创建的那一刻被读一次
+    private var predictiveCommitArmed = false
+
+    /** 弹掉当前最上面那一层（预测性返回与普通返回共用同一份决策） */
+    private fun popTopLayer() {
+        when (backDecision(showAbout, showFixTime, showPicker, showSettings)) {
+            BackDecision.CLOSE_ABOUT -> showAbout = false
+            BackDecision.CLOSE_FIXTIME -> showFixTime = false
+            BackDecision.CLOSE_PICKER -> showPicker = false
+            BackDecision.CLOSE_SETTINGS -> showSettings = false
+            null -> {}
+        }
+    }
 
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
@@ -549,7 +610,9 @@ class MainActivity : ComponentActivity() {
                         (showAbout || showFixTime || showPicker || showSettings)
                 ) { progress ->
                     try {
+                        var sawGesture = false
                         progress.collect { event ->
+                            sawGesture = true
                             backEdgeSign = when (event.swipeEdge) {
                                 BackEventCompat.EDGE_LEFT -> 1f
                                 BackEventCompat.EDGE_RIGHT -> -1f
@@ -557,19 +620,24 @@ class MainActivity : ComponentActivity() {
                             }
                             backProgressAnim.snapTo(event.progress)
                         }
-                        // 手势提交：进度归零、按共享决策弹掉顶层。
-                        // 页面切换动画交给 AnimatedContent 的既有过渡，别在这里再补一段
-                        backProgressAnim.snapTo(0f)
-                        when (backDecision(showAbout, showFixTime, showPicker, showSettings)) {
-                            BackDecision.CLOSE_ABOUT -> showAbout = false
-                            BackDecision.CLOSE_FIXTIME -> showFixTime = false
-                            BackDecision.CLOSE_PICKER -> showPicker = false
-                            BackDecision.CLOSE_SETTINGS -> showSettings = false
-                            null -> {}
+                        if (!sawGesture || backProgressAnim.value <= 0f) {
+                            // 桌面按钮返回：没有手势进度，直接弹层，走既有的滑动过渡
+                            popTopLayer()
+                        } else {
+                            // 手势提交：让位动画**续完**而不是归零重播——官方
+                            // platform-samples 的做法是 controller.animateToEnd()：
+                            // 顶层从当前进度继续缩到位、揭底层迎到全尺寸，然后瞬间换层。
+                            // 第一版是 snapTo(0) + 重播 300ms 滑动，衔接处肉眼可见地跳一下
+                            predictiveCommitArmed = true
+                            backProgressAnim.animateTo(1f, tween(150))
+                            popTopLayer()
+                            backProgressAnim.snapTo(0f)
+                            predictiveCommitArmed = false
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
-                        // 手势取消：平滑收回，且**必须重抛**——取消不等于「已处理返回」
-                        lifecycleScope.launch { backProgressAnim.animateTo(0f, tween(180)) }
+                        // 手势取消：两层一起平滑收回（官方样本是瞬间复位，这里收得更顺），
+                        // 且**必须重抛**——取消不等于「已处理返回」
+                        lifecycleScope.launch { backProgressAnim.animateTo(0f, tween(200)) }
                         throw e
                     }
                 }
@@ -696,17 +764,30 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 预测性返回进行中：先画返回目标页（静止的底层，被顶层页让位后露出来）。
+                    // 预测性返回进行中：底层画「返回目标页」，并**迎着**手势动起来
+                    // （从 0.94 缩放、反向平移 1/28 窗宽处滑到原位）——深度感来自两层相向运动。
                     // 选择器/修复时间的父页是设置页、它们的 DisposableEffect 不会被双重触发，
                     // 因为双渲染只发生在「返回方向」，扫描页永远是顶层而不是底层
                     if (backProgressAnim.value > 0f) {
                         val reveal = backRevealScreen(showAbout, showFixTime, showPicker, showSettings)
                         if (reveal != null && reveal != targetScreen) {
-                            Box(Modifier.fillMaxSize()) { renderScreen(reveal) }
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        val incoming = predictiveIncoming(backProgressAnim.value)
+                                        scaleX = incoming.scale
+                                        scaleY = incoming.scale
+                                        alpha = incoming.alpha
+                                        // 顶层向手势发起边让位，底层从**对面**迎上来
+                                        translationX = -backEdgeSign *
+                                            incoming.shiftFraction * size.width
+                                    }
+                            ) { renderScreen(reveal) }
                         }
                     }
 
-                    // 顶层页跟手让位：缩放 + 向手势发起边平移 + 圆角，Material 预测性返回的样子。
+                    // 顶层页跟手让位：缩放 1→0.9 + 向手势发起边平移 1/20 窗宽 + 圆角渐起。
                     // 读 backProgressAnim.value 写在 graphicsLayer 里 = 延迟读，只有拖动才重绘
                     Box(
                         Modifier
@@ -714,11 +795,15 @@ class MainActivity : ComponentActivity() {
                             .graphicsLayer {
                                 val p = backProgressAnim.value
                                 if (p > 0f) {
-                                    scaleX = 1f - 0.10f * p
-                                    scaleY = 1f - 0.10f * p
-                                    translationX = backEdgeSign * p * 26.dp.toPx()
-                                    shadowElevation = 18.dp.toPx() * p
-                                    shape = RoundedCornerShape(28.dp * p)
+                                    val outgoing = predictiveOutgoing(p)
+                                    scaleX = outgoing.scale
+                                    scaleY = outgoing.scale
+                                    alpha = outgoing.alpha
+                                    translationX = backEdgeSign *
+                                        outgoing.shiftFraction * size.width
+                                    translationY = -outgoing.liftFraction * size.height
+                                    shadowElevation = 24.dp.toPx() * outgoing.cornerFraction
+                                    shape = RoundedCornerShape(32.dp * outgoing.cornerFraction)
                                     clip = true
                                 }
                             }
@@ -726,9 +811,11 @@ class MainActivity : ComponentActivity() {
                         AnimatedContent(
                             targetState = targetScreen,
                             transitionSpec = {
-                                // 主页 → 选择器/修复时间：新界面自右滑入；
-                                // 返回：新界面（主页）自左淡入、旧界面滑回右侧，符合系统返回方向
-                                if (targetState == Screen.Main && initialState != Screen.Main) {
+                                // 手势提交的弹层：揭底层已经在原地，立即换层——
+                                // 若再滑一次 300ms，同一页面会在自己身上重播入场（双重运动）
+                                if (predictiveCommitArmed) {
+                                    EnterTransition.None togetherWith ExitTransition.None
+                                } else if (targetState == Screen.Main && initialState != Screen.Main) {
                                     (slideInHorizontally(tween(300)) { -it / 4 } +
                                             fadeIn(tween(300))) togetherWith
                                             (slideOutHorizontally(tween(300)) { it } +

@@ -4,7 +4,21 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.vliveconvert.app.picker.AlbumInfo
 import com.vliveconvert.app.picker.MediaItem
@@ -317,6 +331,66 @@ class UiScreenshotTest {
             body < paper - 12)
         assertTrue("48px 时播放形必须暗于卡面至少 40（实际 body=$body mark=$mark），否则图标没有锚点",
             body > mark + 40)
+    }
+
+    /**
+     * 预测性返回的**中途帧**：两层结构（顶层让位 + 底层相向迎上）用与生产完全相同的
+     * predictiveOutgoing / predictiveIncoming 数学，摆出假页面在四个进度下逐帧出图。
+     *
+     * 为什么不直接驱动真实 Activity：系统手势事件在 Robolectric 里无法合成；
+     * 而 Animatable.snapTo 是 suspend，从测试线程碰它会撞主线程模型。
+     * 数学是同一个函数，几何手感看帧即可验收（提交/取消的续接逻辑由
+     * BackNavigationTest 端到端保证）。
+     */
+    @Test
+    fun shotPredictiveBackFrames() {
+        val progress = mutableFloatStateOf(0f)
+        render {
+            val p = progress.floatValue
+            val outgoing = predictiveOutgoing(p)
+            val incoming = predictiveIncoming(p)
+            val edge = 1f // 左缘手势：顶层向右让位，揭底层从左迎上
+            Box(Modifier.fillMaxSize().background(Color(0xFF0E141B))) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = incoming.scale
+                            scaleY = incoming.scale
+                            alpha = incoming.alpha
+                            translationX = -edge * incoming.shiftFraction * size.width
+                        }
+                ) { fakePage("返回目标页", Color(0xFF223A5E), Color.White) }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = outgoing.scale
+                            scaleY = outgoing.scale
+                            alpha = outgoing.alpha
+                            translationX = edge * outgoing.shiftFraction * size.width
+                            translationY = -outgoing.liftFraction * size.height
+                            shape = RoundedCornerShape(32.dp * outgoing.cornerFraction)
+                            clip = true
+                            shadowElevation = 36f * outgoing.cornerFraction
+                        }
+                ) { fakePage("当前页", Color(0xFF2A41B8), Color.White) }
+            }
+        }
+        for (f in listOf(0f, 0.33f, 0.66f, 1f)) {
+            progress.floatValue = f
+            compose.mainClock.advanceTimeBy(16)
+            compose.waitForIdle()
+            shot("pb_frame_${(f * 100).toInt()}")
+        }
+    }
+
+    /** 假页面：一个铺满的色块 + 居中标签（几何验收用，内容无关） */
+    @Composable
+    private fun fakePage(label: String, bg: Color, fg: Color) {
+        Box(Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
+            Text(label, color = fg, style = MaterialTheme.typography.headlineMedium)
+        }
     }
 
     /** 空状态 */

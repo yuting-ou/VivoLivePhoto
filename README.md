@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.19），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.20），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.19.apk`](./VivoLivePhoto-v1.7.19.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.20.apk`](./VivoLivePhoto-v1.7.20.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,40 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.20（预测性返回 · 重做）
+
+**v1.7.19 的预测性返回不好看（用户原话），对照官方示例重做。**
+
+对照的是 android/platform-samples 的 predictiveback 系列官方示例。逐帧渲染验收后确认，
+v1.7.19 差在三处：
+
+1. **只动了顶层，揭底层完全静止**。深度感来自两层相向运动——顶层让位时，返回目标页
+   应从 0.90 缩放、反向 1/16 窗宽、65% 透明度**迎上来**。这是观感差的主因
+2. **提交时归零再重播**。官方的做法是让进行中的动画**续完**（`controller.animateToEnd()`）：
+   现在顶层从当前进度继续缩到位、揭底层迎到全尺寸，然后瞬间换层。换层瞬间还配了
+   **尾段 25% 整页淡出**——页面在消失前已经透明，没有"突然没了"的跳变
+   （AnimatedContent 的滑动过渡在手势提交时短路，否则同一页面会在自己身上重播入场）
+3. **进度没过插值器**。系统手势的 progress 是线性的，官方样本用 decelerate（缓出）：
+   起点跟手、收尾加速入位
+
+幅度也比规范原版大：原版（缩 0.9、移 1/20 窗宽）在两个**全屏页面**之间逐帧渲染时
+几乎读不出来。本版顶层缩到 0.88、横移 1/14 窗宽、上浮 1/60 高度、圆角长到 32dp。
+
+验收方式是新的：**手势中途逐帧渲染出图**（用与生产同一套 `predictiveOutgoing` /
+`predictiveIncoming` 纯函数摆假页面，进度 0/33/66/100% 四帧）——系统手势事件在
+Robolectric 里合成不了，但数学是同一个函数，几何手感看帧即可判断。
+测试顺带抓到一个真错误：淡出门槛最初套在缓出**之后**的进度上，缓出把前段推得太靠前，
+手指才到 70% 页面已几乎全透明；改为锚定**原始**进度（最后 25% 手指行程）。
+
+- 新增 `PredictiveMathTest` 3 组（端点/单调性/淡出区间/越界钳制）+ 中途帧渲染 4 张；
+  变异检查：decelerate 换成 linear 当场红
+- 提交/取消路径由 `BackNavigationTest` 4 组端到端用例继续守护（桌面按钮返回不带手势
+  进度，仍走既有滑动过渡；带进度的提交走续完路径）
+- 验证：128 组 JVM 单测（仅 APFS 大小写那条必红）、Lint 0 error、R8 + apksigner 通过
+
+设置页的返回与其它二级页共用同一条链路（设置、关于与开源许可、修复文件时间、选择器
+四层全部覆盖），真机上从设置侧缘往里拖即可看到。
 
 ### v1.7.19（预测性返回 + 全链路扫查六连修）
 
