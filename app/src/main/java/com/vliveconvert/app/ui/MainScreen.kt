@@ -376,7 +376,9 @@ fun MainScreen(
                                 }
                                 Button(
                                     onClick = onStartConvert,
-                                    enabled = pendingCount > 0,
+                                    // 不置灰：置灰的主按钮点下去连 onClick 都不派发，
+                                    // 界面也没有一处解释「为什么按不动」——用户视角就是「点了没反应」。
+                                    // 让 startConvert() 里那句原本走不到的提示替它说话
                                     modifier = Modifier.weight(1f).height(48.dp)
                                 ) {
                                     Icon(

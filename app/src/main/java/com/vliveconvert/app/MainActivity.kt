@@ -82,11 +82,28 @@ import java.io.IOException
 private enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
 
 /**
+ * 一条 `IS_PENDING=1` 的导出记录是否属于「本次启动之前」的残留。
+ *
+ * 冷启动清理与用户第一批转换之间没有互斥（清理在 IO 协程上跑，产物导出期间同样是
+ * pending 态），判据只能是时间戳、不能是「有没有批次在跑」这类可被竞态跨越的状态。
+ * 边界一律向「保留」一侧靠：同一秒内新建的、或 DATE_ADDED 读不到的都当作本次批次的，
+ * 漏清只是多占一条记录，误删吃掉的是用户刚转好的照片。
+ */
+internal fun isStalePendingMediaRow(dateAddedSec: Long, launchedAtMs: Long): Boolean =
+    dateAddedSec > 0L && dateAddedSec < launchedAtMs / 1000L
+
+/**
  * 主界面：转换队列与进度的真实状态在 [ConvertCenter]（进程级单例），
  * 批量转换由前台服务 ConvertService 执行——界面销毁/切后台不影响转换。
  * Activity 负责权限流、界面导航、系统弹窗（回收站确认）与历史文件操作。
  */
 class MainActivity : ComponentActivity() {
+
+    /**
+     * 本次进程启动时刻（ms）。冷启动清理用它区分「上次残留」与「本次正在生成的产物」：
+     * 清理跑在 IO 协程上，与用户第一次点「开始转换」之间没有互斥，只认时间不认状态才安全。
+     */
+    private val launchedAtMs = System.currentTimeMillis()
 
     // 内置选择器
     private lateinit var mediaRepo: MediaRepo
@@ -350,7 +367,7 @@ class MainActivity : ComponentActivity() {
         // 启动时清理上次残留的暂存产物 + MediaStore 半成品记录；
         // 恢复上次未完成的转换队列（进程被杀时可续转）
         lifecycleScope.launch(Dispatchers.IO) {
-            try { File(cacheDir, "output").listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
+            cleanupStaleStagingFiles()
             cleanupPendingMediaStore()
             val pending = ConvertCenter.loadQueue(applicationContext)
             if (pending > 0) {
@@ -919,7 +936,13 @@ class MainActivity : ComponentActivity() {
     private fun startConvert() {
         if (ConvertCenter.isConverting) return
         if (ConvertCenter.items.none { !it.done && !it.failed }) {
-            ConvertCenter.statusText = "没有待转换的照片"
+            // 这条必须说话：冷启动会恢复上次的队列，用户再选同一张会被按 id 去重，
+            // 于是列表非空却没有待转换项——只说「没有待转换的照片」等于没说
+            val total = ConvertCenter.items.size
+            ConvertCenter.statusText = when {
+                total == 0 -> "先添加要转换的照片"
+                else -> "列表里 $total 张都已处理完，没有待转换的（需找回位置请点该行「重转」）"
+            }
             return
         }
         if (!hasMediaLocationPermission() && !locationForceChosen) {
@@ -1285,9 +1308,30 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * 清理上次残留的暂存产物。`ConvertService` 的批次就往这同一个目录里写
+     * （`File(cacheDir, "output")`，见 ConvertService.kt:102），所以只删「本次启动之前」
+     * 的文件，否则冷启动清理会把正在组装的产物连锅端掉。
+     */
+    private fun cleanupStaleStagingFiles() {
+        try {
+            File(cacheDir, "output").listFiles()?.forEach { f ->
+                if (f.lastModified() in 1 until launchedAtMs) {
+                    try { f.delete() } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
      * 清理上次异常退出残留的半成品导出记录（IS_PENDING=1）：
      * MediaStore 仅向所有者暴露 pending 项，故查到的都是本应用的残留；
      * 不清理会永久占用存储（相册不可见、不可访问）。
+     *
+     * 只删「本次启动之前」加入的记录。`ConvertService` 的产物在导出校验期间同样是
+     * IS_PENDING=1（`MediaExport.exportAndVerify`），而本清理跑在 onCreate 的 IO 协程上，
+     * 与用户第一次点「开始转换」之间没有任何互斥——无条件删会把冷启动后第一批的成果
+     * 静默吃掉（用户视角：第一次转换没结果，重试才正常）。
+     * DATE_ADDED 读不到或不可判定时一律保留：漏清理只是多留一条记录，误删丢的是照片。
      */
     private fun cleanupPendingMediaStore() {
         try {
@@ -1295,11 +1339,17 @@ class MainActivity : ComponentActivity() {
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val ids = mutableListOf<Long>()
             contentResolver.query(
-                collection, arrayOf(MediaStore.MediaColumns._ID),
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATE_ADDED),
                 "${MediaStore.MediaColumns.IS_PENDING}=1",
                 null, null
             )?.use { c ->
-                while (c.moveToNext()) ids.add(c.getLong(0))
+                val iDate = c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
+                if (iDate >= 0) {
+                    while (c.moveToNext()) {
+                        if (isStalePendingMediaRow(c.getLong(iDate), launchedAtMs)) ids.add(c.getLong(0))
+                    }
+                }
             }
             for (id in ids) {
                 try {

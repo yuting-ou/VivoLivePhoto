@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.9），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.10），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.9.apk`](./VivoLivePhoto-v1.7.9.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.10.apk`](./VivoLivePhoto-v1.7.10.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,28 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.10（稳定版）
+
+继续追「冷启动后第一次点开始转换无反应」——v1.7.9 修的是弹窗异步，这一版修的是**冷启动特有**的
+两处，均以 `ColdStartConvertTest`（6 组用例）先复现红、修完转绿，并做变异检查确认用例会咬。
+
+- **冷启动清理不再吃掉了第一批转换结果**：`onCreate` 在 IO 协程上无条件删除 `cacheDir/output`
+  下的全部文件，并删除**所有** `IS_PENDING=1` 的 MediaStore 记录；而 `ConvertService` 的批次
+  暂存目录正是同一个 `cacheDir/output`，产物在导出校验期间同样处于 pending 态。两者之间没有
+  任何互斥——清理与用户第一次点「开始转换」谁先跑完，决定第一次转换的结果还在不在。
+  现按**时间戳**判定残留（只清本次启动之前的），边界一律偏向保留：漏清理只是多占一条记录，
+  误删吃掉的是用户刚转好的照片
+- **主按钮不再是无解释的死点击**：冷启动会恢复上次队列，用户再选同一张时按 id 去重、
+  静默丢弃，于是列表非空却没有待转换项 → 主按钮 `enabled=false`，点下去连 `onClick` 都不派发，
+  而界面没有任何一处解释「为什么按不动」。现取消置灰，让 `startConvert()` 里那句原本
+  **永远走不到**的提示替它说话，并区分「还没添加照片」与「都已处理完（需找回位置请点行内重转）」
+- 新增 `ColdStartConvertTest`：权限在 Activity **首次组合之前**授予（不 `recreate()`，
+  否则冷启动特征被洗掉）、条目经生产代码 `addPickedItems()` 入队（不直接塞队列）
+- 已知环境差异：`ConverterPipelineTest.siblingMp4MatchesUppercaseExtension` 在 macOS
+  （APFS 大小写不敏感）上必红，Linux/CI 全绿——非产品缺陷
+- 验证：**84 组 JVM 单测**（仅上述 1 组环境性失败）、Lint 无 error、
+  R8 release 构建与签名校验通过
 
 ### v1.7.9（稳定版）
 
