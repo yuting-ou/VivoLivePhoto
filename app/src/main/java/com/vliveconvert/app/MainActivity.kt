@@ -79,7 +79,31 @@ import java.io.File
 import java.io.IOException
 
 /** 主界面栈：权限页 → 主页 → 选择器 / 修复时间 / 设置 / 关于（用于转场方向判定） */
-private enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
+internal enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
+
+/**
+ * 当前应渲染哪个界面。
+ *
+ * 规则只有一条：**嵌套页面必须早于它的父页面判定**。「修复文件时间」「关于」的唯一入口
+ * 都在设置页里，一旦把 `showSettings` 排在它们前面，用户从设置页点进去时
+ * `showSettings` 仍为真 → 界面永远停在设置页 → 点击看起来毫无反应。
+ * 这个顺序错误让「修复文件时间」自 v1.7.3 起完全不可达，故把优先级显式写成了
+ * 一个纯函数并由真值表用例守着——再排错会直接红，不靠肉眼 review。
+ */
+internal fun pickScreen(
+    hasReadPermission: Boolean,
+    showAbout: Boolean,
+    showFixTime: Boolean,
+    showPicker: Boolean,
+    showSettings: Boolean
+): Screen = when {
+    !hasReadPermission -> Screen.Permission
+    showAbout -> Screen.About
+    showFixTime -> Screen.FixTime
+    showPicker -> Screen.Picker
+    showSettings -> Screen.Settings
+    else -> Screen.Main
+}
 
 /**
  * 「转换完成」节拍的最短可见时长（墙钟毫秒）。
@@ -450,12 +474,13 @@ class MainActivity : ComponentActivity() {
                         .background(MaterialTheme.colorScheme.background)
                 ) {
                     // 目标界面：授权后带权限状态一起参与重组，权限授予时也有过渡动画
-                    val targetScreen = if (!hasReadPermission()) Screen.Permission
-                    else if (showAbout) Screen.About
-                    else if (showSettings) Screen.Settings
-                    else if (showPicker) Screen.Picker
-                    else if (showFixTime) Screen.FixTime
-                    else Screen.Main
+                    val targetScreen = pickScreen(
+                        hasReadPermission(),
+                        showAbout,
+                        showFixTime,
+                        showPicker,
+                        showSettings
+                    )
                     AnimatedContent(
                         targetState = targetScreen,
                         transitionSpec = {

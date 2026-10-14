@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.12），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.13），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.12.apk`](./VivoLivePhoto-v1.7.12.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.13.apk`](./VivoLivePhoto-v1.7.13.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,31 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.13（稳定版）
+
+**「修复文件时间」自 v1.7.3 起就完全打不开** —— 从设置页点它没有任何反应。
+
+原因是一行优先级写错：界面选择用的是四个互不相关的布尔标志串成的 `if/else` 链，
+而 `showSettings` 排在 `showFixTime` 之前：
+
+```kotlin
+else if (showSettings) Screen.Settings   // ← 先命中，永远停在这里
+else if (showFixTime)  Screen.FixTime    // ← 轮不到
+```
+
+偏偏「修复文件时间」的**唯一入口就在设置页里**：点击后 `openFixTime()` 确实执行了、
+`showFixTime` 也确实置上了，但界面判定先命中 `showSettings`，于是画面一动不动。
+v1.7.11 修掉的那几处「静默守卫」都在这条链之后，所以那次的修复对它无效。
+
+- **改成显式的纯函数 `pickScreen(...)`**，把规则写明白：**嵌套页面必须早于父页面判定**。
+  「关于」同样从设置页进入，此前侥幸排在前头才没出事
+- 新增 `ScreenReachabilityTest`（2 层）：`pickScreen` 真值表 + 真实组合渲染
+  （同时置上两个标志时，画面上必须是修复时间页，且设置页内容应消失）。
+  **验证方式是把顺序退回 v1.7.3 那个写法：两条用例同时变红** ——
+  证明它们复现的正是用户报的那个现象，而不是一条永远绿的用例
+- 验证：99 组 JVM 单测（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS
+  大小写不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.12（稳定版）
 
