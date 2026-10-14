@@ -10,6 +10,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.ui.ConvertItem
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -306,6 +307,62 @@ class ColdStartConvertTest {
         f.isAccessible = true
         assertTrue("preflight 的委托必须是 Compose 状态对象",
             f.get(activity) is androidx.compose.runtime.State<*>)
+    }
+
+    /**
+     * 冷启动恢复与用户第一次添加之间的竞争：`loadQueue` 排在 MediaStore 清理之后，
+     * 完全可能在用户已经选好照片之后才跑完。原先守卫是
+     * `if (items.isNotEmpty()) return 0` —— 上次没转完的那批被**整批静默丢弃**。
+     * 队列是「进程被杀可续转」的唯一凭据，丢掉它不是体验问题而是数据连续性问题。
+     *
+     * 只测合并决策（纯函数），不测协程调度：Robolectric 的 PAUSED 主线程模型下，
+     * 从测试线程驱动 `withContext(Main)` 要么死锁要么报「只能在所属线程控制 looper」，
+     * 那种断言测的是框架而不是产品。
+     */
+    @org.junit.Test
+    fun restoreMerge_keepsBothUserAdditionsAndUnfinishedHistory() {
+        val userAdded = ConvertItem(item = sampleItem("IMG_USER_ADDED"))
+        val lastTime = MediaItem(99_887L, "/sdcard/IMG_LAST_TIME.jpg", "IMG_LAST_TIME.jpg",
+            1L, 1_754_000_000_000L, 1_754_000_000L, 6L)
+        val unfinished = ConvertItem(item = lastTime, status = "待转换")
+
+        val merged = com.vliveconvert.app.service.mergeRestored(
+            parsed = listOf(unfinished, unfinished.copy(item = lastTime.copy(id = 42L))),
+            current = listOf(userAdded)
+        )
+
+        assertEquals("用户新加的 + 上次没转完的两张，一张都不能少", 3, merged.size)
+        assertTrue("用户自己加的那张必须保留", merged.any { it.item.id == userAdded.item.id })
+        assertTrue("上次未完成的必须回来", merged.any { it.item.id == 99_887L })
+        assertEquals("同一张不能因为恢复而重复", 1, merged.count { it.item.id == userAdded.item.id })
+
+        // 用户已加过同一张时，以用户当前的状态为准（不能被旧的 done 记录倒回去）
+        val sameId = unfinished.copy(item = lastTime.copy(id = userAdded.item.id))
+        val noRollback = com.vliveconvert.app.service.mergeRestored(
+            parsed = listOf(sameId.copy(done = true, status = "完成：已导出到输出目录")),
+            current = listOf(userAdded)
+        )
+        assertEquals("同 id 的旧记录不得覆盖用户当前条目", 1, noRollback.size)
+        assertTrue(noRollback.single().item.id == userAdded.item.id)
+        assertEquals(false, noRollback.single().done)
+    }
+
+    /** 接线：`loadQueue` 必须真的走合并，而不是回到「非空就整批跳过」 */
+    @org.junit.Test
+    fun loadQueueWiring_appliesMergeOnMainThread() {
+        activity.runOnUiThread { ConvertCenter.items.clear() }
+        compose.waitForIdle()
+        val userAdded = ConvertItem(item = sampleItem("IMG_WIRING"))
+        activity.runOnUiThread { ConvertCenter.items.add(userAdded) }
+        compose.waitForIdle()
+
+        val lastTime = MediaItem(99_888L, "/sdcard/IMG_WIRING_OLD.jpg", "IMG_WIRING_OLD.jpg",
+            1L, 1_754_000_000_000L, 1_754_000_000L, 6L)
+        val pending = ConvertCenter.applyRestored(listOf(ConvertItem(item = lastTime)))
+
+        assertEquals("恢复出的未完成数应为 1", 1, pending)
+        assertEquals("用户加的与恢复的都必须在队列里", 2, ConvertCenter.items.size)
+        assertTrue(ConvertCenter.items.any { it.item.id == 99_888L })
     }
 
     /** 清理的另一半同理：暂存目录里只许删「本次启动之前」的文件 */

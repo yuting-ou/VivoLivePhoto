@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.14），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.15），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.14.apk`](./VivoLivePhoto-v1.7.14.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.15.apk`](./VivoLivePhoto-v1.7.15.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,32 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.15（数据正确性）
+
+**冷启动恢复队列不再会因为用户手快而整批丢失。**
+
+`onCreate` 里的恢复协程排在 MediaStore 清理**之后**，完全可能晚于用户的第一次添加。
+而它原先的守卫是：
+
+```kotlin
+if (items.isNotEmpty()) return 0   // 队列非空 ⇒ 整批不恢复
+```
+
+于是：冷启动 → 用户先选了一张照片 → 恢复协程这时才跑完 → **上次没转完的那批被静默丢弃**。
+队列文件是「进程被杀可续转」的唯一凭据，丢掉它不是体验问题，是数据连续性问题。
+
+- 改为**按 id 合并**：只补进当前队列里没有的条目，且**绝不回退用户当前条目的状态**
+  （同一张既在旧队列里、用户又刚加了一次时，以用户当前这条为准）
+- 决策抽成纯函数 `mergeRestored(parsed, current)`，接线抽成 `applyRestored(parsed)`。
+  后者是为了能测**接线本身**：`loadQueue` 是 `suspend + withContext(Main)`，在 Robolectric
+  的 PAUSED 主线程模型下从测试里驱动它，要么与主线程互等死锁、要么撞「只能在所属线程
+  控制 looper」——那种断言测的是框架而不是产品（这两坑本次都实际撞上了）
+- 新增 2 组用例：合并决策真值表 + `loadQueue` 接线。变异检查（把接线退回旧的整批跳过）
+  结果符合分层预期：**接线用例红、决策用例绿**——决策用例不该被这次变异影响，
+  它测的不是调用点
+- 验证：110 组 JVM 单测（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS
+  大小写不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.14（稳定版）
 

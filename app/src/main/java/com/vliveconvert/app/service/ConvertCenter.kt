@@ -97,11 +97,23 @@ object ConvertCenter {
         if (!f.exists()) return 0
         val parsed = try { QueueJson.fromJson(f.readText()) } catch (_: Exception) { null }
         if (parsed == null) return 0
-        return withContext(Dispatchers.Main) {
-            if (items.isNotEmpty()) return@withContext 0
-            items.addAll(parsed)
-            parsed.count { !it.done && !it.failed }
-        }
+        return withContext(Dispatchers.Main) { applyRestored(parsed) }
+    }
+
+    /**
+     * 把恢复出的条目并进当前队列（主线程调用），返回其中仍未完成的条数。
+     *
+     * 单独成函数是为了让**接线本身**可测：`loadQueue` 是 suspend + `withContext(Main)`，
+     * 在 Robolectric 的 PAUSED 主线程模型下从测试里驱动它，要么和主线程互相等成死锁，
+     * 要么撞上「只能在所属线程控制 looper」——那种断言测的是框架而不是产品。
+     */
+    fun applyRestored(parsed: List<ConvertItem>): Int {
+        // 合并而不是「非空就整批跳过」：本协程排在 MediaStore 清理之后，
+        // 完全可能晚于用户的第一次添加，跳过等于把上次没转完的凭据丢掉
+        val missing = mergeRestored(parsed, items.toList()).drop(items.size)
+        if (missing.isEmpty()) return 0
+        items.addAll(missing)
+        return missing.count { !it.done && !it.failed }
     }
 
     /** 开始转换：持久化队列快照并启动前台服务执行批次（主线程调用） */
@@ -174,3 +186,16 @@ object ConvertCenter {
         if (idx >= 0) items[idx] = new
     }
 }
+
+/**
+ * 冷启动恢复队列与「用户已经加进去的条目」如何合并（纯函数，可 JVM 单测）。
+ *
+ * 规则只有一条：**只补进当前没有的 id，绝不回退用户当前条目的状态**。
+ * 旧实现是 `if (items.isNotEmpty()) return 0`——恢复协程跑在 MediaStore 清理之后，
+ * 用户手快先加一张，上次没转完的那批就被整批静默丢弃；队列是「进程被杀可续转」
+ * 的唯一凭据，丢掉它不是体验问题而是数据连续性问题。
+ */
+internal fun mergeRestored(
+    parsed: List<ConvertItem>,
+    current: List<ConvertItem>
+): List<ConvertItem> = current + parsed.filter { p -> current.none { it.item.id == p.item.id } }
