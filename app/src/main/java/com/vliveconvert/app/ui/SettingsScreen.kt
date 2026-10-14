@@ -250,7 +250,10 @@ private fun ActionRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (enabled) Modifier.clickableNoRipple(onClick) else Modifier)
+            // 忙时不摘掉 clickable：原先这里直接不换 clickable，点击就是空气——
+            // 与「开始转换」置灰后点不动是同一类静默缺陷。文字仍变淡作为提示，
+            // 具体原因由处理函数说清楚
+            .clickableNoRipple(onClick)
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

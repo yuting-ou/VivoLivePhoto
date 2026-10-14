@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 32
-        versionName = "1.7.10"
+        versionCode = 33
+        versionName = "1.7.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -71,6 +71,13 @@ android {
 // 直连会失败。仅在显式传入 -PtestProxyHost=... -PtestProxyPort=... 时才把代理透传给
 // 测试 JVM——常规本地构建不受任何影响。
 tasks.withType<Test>().configureEach {
+    // Robolectric + Compose 合在一个 JVM 里跑完全部用例会累积到 OOM（表现为 Recomposer 的
+    // withFrameNanos 抛 OutOfMemoryError，再被 kotlinx-coroutines-test 归因成
+    // 「测试开始前存在未捕获异常」——是量具问题，不是产品缺陷）。
+    // 对策是「定期换 JVM」而不是「把堆开得更大」：本机内存吃紧，大堆会直接触发换页，
+    // 实测 3G 堆时整套从 2 分钟劣化到 13 分钟没跑完一个测试类。
+    maxHeapSize = "1024m"
+    forkEvery = 3
     val proxyHost = providers.gradleProperty("testProxyHost").orNull
     val proxyPort = providers.gradleProperty("testProxyPort").orNull
     if (!proxyHost.isNullOrBlank() && !proxyPort.isNullOrBlank()) {

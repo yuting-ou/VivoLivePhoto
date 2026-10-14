@@ -152,7 +152,13 @@ class MainActivity : ComponentActivity() {
     private var showStatusDetail by mutableStateOf(false)
     // 转换前的影响面预估弹窗
     private var showPreflightDialog by mutableStateOf(false)
-    private var preflight: Preflight.Info? = null
+    /**
+     * 必须是 Compose 状态：弹窗由 `preflight?.let { if (showPreflightDialog) … }` 把关，
+     * 若它是普通字段，「状态已置上、数据还没被追踪」的那一帧会把弹窗**静默欠下**——
+     * 之后没有任何东西再触发重组，直到用户点开设置/详情这类无关界面才突然补出来。
+     * 这正是「冷启动第一次点了没反应，切个页面才有反应」的形状。
+     */
+    private var preflight: Preflight.Info? by mutableStateOf(null)
     private var skipPreflightNext by mutableStateOf(false)
     // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
     private var showAbout by mutableStateOf(false)
@@ -1006,7 +1012,12 @@ class MainActivity : ComponentActivity() {
 
     /** 单条目行内「重转」：与批量入口共用同一套权限门禁与执行逻辑 */
     private fun reconvertOneItem(ci: ConvertItem) {
-        if (ConvertCenter.isConverting) return
+        if (ConvertCenter.isConverting) {
+            // 可达：行内「重转」按钮只按条目自身状态渲染，转换进行中它依然在列表上。
+            // 原先这里静默 return，用户点下去就是空气
+            ConvertCenter.statusText = "转换进行中，等本轮完成后再重新转换这张"
+            return
+        }
         if (!ci.done || !ci.lostGps || ci.failed) return
         if (!hasMediaLocationPermission()) {
             pendingLocationAction = { doReconvert(listOf(ci)) }
@@ -1072,16 +1083,21 @@ class MainActivity : ComponentActivity() {
 
     /** 打开修复时间界面（需「所有文件访问权限」：未授权时引导授权，授权后自动进入） */
     private fun openFixTime() {
-        if (isFixing) return
         if (!Environment.isExternalStorageManager()) {
             pendingAfterAllFiles = { openFixTime() }
             showAllFilesDialog = true
             return
         }
+        showFixTime = true
+        if (isFixing) {
+            // 原先这里是静默 `return`：修复进度只显示在本页，从设置页再点就是「毫无反应」，
+            // 用户只能理解成卡死。进页给出进度，才是这一击该有的回应
+            fixStatus = "上一批仍在修复中，进度见本页；请等待完成后再操作"
+            return
+        }
         // 与内置选择器一致：每次进入开启新会话，清空上次的扫描结果与 completed 标记。
         // 否则同一进程内再次进入不会重新查询媒体库——新拍的实况不出现、已删除/已修复的项仍留在清单里。
         singleLiveScanner.newSession()
-        showFixTime = true
         fixStatus = "正在读取相册…"
         lifecycleScope.launch(Dispatchers.IO) {
             val albums = mediaRepo.queryAlbums()
@@ -1094,7 +1110,14 @@ class MainActivity : ComponentActivity() {
 
     /** 批量修复所选单文件实况的「修改时间」：文件名时间 → 拍摄时间，两者都无则跳过 */
     private fun startFixTimes(targets: List<MediaItem>) {
-        if (targets.isEmpty() || isFixing) return
+        if (isFixing) {
+            fixStatus = "上一批仍在修复中，请等待完成"
+            return
+        }
+        if (targets.isEmpty()) {
+            fixStatus = "先勾选要修复的文件"
+            return
+        }
         isFixing = true
         fixProgress = 0f
         fixStatus = ""
@@ -1103,8 +1126,14 @@ class MainActivity : ComponentActivity() {
             var skip = 0
             val fixed = mutableListOf<MediaItem>()
             for ((idx, item) in targets.withIndex()) {
-                val time = PhotoTime.parseFromName(item.name)
-                    ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
+                // 解析失败必须计入 skip 而不是抛出：协程一旦异常终止，收尾的
+                // `isFixing = false` 就被跳过，整页从此静默失灵
+                val time = try {
+                    PhotoTime.parseFromName(item.name)
+                        ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
+                } catch (_: Exception) {
+                    0L
+                }
                 if (time <= 0L) {
                     skip++
                 } else {
@@ -1426,7 +1455,14 @@ class MainActivity : ComponentActivity() {
      * 一并挪进相机相册。跳过的数量如实回报。
      */
     private fun moveOutputsToCamera() {
-        if (isMovingOutputs || ConvertCenter.isConverting) return
+        if (isMovingOutputs) {
+            ConvertCenter.statusText = "正在移动输出文件，请稍候"
+            return
+        }
+        if (ConvertCenter.isConverting) {
+            ConvertCenter.statusText = "转换进行中，等本轮完成后再移动输出文件"
+            return
+        }
         if (outputRelPath.equals("DCIM/Camera", ignoreCase = true)) {
             ConvertCenter.statusText = "输出目录已是 DCIM/Camera，无需移动"
             return

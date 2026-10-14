@@ -285,6 +285,29 @@ class ColdStartConvertTest {
             isStalePendingMediaRow(0L, launch))
     }
 
+    /**
+     * 预检弹窗由 `preflight?.let { if (showPreflightDialog) … }` 把关。`preflight` 若只是
+     * 普通字段，「弹窗状态已置上、数据还没被组合追踪」的那一帧会把弹窗**静默欠下**——
+     * 之后没有任何东西再触发重组，直到用户点开设置/详情这类无关界面才突然补出来。
+     * 这正是反馈里「冷启动第一次点了没反应，切个页面才有反应」的形状。
+     *
+     * Robolectric 下弹窗是独立 window、语义节点查不到，所以用结构断言钉（与清单契约测试同路子）：
+     * 退化成普通字段即红。
+     */
+    @org.junit.Test
+    fun preflightIsComposeState() {
+        val f = try {
+            MainActivity::class.java.getDeclaredField("preflight\$delegate")
+        } catch (_: NoSuchFieldException) {
+            org.junit.Assert.fail(
+                "preflight 必须是 by mutableStateOf 的委托字段：普通字段会让预检弹窗被静默欠下")
+            return
+        }
+        f.isAccessible = true
+        assertTrue("preflight 的委托必须是 Compose 状态对象",
+            f.get(activity) is androidx.compose.runtime.State<*>)
+    }
+
     /** 清理的另一半同理：暂存目录里只许删「本次启动之前」的文件 */
     @org.junit.Test
     fun coldStartCleanup_keepsStagingFileWrittenByCurrentBatch() {

@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.10），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.7.11），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.7.10.apk`](./VivoLivePhoto-v1.7.10.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.7.11.apk`](./VivoLivePhoto-v1.7.11.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,35 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.7.11（稳定版）
+
+继续追反馈里那句「冷启动第一次点了没反应，**打开设置/详情再返回才有反应**」——这句话本身
+就是线索：切界面唯一的作用是**引发一次无关的重新组合**。
+
+- **预检弹窗不再被「静默欠下」**：弹窗由 `preflight?.let { if (showPreflightDialog) … }` 把关，
+  而 `preflight` 此前是普通字段、不是 Compose 状态。于是存在一个窗口：弹窗状态已置上、
+  数据却未被组合追踪 —— 弹窗不会显示，也没有任何东西再触发重组，直到用户点开设置/详情
+  引发一次无关重组才突然补出来。现把 `preflight` 收为 `by mutableStateOf`，这条路径在结构上消失
+- **静默守卫批量消除（同一病根的其余三处）**：`startFixTimes()`（忙 / 未勾选两种）、
+  `moveOutputsToCamera()`（正在移动 / 正在转换两种）原先都是 `if (…) return` 一声不响，
+  现全部给出可读原因
+- **设置页工具行不再是点不动的死区**：`ActionRow` 忙时原先直接不挂 `clickable`，
+  点击被吞且无处解释；现在点击照常派发、由处理函数说明原因，文字变淡仅作为提示
+- **修复时间批次不再被单个文件带崩**：文件名时间解析此前在 try 之外，一条异常会终止整批协程、
+  并跳过收尾的 `isFixing = false` —— 从此该页永久静默失灵。现计入跳过项继续下一张
+- **测试层的坦白**：新增 `SilentControlsTest` / `SettingsActionRowClickTest`；
+  「欠弹窗」这条用**结构断言**守（`preflight` 必须是 Compose 状态）。原因是 Robolectric 会主动
+  泵帧，把真机上的重组时序问题洗掉——变异检查显示该类退化下 8 条行为用例**全部照绿**，
+  只有结构断言会红。行为用例抓不到的东西，不假装抓到了
+- 已知：v1.7.11 的这几处修复针对的是「静默」这一类缺陷；OriginOS 真机上首次点击的确切机制
+  仍未取得设备侧证据，装机复测若仍复现，请从设置页导出崩溃日志并附版本号
+- **测试基建修正**：Robolectric + Compose 全量挤在一个 JVM 里会累积到 OOM，
+  表现为 `Recomposer.withFrameNanos` 抛 `OutOfMemoryError` 并被归因成「测试开始前有未捕获异常」。
+  对策是**定期换 JVM**（`forkEvery = 3`，堆保持 1024m）而不是把堆开大——本机内存吃紧时
+  3G 堆会直接触发换页，实测整套从 2 分钟劣化到 13 分钟跑不完一个类；改后全量 25 秒
+- 验证：**92 组 JVM 单测**（仅 `siblingMp4MatchesUppercaseExtension` 因 macOS APFS
+  大小写不敏感必红，Linux/CI 绿）、Lint 无 error、R8 release + apksigner 验签通过
 
 ### v1.7.10（稳定版）
 
