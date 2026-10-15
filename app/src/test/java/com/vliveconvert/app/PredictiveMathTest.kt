@@ -60,7 +60,7 @@ class PredictiveMathTest {
     fun selfDrivenAmplitudeAmplifiesAndClamps() {
         // ROM 不派发进度事件时的自驱动回放用 1.35× 幅度——必须更大、且各分量钳住不越界
         val base = predictiveOutgoing(1f)
-        val amp = predictiveOutgoing(1f, SELF_DRIVE_AMP)
+        val amp = predictiveOutgoing(1f, 1.35f)
         assertTrue("放大版必须缩得更小", amp.scale < base.scale)
         assertTrue("放大版必须位移更多", amp.shiftFraction > base.shiftFraction)
         assertEquals("播放形透明度不随幅度变化（始终全透明收尾）", 0f, amp.alpha, 1e-6f)
@@ -68,7 +68,7 @@ class PredictiveMathTest {
         assertTrue("位移上限钳制", amp.shiftFraction <= 0.1f + 1e-6f)
 
         val inBase = predictiveIncoming(0f)
-        val inAmp = predictiveIncoming(0f, SELF_DRIVE_AMP)
+        val inAmp = predictiveIncoming(0f, 1.35f)
         assertEquals("揭底层不受幅度影响（始终从同一处迎上来）", inBase.scale, inAmp.scale, 1e-6f)
     }
 

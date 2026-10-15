@@ -29,6 +29,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -182,17 +184,11 @@ internal fun fixTimeSummary(
     }
 }
 
-/** 一次续接动画的记账：目标（1f=弹出 / 0f=收回）、时长、幅度（自驱动 1.35× 更醒目）。 */
-internal data class BackAnim(val target: Float, val durationMs: Int, val amplitude: Float = 1f)
+/** 一次续接动画的记账：目标（1f=弹出 / 0f=收回）、时长。仅用于有手势进度的续完/收回。 */
+internal data class BackAnim(val target: Float, val durationMs: Int)
 
 // 手势提交后的续完：从当前进度到位，要短——手已经松了
 internal const val COMMIT_FINISH_MS = 120
-// 无进度事件时的自驱动整段播放 + 页内返回按钮：完整编排，稍长
-internal const val SELF_DRIVEN_POP_MS = 280
-// 自驱动回放的幅度放大：ROM 不派发进度事件时，这是唯一"看得见的预测性动画"
-internal const val SELF_DRIVE_AMP = 1.35f
-// 取消收回
-internal const val CANCEL_RETURN_MS = 200
 
 /** 顶层页（正在退出的那个）的手势变换。
  *  官方规范的原版参数（缩 0.9、移 1/20 窗宽）在全屏页面之间**读不出来**——
@@ -344,14 +340,12 @@ class MainActivity : ComponentActivity() {
     private var predictiveCommitArmed = false
 
     /**
-     * 页内返回按钮走的路径：自驱动播放同一套双层动画后弹层。
-     * 与手势共用一套数学——按钮返回不该比手势返回少一段动画。
-     * backAnim 非空时忽略重复点击（动画进行中再弹一次会连跳两层）
+     * 页内返回按钮：直接弹层，由换页转场演出预测性编排（与无事件手势同一条路）。
+     * 转场是布局动画、必然渲染，不依赖 ROM 派发进度
      */
     private fun animateBackPop() {
-        if (backAnim != null) return
-        backEdgeSign = 1f
-        backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS, SELF_DRIVE_AMP)
+        predictiveCommitArmed = false
+        popTopLayer()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -719,14 +713,15 @@ class MainActivity : ComponentActivity() {
                                 "value=${backProgressAnim.value}")
                         lastBackTrace = if (sawGesture && backProgressAnim.value > 0f)
                             "事件 $eventCount 次，末进度 $lastProgress，路径=跟手续完"
-                        else "事件 $eventCount 次，路径=自驱动回放"
+                        else "事件 $eventCount 次，路径=直接弹层+转场编排"
                         if (!sawGesture || backProgressAnim.value <= 0f) {
-                            // ROM 不派发进度事件（OriginOS 等一大批国产 ROM 如此）时，
-                            // 手势提交到这里一个事件都没有——**自驱动**把同一套双层动画
-                            // 从 0 播到 1 再换层，保证任何设备上都有预测性返回的观感。
-                            // 边信息缺失按左缘处理（与既有滑出方向一致）
-                            backEdgeSign = 1f
-                            backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS, SELF_DRIVE_AMP)
+                            // ROM 不派发进度事件（OriginOS 等一大批国产 ROM 如此）：
+                            // 拖动全程无法跟手（系统没给进度），松手后由**换页转场本身**
+                            // 演出预测性编排（缩出+淡出 / 缩放就位）——转场是窗口内布局动画，
+                            // 在任何 ROM 上都必然渲染，不依赖帧时钟（自驱动预动画在真机上
+                            // 因系统窗口动画接管而不可见，v1.8.6 诊断确认）
+                            predictiveCommitArmed = false
+                            popTopLayer()
                         } else {
                             // 手势提交：只**记账**（回填续接目标），动画由组合内的
                             // LaunchedEffect 执行——从当前进度续完，跟手感
@@ -736,7 +731,7 @@ class MainActivity : ComponentActivity() {
                         // 手势取消：记一个"收回"目标后必须重抛——取消不等于「已处理返回」
                         Log.i("BackDebug", "cancelled after events=$eventCount")
                         lastBackTrace = "事件 $eventCount 次，路径=取消收回"
-                        backAnim = BackAnim(0f, CANCEL_RETURN_MS)
+                        backAnim = BackAnim(0f, 200)
                         throw e
                     }
                 }
@@ -749,7 +744,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(backAnim) {
                     val anim = backAnim ?: return@LaunchedEffect
                     Log.i("BackDebug",
-                        "anim start target=${anim.target} dur=${anim.durationMs} amp=${anim.amplitude}")
+                        "anim start target=${anim.target} dur=${anim.durationMs}")
                     try {
                         withTimeout(anim.durationMs + 450L) {
                             // 提交续完用 tween（有界、可超时兜底）；取消收回用弹簧——
@@ -913,8 +908,7 @@ class MainActivity : ComponentActivity() {
                                 Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
-                                        val incoming = predictiveIncoming(
-                                        backProgressAnim.value, backAnim?.amplitude ?: 1f)
+                                        val incoming = predictiveIncoming(backProgressAnim.value)
                                         scaleX = incoming.scale
                                         scaleY = incoming.scale
                                         alpha = incoming.alpha
@@ -962,10 +956,17 @@ class MainActivity : ComponentActivity() {
                                 if (predictiveCommitArmed) {
                                     EnterTransition.None togetherWith ExitTransition.None
                                 } else if (targetState == Screen.Main && initialState != Screen.Main) {
-                                    (slideInHorizontally(move) { -it / 4 } +
-                                            fadeIn(fadeInSpec)) togetherWith
-                                            (slideOutHorizontally(move) { it } +
-                                                    fadeOut(fadeOutSpec))
+                                    // 返回：预测性收场编排——旧页缩出+淡出+向手势侧位移，
+                                    // 新页自 0.94 缩放就位。转场是窗口内布局动画，
+                                    // 任何 ROM 上都必然渲染（v1.8.6 诊断确认自驱动预动画
+                                    // 在 OriginOS 上被系统窗口动画接管而不可见）
+                                    (scaleIn(initialScale = 0.94f,
+                                        animationSpec = tween(240, easing = PredictiveEase)) +
+                                            fadeIn(tween(240))) togetherWith
+                                            (scaleOut(targetScale = 0.86f,
+                                                animationSpec = tween(220, easing = PredictiveEase)) +
+                                                    fadeOut(tween(200)) +
+                                                    slideOutHorizontally(tween(220)) { it / 5 })
                                 } else {
                                     (slideInHorizontally(move) { it } +
                                             fadeIn(fadeInSpec)) togetherWith
