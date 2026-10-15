@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
@@ -690,10 +691,16 @@ class MainActivity : ComponentActivity() {
                     enabled = hasReadPermission() && !ConvertCenter.isConverting &&
                         (showAbout || showFixTime || showPicker || showSettings)
                 ) { progress ->
+                    var sawGesture = false
+                    var eventCount = 0
+                    var lastProgress = 0f
                     try {
-                        var sawGesture = false
                         progress.collect { event ->
-                            sawGesture = true
+                            eventCount++
+                            lastProgress = event.progress
+                            if (eventCount == 1) {
+                                Log.i("BackDebug", "gesture start edge=${event.swipeEdge}")
+                            }
                             // 新手势进来：掐掉任何没跑完的续接动画（LaunchedEffect 随键重启），
                             // 并复位提交标记（上个提交遗留的 true 不许污染下一次过渡）
                             backAnim = null
@@ -705,6 +712,9 @@ class MainActivity : ComponentActivity() {
                             }
                             backProgressAnim.snapTo(event.progress)
                         }
+                        Log.i("BackDebug",
+                            "commit: events=$eventCount lastProgress=$lastProgress " +
+                                "value=${backProgressAnim.value}")
                         if (!sawGesture || backProgressAnim.value <= 0f) {
                             // ROM 不派发进度事件（OriginOS 等一大批国产 ROM 如此）时，
                             // 手势提交到这里一个事件都没有——**自驱动**把同一套双层动画
@@ -719,6 +729,7 @@ class MainActivity : ComponentActivity() {
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         // 手势取消：记一个"收回"目标后必须重抛——取消不等于「已处理返回」
+                        Log.i("BackDebug", "cancelled after events=$eventCount")
                         backAnim = BackAnim(0f, CANCEL_RETURN_MS)
                         throw e
                     }
@@ -731,6 +742,8 @@ class MainActivity : ComponentActivity() {
                 // 宁可让页面直接就位，也不能把返回链路挂死（v1.7.20 卡死的形状）
                 LaunchedEffect(backAnim) {
                     val anim = backAnim ?: return@LaunchedEffect
+                    Log.i("BackDebug",
+                        "anim start target=${anim.target} dur=${anim.durationMs} amp=${anim.amplitude}")
                     try {
                         withTimeout(anim.durationMs + 450L) {
                             // 提交续完用 tween（有界、可超时兜底）；取消收回用弹簧——
@@ -746,6 +759,7 @@ class MainActivity : ComponentActivity() {
                     if (anim.target == 1f) {
                         predictiveCommitArmed = true
                         popTopLayer()
+                        Log.i("BackDebug", "anim done → popped")
                         backProgressAnim.snapTo(0f)
                     }
                     backAnim = null
