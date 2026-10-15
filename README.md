@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.4），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.5），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.4.apk`](./VivoLivePhoto-v1.8.4.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.5.apk`](./VivoLivePhoto-v1.8.5.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.5（细节动效打磨）
+
+三处还会"生硬一下"的地方收掉，与 v1.8.2–1.8.4 的动效语言一致：
+
+1. **主界面空状态 ↔ 列表**：加第一张照片、清空列表时此前是瞬间跳切，
+   现在淡入淡出 + 96%→100% 缩放过渡
+2. **条目状态底色**：待转换 → 转换中 → 完成 的行底色此前瞬变，
+   现在 `animateColorAsState` 300ms 平滑过渡（含失败红、丢位置紫）
+3. **修复时间页网格**：修复单元格增删/重排同样接入 `animateItem`
+   （此前只有转换列表有，同一次打磨漏了姊妹页）
+
+- 验证：142 组单测全量通过、Lint 0 error、R8 + apksigner 通过
 
 ### v1.8.4（预测性返回加强 · 自驱动回放）
 

@@ -2,6 +2,9 @@ package com.vliveconvert.app.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -270,27 +273,39 @@ fun MainScreen(
 
         // ── 列表 ──
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (items.isEmpty()) {
-                EmptyState(onAdd = onAddMore)
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(items, key = { it.item.key }) { ci ->
-                        ConvertItemRow(
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = tween(220),
-                                placementSpec = spring(
-                                    dampingRatio = 0.9f, stiffness = 380f),
-                                fadeOutSpec = tween(180)
-                            ),
-                            ci = ci,
-                            onRemove = { onRemove(ci) },
-                            onReconvert = { onReconvertItem(ci) }
-                        )
+            // v1.8.5：空状态 ↔ 列表不再瞬间跳切（加第一张照片/清空时肉眼可见地切换）
+            AnimatedContent(
+                targetState = items.isEmpty(),
+                transitionSpec = {
+                    (fadeIn(tween(260)) + scaleIn(
+                        initialScale = 0.96f, animationSpec = tween(260))) togetherWith
+                        (fadeOut(tween(200)) + scaleOut(
+                            targetScale = 0.96f, animationSpec = tween(200)))
+                },
+                label = "emptyListSwitch"
+            ) { empty ->
+                if (empty) {
+                    EmptyState(onAdd = onAddMore)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(items, key = { it.item.key }) { ci ->
+                            ConvertItemRow(
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = tween(220),
+                                    placementSpec = spring(
+                                        dampingRatio = 0.9f, stiffness = 380f),
+                                    fadeOutSpec = tween(180)
+                                ),
+                                ci = ci,
+                                onRemove = { onRemove(ci) },
+                                onReconvert = { onReconvertItem(ci) }
+                            )
+                        }
                     }
                 }
             }
@@ -478,11 +493,13 @@ private fun ConvertItemRow(
     val busy = isBusyStatus(ci.status)
     val lostGps = ci.done && ci.lostGps && !ci.failed
     val status = statusColors
-    val bg = when {
+    val bgTarget = when {
         ci.failed -> MaterialTheme.colorScheme.errorContainer
         lostGps -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
+    // 状态切换时底色平滑过渡（v1.8.5）：待转换→转换中→完成不再瞬变
+    val bg by animateColorAsState(bgTarget, tween(300), label = "rowBg")
     val main = MaterialTheme.colorScheme.onSurface
     val statusColor = when {
         ci.failed -> MaterialTheme.colorScheme.onErrorContainer

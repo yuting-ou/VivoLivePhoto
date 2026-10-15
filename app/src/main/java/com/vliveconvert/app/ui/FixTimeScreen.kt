@@ -300,6 +300,12 @@ fun FixTimeScreen(
                         }
                         items(groupItems, key = { it.key }) { item ->
                             FixCell(
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = tween(220),
+                                    placementSpec = spring(
+                                        dampingRatio = 0.9f, stiffness = 380f),
+                                    fadeOutSpec = tween(180)
+                                ),
                                 item = item,
                                 selected = selected.any { it.id == item.id },
                                 onToggle = { toggleItem(item) }
@@ -400,7 +406,12 @@ private fun formatCurrentTime(ms: Long): String =
     if (ms > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(ms)) else "未知"
 
 @Composable
-private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
+private fun FixCell(
+    modifier: Modifier = Modifier,
+    item: MediaItem,
+    selected: Boolean,
+    onToggle: () -> Unit
+) {
     val resolver = LocalContext.current.contentResolver
     val transition = updateTransition(selected, label = "fixCell")
     val scale by transition.animateFloat(label = "scale") { if (it) 0.88f else 1f }
@@ -426,7 +437,7 @@ private fun FixCell(item: MediaItem, selected: Boolean, onToggle: () -> Unit) {
     val targetText = targetTimeText(item)
 
     Box(
-        Modifier
+        modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onToggle)
