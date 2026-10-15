@@ -281,6 +281,12 @@ fun MainScreen(
                 ) {
                     items(items, key = { it.item.key }) { ci ->
                         ConvertItemRow(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = tween(220),
+                                placementSpec = spring(
+                                    dampingRatio = 0.9f, stiffness = 380f),
+                                fadeOutSpec = tween(180)
+                            ),
                             ci = ci,
                             onRemove = { onRemove(ci) },
                             onReconvert = { onReconvertItem(ci) }
@@ -463,6 +469,7 @@ private fun EmptyState(onAdd: () -> Unit) {
  */
 @Composable
 private fun ConvertItemRow(
+    modifier: Modifier = Modifier,
     ci: ConvertItem,
     onRemove: () -> Unit,
     onReconvert: () -> Unit
@@ -488,7 +495,7 @@ private fun ConvertItemRow(
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = bg,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
         Row(
             Modifier.padding(10.dp),

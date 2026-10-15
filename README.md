@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.2），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.3），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.2.apk`](./VivoLivePhoto-v1.8.2.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.3.apk`](./VivoLivePhoto-v1.8.3.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,20 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.3（动效打磨）
+
+三处看得见的动画升级，与 v1.8.2 的苹果式图标同一套质感语言：
+
+1. **页面切换弹簧化**：匀速 300ms tween → 弹簧（位移 dampingRatio 0.9 / stiffness 520，
+   稳态收敛 ~200ms）+ 更短的淡入淡出（180/150ms）——"到位"的那一下有了苹果味的弹性
+2. **转换列表条目动画**：此前增删/重排是瞬间跳变，现在用 `animateItem`
+   （淡入 220ms、位移动画弹簧、淡出 180ms）——添加照片、转换完成、移除条目都会平滑过渡
+3. **预测性返回取消回弹弹簧化**：松手收回从匀速 tween 改为轻微弹簧（0.85/350）——
+   "液态玻璃"的松手就该有一点点液体味；提交续完仍用有界 tween（保留超时兜底）
+
+- 验证：141 组单测全量通过（导航/可达性/冷启动/冒烟在弹簧时长下复跑），
+  Lint 0 error，R8 + apksigner 通过
 
 ### v1.8.2（图标定稿 · 苹果式 Liquid Glass）
 

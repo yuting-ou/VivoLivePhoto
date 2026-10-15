@@ -22,6 +22,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -58,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.withTimeout
@@ -727,7 +729,12 @@ class MainActivity : ComponentActivity() {
                     val anim = backAnim ?: return@LaunchedEffect
                     try {
                         withTimeout(anim.durationMs + 450L) {
-                            backProgressAnim.animateTo(anim.target, tween(anim.durationMs))
+                            // 提交续完用 tween（有界、可超时兜底）；取消收回用弹簧——
+                            // "液态玻璃"的松手回弹就该有一点点液体味
+                            backProgressAnim.animateTo(
+                                anim.target,
+                                if (anim.target == 1f) tween(anim.durationMs)
+                                else spring(dampingRatio = 0.85f, stiffness = 350f))
                         }
                     } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                         backProgressAnim.snapTo(anim.target)
@@ -917,18 +924,25 @@ class MainActivity : ComponentActivity() {
                             transitionSpec = {
                                 // 手势提交的弹层：揭底层已经在原地，立即换层——
                                 // 若再滑一次 300ms，同一页面会在自己身上重播入场（双重运动）
+                                //
+                                // v1.8.3：匀速 tween → 弹簧（苹果味的"到位"感），
+                                // 位移弹簧 + 短淡入淡出；稳态收敛 ~200ms
+                                val move = spring<IntOffset>(
+                                    dampingRatio = 0.9f, stiffness = 520f)
+                                val fadeInSpec = tween<Float>(180)
+                                val fadeOutSpec = tween<Float>(150)
                                 if (predictiveCommitArmed) {
                                     EnterTransition.None togetherWith ExitTransition.None
                                 } else if (targetState == Screen.Main && initialState != Screen.Main) {
-                                    (slideInHorizontally(tween(300)) { -it / 4 } +
-                                            fadeIn(tween(300))) togetherWith
-                                            (slideOutHorizontally(tween(300)) { it } +
-                                                    fadeOut(tween(220)))
+                                    (slideInHorizontally(move) { -it / 4 } +
+                                            fadeIn(fadeInSpec)) togetherWith
+                                            (slideOutHorizontally(move) { it } +
+                                                    fadeOut(fadeOutSpec))
                                 } else {
-                                    (slideInHorizontally(tween(300)) { it } +
-                                            fadeIn(tween(300))) togetherWith
-                                            (slideOutHorizontally(tween(300)) { -it / 4 } +
-                                                    fadeOut(tween(220)))
+                                    (slideInHorizontally(move) { it } +
+                                            fadeIn(fadeInSpec)) togetherWith
+                                            (slideOutHorizontally(move) { -it / 4 } +
+                                                    fadeOut(fadeOutSpec))
                                 }
                             },
                             label = "screenTransition"
