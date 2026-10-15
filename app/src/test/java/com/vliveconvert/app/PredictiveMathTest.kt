@@ -57,6 +57,22 @@ class PredictiveMathTest {
     }
 
     @Test
+    fun selfDrivenAmplitudeAmplifiesAndClamps() {
+        // ROM 不派发进度事件时的自驱动回放用 1.35× 幅度——必须更大、且各分量钳住不越界
+        val base = predictiveOutgoing(1f)
+        val amp = predictiveOutgoing(1f, SELF_DRIVE_AMP)
+        assertTrue("放大版必须缩得更小", amp.scale < base.scale)
+        assertTrue("放大版必须位移更多", amp.shiftFraction > base.shiftFraction)
+        assertEquals("播放形透明度不随幅度变化（始终全透明收尾）", 0f, amp.alpha, 1e-6f)
+        assertTrue("缩放下限钳制", amp.scale >= 0.78f - 1e-4f)
+        assertTrue("位移上限钳制", amp.shiftFraction <= 0.1f + 1e-6f)
+
+        val inBase = predictiveIncoming(0f)
+        val inAmp = predictiveIncoming(0f, SELF_DRIVE_AMP)
+        assertEquals("揭底层不受幅度影响（始终从同一处迎上来）", inBase.scale, inAmp.scale, 1e-6f)
+    }
+
+    @Test
     fun outOfRangeProgressIsClamped() {
         // 系统偶尔会在提交边界外补事件：负值与 >1 都必须钳制，不许把页面拉爆
         assertEquals(predictiveOutgoing(0f).scale, predictiveOutgoing(-0.3f).scale, 1e-6f)

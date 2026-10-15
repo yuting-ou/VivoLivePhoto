@@ -181,13 +181,15 @@ internal fun fixTimeSummary(
     }
 }
 
-/** 一次续接动画的记账：目标是多少（1f=弹出 / 0f=收回）、用多长时间。 */
-internal data class BackAnim(val target: Float, val durationMs: Int)
+/** 一次续接动画的记账：目标（1f=弹出 / 0f=收回）、时长、幅度（自驱动 1.35× 更醒目）。 */
+internal data class BackAnim(val target: Float, val durationMs: Int, val amplitude: Float = 1f)
 
 // 手势提交后的续完：从当前进度到位，要短——手已经松了
-internal const val COMMIT_FINISH_MS = 150
+internal const val COMMIT_FINISH_MS = 120
 // 无进度事件时的自驱动整段播放 + 页内返回按钮：完整编排，稍长
-internal const val SELF_DRIVEN_POP_MS = 240
+internal const val SELF_DRIVEN_POP_MS = 280
+// 自驱动回放的幅度放大：ROM 不派发进度事件时，这是唯一"看得见的预测性动画"
+internal const val SELF_DRIVE_AMP = 1.35f
 // 取消收回
 internal const val CANCEL_RETURN_MS = 200
 
@@ -201,17 +203,19 @@ internal data class PredictiveOutgoing(
     val cornerFraction: Float, val alpha: Float
 )
 
-internal fun predictiveOutgoing(progress: Float): PredictiveOutgoing {
+internal fun predictiveOutgoing(progress: Float, amplitude: Float = 1f): PredictiveOutgoing {
+    // amplitude 放大" eased 进度"本身（自驱动回放用它加强幅度到 1.35×），
+    // 各分量在函数内自行钳制，p>1 不会把页面拉爆
     val raw = progress.coerceIn(0f, 1f)
-    val p = PredictiveEase.transform(raw)
-    // 淡出门槛必须锚定**原始**进度（最后 25% 手指行程）。套在缓出之后的进度上时，
-    // 缓出把前段推得太靠前：手指才到 70% 页面已经几乎全透明（测试抓的）
+    val p = PredictiveEase.transform(raw) * amplitude
+    // 淡出门槛必须锚定**原始**进度（最后 25% 手指行程）——套在缓出后的进度上时，
+    // 缓出把前段推得太靠前，手指才到 70% 页面已几乎全透明（此回归被测试抓过两次）
     val fade = ((raw - 0.75f) / 0.25f).coerceIn(0f, 1f)
     return PredictiveOutgoing(
-        scale = 1f - 0.12f * p,
-        shiftFraction = p / 14f,
+        scale = (1f - 0.12f * p).coerceAtLeast(0.78f),
+        shiftFraction = (p / 14f).coerceAtMost(0.1f),
         liftFraction = p / 60f,
-        cornerFraction = p,
+        cornerFraction = p.coerceAtMost(1f),
         alpha = 1f - fade,
     )
 }
@@ -221,8 +225,8 @@ internal fun predictiveOutgoing(progress: Float): PredictiveOutgoing {
  *  看起来就像页面轻微抖了一下；深度感来自两层**相向运动** */
 internal data class PredictiveIncoming(val scale: Float, val shiftFraction: Float, val alpha: Float)
 
-internal fun predictiveIncoming(progress: Float): PredictiveIncoming {
-    val p = PredictiveEase.transform(progress.coerceIn(0f, 1f))
+internal fun predictiveIncoming(progress: Float, amplitude: Float = 1f): PredictiveIncoming {
+    val p = (PredictiveEase.transform(progress.coerceIn(0f, 1f)) * amplitude).coerceAtMost(1f)
     return PredictiveIncoming(
         scale = 0.90f + 0.10f * p,
         shiftFraction = (1f - p) / 16f,
@@ -346,7 +350,7 @@ class MainActivity : ComponentActivity() {
     private fun animateBackPop() {
         if (backAnim != null) return
         backEdgeSign = 1f
-        backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS)
+        backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS, SELF_DRIVE_AMP)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -707,7 +711,7 @@ class MainActivity : ComponentActivity() {
                             // 从 0 播到 1 再换层，保证任何设备上都有预测性返回的观感。
                             // 边信息缺失按左缘处理（与既有滑出方向一致）
                             backEdgeSign = 1f
-                            backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS)
+                            backAnim = BackAnim(1f, SELF_DRIVEN_POP_MS, SELF_DRIVE_AMP)
                         } else {
                             // 手势提交：只**记账**（回填续接目标），动画由组合内的
                             // LaunchedEffect 执行——从当前进度续完，跟手感
@@ -886,7 +890,8 @@ class MainActivity : ComponentActivity() {
                                 Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
-                                        val incoming = predictiveIncoming(backProgressAnim.value)
+                                        val incoming = predictiveIncoming(
+                                        backProgressAnim.value, backAnim?.amplitude ?: 1f)
                                         scaleX = incoming.scale
                                         scaleY = incoming.scale
                                         alpha = incoming.alpha

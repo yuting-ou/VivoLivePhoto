@@ -352,8 +352,8 @@ class UiScreenshotTest {
         val progress = mutableFloatStateOf(0f)
         render {
             val p = progress.floatValue
-            val outgoing = predictiveOutgoing(p)
-            val incoming = predictiveIncoming(p)
+            val outgoing = predictiveOutgoing(p, SELF_DRIVE_AMP)
+            val incoming = predictiveIncoming(p, SELF_DRIVE_AMP)
             val edge = 1f // 左缘手势：顶层向右让位，揭底层从左迎上
             Box(Modifier.fillMaxSize().background(Color(0xFF0E141B))) {
                 Box(
@@ -387,6 +387,13 @@ class UiScreenshotTest {
             compose.mainClock.advanceTimeBy(16)
             compose.waitForIdle()
             shot("pb_frame_${(f * 100).toInt()}")
+        }
+        // 自驱动回放帧（amplitude 1.35×）：ROM 无进度事件时的实际观感
+        for (f in listOf(0f, 0.5f, 1f)) {
+            progress.floatValue = f
+            compose.mainClock.advanceTimeBy(16)
+            compose.waitForIdle()
+            shot("pb_frame_self_${(f * 100).toInt()}")
         }
     }
 

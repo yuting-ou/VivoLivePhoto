@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.3），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.4），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.3.apk`](./VivoLivePhoto-v1.8.3.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.4.apk`](./VivoLivePhoto-v1.8.4.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,29 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.4（预测性返回加强 · 自驱动回放）
+
+**真机反馈「设置里没预测性动画」的根因与对策。**
+
+查证 androidx 1.13.0 源码：我们这一侧的事件链路是通的（`onBackStarted/Progressed`
+逐个转发）。但**"拖动跟手指"必须由 ROM 派发进度事件**——OriginOS 这类 ROM 很可能
+不派发，于是拖动全程页面纹丝不动，松手才补一段动画，观感就是"没预测性动画"。
+
+对策（v1.8.4）：
+
+- **自驱动回放加强**：新增幅度机制（`BackAnim.amplitude`），ROM 不派发事件时的
+  回放用 **1.35× 幅度**（缩得更小 0.78、位移更多 10% 窗宽、280ms），
+  松手后的动画从"轻描淡写"变成"明确的一次预测性返回"
+- 手指跟随不变：ROM 派发进度事件时仍实时跟手，松手从当前进度续完（150→120ms 更利落）
+- 取消回弹弹簧化、页面切换弹簧化、列表条目动画随 v1.8.3 已就位
+
+**想开手指跟随**：ROM 若提供开关，检查 系统设置 → 开发者选项 →「预测性返回动画」
+（Android 14 的应用内进度事件曾依赖它，15+ 默认开启；OriginOS 的开关位置以其为准）。
+
+- 验证：142 组单测（新增幅度钳制断言；淡出门槛回归被测试第 2 次抓到并修正——
+  它必须锚定**原始**进度而非缓出后的进度）、Lint 0 error、R8 + apksigner 通过、
+  自驱动 1.35× 中途帧渲染逐帧看过
 
 ### v1.8.3（动效打磨）
 
