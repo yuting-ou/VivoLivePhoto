@@ -54,7 +54,8 @@ fun SettingsScreen(
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
     onOpenAbout: () -> Unit,
-    statusText: String = ""
+    statusText: String = "",
+    backTrace: String = ""
 ) {
     Column(
         Modifier
@@ -81,6 +82,18 @@ fun SettingsScreen(
                 "设置",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        // 返回链路诊断（真机取证）：最近一次手势的事件数/路径/动画结果
+        if (backTrace.isNotEmpty()) {
+            Text(
+                "返回诊断：$backTrace",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
             )
         }
 

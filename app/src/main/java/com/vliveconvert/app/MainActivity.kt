@@ -379,6 +379,8 @@ class MainActivity : ComponentActivity() {
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
     private var showOutputPathDialog by mutableStateOf(false)
     // 崩溃日志导出结果的弹窗文案；null = 不弹。用弹窗而不是顶栏小字（用户反馈过看不见）
+    // 返回链路诊断：最近一次手势的事件数/路径/动画结果，就地显示在设置页（真机取证用）
+    private var lastBackTrace by mutableStateOf("")
     private var crashExportMessage by mutableStateOf<String?>(null)
     private var outputPathInput by mutableStateOf("")
     // 输出文件批量移动到 DCIM/Camera
@@ -715,6 +717,9 @@ class MainActivity : ComponentActivity() {
                         Log.i("BackDebug",
                             "commit: events=$eventCount lastProgress=$lastProgress " +
                                 "value=${backProgressAnim.value}")
+                        lastBackTrace = if (sawGesture && backProgressAnim.value > 0f)
+                            "事件 $eventCount 次，末进度 $lastProgress，路径=跟手续完"
+                        else "事件 $eventCount 次，路径=自驱动回放"
                         if (!sawGesture || backProgressAnim.value <= 0f) {
                             // ROM 不派发进度事件（OriginOS 等一大批国产 ROM 如此）时，
                             // 手势提交到这里一个事件都没有——**自驱动**把同一套双层动画
@@ -730,6 +735,7 @@ class MainActivity : ComponentActivity() {
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         // 手势取消：记一个"收回"目标后必须重抛——取消不等于「已处理返回」
                         Log.i("BackDebug", "cancelled after events=$eventCount")
+                        lastBackTrace = "事件 $eventCount 次，路径=取消收回"
                         backAnim = BackAnim(0f, CANCEL_RETURN_MS)
                         throw e
                     }
@@ -755,11 +761,13 @@ class MainActivity : ComponentActivity() {
                         }
                     } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                         backProgressAnim.snapTo(anim.target)
+                        lastBackTrace = lastBackTrace + "，动画=超时兜底（帧时钟没吐帧）"
                     }
                     if (anim.target == 1f) {
                         predictiveCommitArmed = true
                         popTopLayer()
                         Log.i("BackDebug", "anim done → popped")
+                        lastBackTrace = lastBackTrace + "，动画=完整播放"
                         backProgressAnim.snapTo(0f)
                     }
                     backAnim = null
@@ -817,6 +825,7 @@ class MainActivity : ComponentActivity() {
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
                                 statusText = ConvertCenter.statusText,
+                                backTrace = lastBackTrace,
                                 outputRelPath = outputRelPath,
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,
