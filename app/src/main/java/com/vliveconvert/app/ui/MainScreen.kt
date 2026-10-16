@@ -338,6 +338,13 @@ fun MainScreen(
                 // 用 AnimatedContent + SizeTransform 而不是 Crossfade：底栏各态高度不同
                 // （进度+取消 ≈ 88dp，摘要+按钮 ≈ 74dp），Crossfade 期间容器按最高子项定尺寸，
                 // 切换瞬间整块高度跳变，观感就是「原地闪一下」；SizeTransform 让尺寸随动画平滑过渡
+                // v2.0 数字滚动：服务端按条目跳变 progress，临界阻尼弹簧让它平滑追赶
+                // （无过冲：100% 恒为 100%；新批次归零时快速泄回，读作"重置"）
+                val shownProgress by animateFloatAsState(
+                    targetValue = progress,
+                    animationSpec = spring(stiffness = 240f, dampingRatio = 1f),
+                    label = "shownProgress"
+                )
                 AnimatedContent(
                     targetState = if (isConverting) 2 else if (finishedBeat) 1 else 0,
                     transitionSpec = {
@@ -360,14 +367,14 @@ fun MainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(
-                                    "${(progress * 100).toInt()}%",
+                                    "${(shownProgress * 100).toInt()}%",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             LinearProgressIndicator(
-                                progress = { progress },
+                                progress = { shownProgress },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp)
