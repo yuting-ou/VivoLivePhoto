@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 59
-        versionName = "2.0.0"
+        versionCode = 60
+        versionName = "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -110,6 +110,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
     // JVM 单测替换 android.jar 的 org.json stub（stub 全部方法抛异常）为真实实现

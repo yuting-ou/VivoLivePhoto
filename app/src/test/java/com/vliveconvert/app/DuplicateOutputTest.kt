@@ -204,4 +204,34 @@ class DuplicateOutputTest {
         assertEquals("应返回同一 URI", firstUri, returned)
         assertTrue("内容应已替换", readBack(returned).contentEquals(second))
     }
+
+    /**
+     * 相机行是 `DCIM/camera/`（小写）、应用行可能是 `DCIM/Camera/`——SQLite 的 IN 比较
+     * 区分大小写，查重漏掉相机行会让插入撞上同名源文件：vivo Provider 会把冲突行整行
+     * 删掉、文件成孤儿（2026-10-16 真机实测）。uniqueCameraName 必须对目录做大小写
+     * 不敏感匹配。
+     */
+    @Test
+    fun uniqueCameraNameSeesLowercasePathRows() {
+        // 模拟 vivo 相机行：小写 relative_path 下的同名文件
+        putMedia("DCIM/camera", "IMG_CASE.jpg", byteArrayOf(1))
+        val name = MediaExport.uniqueCameraName(resolver, "IMG_CASE.jpg")
+        assertEquals("必须看见小写目录里的同名文件并避开", "IMG_CASE(1).jpg", name)
+    }
+
+    /** 既往产物即使行的大小写形态不同，也应被识别并原地覆盖（指纹/标记匹配） */
+    @Test
+    fun previousOutputWithDifferentPathCaseIsStillFound() {
+        val rel = "DCIM/camera" // 与应用写入的 "DCIM/Camera" 大小写不同
+        val first = contentWithMotionPhoto(byteArrayOf(0x21))
+        val firstUri = putMedia(rel, "IMG_CASEOUT.jpg", first)
+
+        val second = contentWithMotionPhoto(byteArrayOf(0x22))
+        val returned = MediaExport.exportAndVerify(
+            app, makeResult(second, "IMG_CASEOUT"), timestamp = 1_700_000_000_000L,
+            relPath = "DCIM/Camera", useCameraDir = true
+        )
+        assertEquals("大小写不同的既往产物也应被识别覆盖", firstUri, returned)
+        assertTrue(readBack(returned).contentEquals(second))
+    }
 }

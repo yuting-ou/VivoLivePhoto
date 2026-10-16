@@ -21,6 +21,37 @@ import java.io.IOException
 internal object MediaExport {
 
     /**
+     * MediaStore 的拍摄坐标列。MediaColumns.LATITUDE/LONGITUDE 常量已从 API 36 SDK 移除，
+     * 但 Provider 的列仍在（真机可查）；相册的位置显示读的就是这两列。
+     */
+    private const val GPS_LATITUDE_COLUMN = "latitude"
+    private const val GPS_LONGITUDE_COLUMN = "longitude"
+
+    private fun putGpsColumns(values: ContentValues, coords: Pair<Double, Double>) {
+        values.put(GPS_LATITUDE_COLUMN, coords.first)
+        values.put(GPS_LONGITUDE_COLUMN, coords.second)
+    }
+
+    /** 把坐标写入既有行；coords=null 时清列（行应如实描述当前文件）。失败不致命。 */
+    private fun updateLocationColumns(
+        resolver: android.content.ContentResolver,
+        uri: Uri,
+        coords: Pair<Double, Double>?
+    ) {
+        try {
+            resolver.update(uri, ContentValues().apply {
+                if (coords != null) {
+                    put(GPS_LATITUDE_COLUMN, coords.first)
+                    put(GPS_LONGITUDE_COLUMN, coords.second)
+                } else {
+                    putNull(GPS_LATITUDE_COLUMN)
+                    putNull(GPS_LONGITUDE_COLUMN)
+                }
+            }, null, null)
+        } catch (_: Exception) {}
+    }
+
+    /**
      * 导出转换产物到系统相册并做写后自检，返回入库 URI。
      *
      * 命名策略（避免重复转换累积 `IMG_x(1).jpg` / `(2)` / `(3)`…）：
@@ -51,9 +82,17 @@ internal object MediaExport {
         val stem = src.name.substringBeforeLast('.')
 
         // 待导出产物 XMP 里的源指纹（VivoSingle 写入）——判定「既往产物是否同源」的依据
+        val outBytes = src.readBytes()
         val expectedFingerprint = try {
-            XmpTemplate.extractSourceFingerprint(
-                JpegUtil.findXmpSegment(src.readBytes())?.xmpText)
+            XmpTemplate.extractSourceFingerprint(JpegUtil.findXmpSegment(outBytes)?.xmpText)
+        } catch (_: Exception) {
+            null
+        }
+        // 拍摄坐标（源 EXIF 的 GPS，随主图进入产物）：写入媒体库坐标列。
+        // vivo 相册的「位置」显示读媒体库列、不回读文件 EXIF，相机拍照时由系统写入该列；
+        // 应用插入的行若不带坐标，相册就永远显示不出位置（2026-10 真机结论）
+        val coords = try {
+            JpegUtil.gpsCoordinates(outBytes)
         } catch (_: Exception) {
             null
         }
@@ -62,7 +101,7 @@ internal object MediaExport {
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
-            overwriteExisting(resolver, previous, src, result, timestamp)?.let { return it }
+            overwriteExisting(resolver, previous, src, result, timestamp, coords)?.let { return it }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
         }
 
@@ -75,10 +114,22 @@ internal object MediaExport {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
             put(MediaStore.MediaColumns.DATE_MODIFIED, timestamp / 1000)
             put(MediaStore.MediaColumns.DATE_TAKEN, timestamp)
+            if (coords != null) putGpsColumns(this, coords)
         }
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val uri = resolver.insert(collection, values)
-            ?: throw IOException("MediaStore insert 返回 null")
+        val uri = try {
+            resolver.insert(collection, values)
+                ?: throw IOException("MediaStore insert 返回 null")
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            if (coords == null) throw e
+            // 个别 ROM 拒绝已废弃的坐标列：去掉坐标重试一次（文件写入不受影响）
+            values.remove(GPS_LATITUDE_COLUMN)
+            values.remove(GPS_LONGITUDE_COLUMN)
+            resolver.insert(collection, values)
+                ?: throw IOException("MediaStore insert 返回 null")
+        }
         try {
             resolver.openOutputStream(uri, "w")?.use { output ->
                 src.inputStream().use { input -> input.copyTo(output) }
@@ -125,7 +176,8 @@ internal object MediaExport {
         old: Uri,
         src: File,
         result: SingleWriteResult,
-        timestamp: Long
+        timestamp: Long,
+        coords: Pair<Double, Double>?
     ): Uri? {
         // 旧记录仍有效才覆盖（用户可能已手动删除产物）
         val valid = try {
@@ -160,7 +212,11 @@ internal object MediaExport {
                     OutputVerifier.verify(it, result.segments)
                 } == true
             } catch (_: Exception) { false }
-            if (verified) return old
+            if (verified) {
+                // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）
+                updateLocationColumns(resolver, old, coords)
+                return old
+            }
             // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
             try { resolver.delete(old, null, null) } catch (_: Exception) {}
             null
@@ -212,12 +268,13 @@ internal object MediaExport {
             resolver.query(
                 collection,
                 arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA),
-                // RELATIVE_PATH 按带/不带尾斜杠两种形态匹配（与 MainActivity.queryImagesIn 一致）：
-                // 真实设备通常规范化带尾斜杠，个别实现不带
-                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?) AND (" +
+                // RELATIVE_PATH 大小写不敏感匹配（LIKE）：本机各行的目录大小写不统一
+                // （相机行 `DCIM/camera/`、应用行可能 `DCIM/Camera/`），IN 区分大小写会漏
+                "(${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?) AND (" +
                     "${MediaStore.MediaColumns.DISPLAY_NAME}=? OR " +
                     "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? ESCAPE '\\')",
-                arrayOf("$targetRelPath/", targetRelPath, exactName, "$escapedStem(%"),
+                arrayOf("$targetRelPath", "$targetRelPath/%", exactName, "$escapedStem(%"),
                 null
             )?.use { c ->
                 while (c.moveToNext()) {
@@ -330,10 +387,13 @@ internal object MediaExport {
             resolver.query(
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
                 arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
-                // 按带/不带尾斜杠两种形态匹配（与 MainActivity.queryImagesIn 一致）：
-                // 只匹配带尾斜杠的形态在个别实现上取不到既有文件名，序号会变得不确定
-                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?)",
-                arrayOf("DCIM/Camera/", "DCIM/Camera"),
+                // 大小写不敏感匹配相机目录：vivo 相机行是 `DCIM/camera/`、应用行可能是
+                // `DCIM/Camera/`——SQLite 的 IN 比较区分大小写，查重漏掉相机行会让插入
+                // 撞上同名源文件，vivo Provider 会把冲突行整行删掉（文件成孤儿）。
+                // SQLite 的 LIKE 对 ASCII 天然不区分大小写，正好覆盖两种写法
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                arrayOf("DCIM/Camera", "DCIM/Camera/%"),
                 null
             )?.use { c ->
                 val i = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
@@ -375,6 +435,15 @@ internal object MediaExport {
         } catch (_: Exception) {}
         var newUri: Uri? = null
         return try {
+            // 回退复制会新建行：旧行的坐标列必须随迁（新行不带坐标，相册就显示不出位置）
+            val carried = try {
+                resolver.query(uri, arrayOf(GPS_LATITUDE_COLUMN, GPS_LONGITUDE_COLUMN),
+                    null, null, null)?.use { c ->
+                    if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1))
+                        c.getDouble(0) to c.getDouble(1)
+                    else null
+                }
+            } catch (_: Exception) { null }
             // 目标名查询与移动之间无并发写入（应用内串行），此处仍以唯一名兜底
             newUri = resolver.insert(
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
@@ -382,6 +451,7 @@ internal object MediaExport {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+                    if (carried != null) putGpsColumns(this, carried)
                 }
             ) ?: return false
             resolver.openOutputStream(newUri, "w")?.use { out ->

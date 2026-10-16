@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.withTimeout
 import com.vliveconvert.app.R
+import com.vliveconvert.app.convert.LocationDisplayRepair
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.XmpTemplate
@@ -379,6 +380,10 @@ class MainActivity : ComponentActivity() {
     private var outputPathInput by mutableStateOf("")
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
+    // 恢复历史产物位置显示（只写媒体库坐标列）
+    private var isRepairingLocation by mutableStateOf(false)
+    private var showRepairConfirm by mutableStateOf(false)
+    private var repairProgressText by mutableStateOf("")
 
     // 动态照片 = 图片 + 伴生视频，必须同时申请图片与视频读取权限
     // （双文件格式需要直接读取同目录 .mp4，缺视频权限会报 EACCES）；
@@ -824,7 +829,8 @@ class MainActivity : ComponentActivity() {
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,
                                 crashLogCount = crashLogCount,
-                                isBusy = ConvertCenter.isConverting || isMovingOutputs || isFixing,
+                                isBusy = ConvertCenter.isConverting || isMovingOutputs ||
+                                    isFixing || isRepairingLocation,
                                 onBack = { animateBackPop() },
                                 onEditOutputPath = {
                                     outputPathInput = outputRelPath
@@ -845,6 +851,7 @@ class MainActivity : ComponentActivity() {
                                         .edit().putBoolean("delete_original", on).apply()
                                 },
                                 onOpenFixTime = { openFixTime() },
+                                onRepairLocationDisplay = { showRepairConfirm = true },
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onExportCrashLogs = { exportCrashLogs() },
                                 onOpenAbout = { showAbout = true }
@@ -1199,6 +1206,38 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             Button(onClick = { crashExportMessage = null }) { Text("知道了") }
                         }
+                    )
+                }
+
+                // 位置显示恢复：确认 + 进度弹窗
+                if (showRepairConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showRepairConfirm = false },
+                        title = { Text("恢复位置显示") },
+                        text = {
+                            Text(
+                                "将扫描相机相册中的历史转换产物，把文件里的拍摄坐标补写进媒体库" +
+                                    "（只改媒体库记录，不动照片内容，约几分钟）。" +
+                                    "完成后 vivo 相册即可显示这些照片的位置。"
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                showRepairConfirm = false
+                                repairLocationDisplay()
+                            }) { Text("开始") }
+                        },
+                        dismissButton = {
+                            Button(onClick = { showRepairConfirm = false }) { Text("取消") }
+                        }
+                    )
+                }
+                if (isRepairingLocation) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("恢复位置显示") },
+                        text = { Text(repairProgressText) },
+                        confirmButton = {}
                     )
                 }
 
@@ -1908,6 +1947,42 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
         return result
+    }
+
+    /**
+     * 恢复历史转换产物的相册位置显示：枚举相机相册里的应用产物、解析文件头坐标、
+     * 补写媒体库坐标列。只写数据库、不改文件字节（实现在 LocationDisplayRepair）。
+     */
+    private fun repairLocationDisplay() {
+        if (isRepairingLocation) return
+        if (ConvertCenter.isConverting) {
+            ConvertCenter.statusText = "转换进行中，等本轮完成后再恢复位置显示"
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                isRepairingLocation = true
+                repairProgressText = "正在扫描相机相册…"
+            }
+            try {
+                val stats = LocationDisplayRepair.repair(this@MainActivity) { done, total ->
+                    // mutableStateOf 可从任意线程写（快照系统保证安全），回调本身非 suspend
+                    repairProgressText = "扫描 $done/$total…"
+                }
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.statusText = "位置显示恢复完成：扫描 ${stats.scanned} 张，" +
+                        "转换产物 ${stats.outputs} 张，从视频段恢复 ${stats.restored} 张，" +
+                        "坐标列补写 ${stats.repaired} 张" +
+                        (if (stats.noGps > 0) "（${stats.noGps} 张无坐标且无法恢复）" else "")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.statusText = "恢复失败：${e.message}"
+                }
+            } finally {
+                withContext(Dispatchers.Main) { isRepairingLocation = false }
+            }
+        }
     }
 
     /**

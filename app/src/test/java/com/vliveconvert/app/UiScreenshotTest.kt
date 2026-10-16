@@ -191,7 +191,8 @@ class UiScreenshotTest {
                 onEditOutputPath = {},
                 onToggleMoveToCamera = {},
                 onToggleDeleteOriginal = {},
-                onOpenFixTime = {},
+                onRepairLocationDisplay = {},
+        onOpenFixTime = {},
                 onMoveOutputsToCamera = {},
                 onExportCrashLogs = {},
                 onOpenAbout = {}

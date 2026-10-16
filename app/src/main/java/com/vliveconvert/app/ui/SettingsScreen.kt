@@ -51,6 +51,7 @@ fun SettingsScreen(
     onToggleMoveToCamera: (Boolean) -> Unit,
     onToggleDeleteOriginal: (Boolean) -> Unit,
     onOpenFixTime: () -> Unit,
+    onRepairLocationDisplay: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -160,6 +161,8 @@ fun SettingsScreen(
             SectionLabel("工具")
             SettingsCard {
                 ActionRow("修复文件时间", onOpenFixTime)
+                CardDivider()
+                ActionRow("恢复已有照片的位置显示", onRepairLocationDisplay, enabled = !isBusy)
                 CardDivider()
                 ActionRow("把输出移到相机相册", onMoveOutputsToCamera, enabled = !isBusy)
                 CardDivider()

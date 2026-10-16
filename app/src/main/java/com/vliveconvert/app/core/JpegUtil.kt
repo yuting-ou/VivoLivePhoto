@@ -235,6 +235,147 @@ internal object JpegUtil {
         return false
     }
 
+    /**
+     * 从 EXIF GPS IFD 解出经纬度，返回 (纬度, 经度)；无 GPS 或解析失败返回 null。
+     *
+     * 用途：导出时写入 MediaStore 的 latitude/longitude 列（相机的写入方式），
+     * 让相册能对转换产物显示位置——vivo 相册的位置显示来自媒体库列，
+     * 不会回读文件 EXIF（2026-10 真机结论）。
+     *
+     * vivo 相机把度分秒写成 SRATIONAL（type 10），标准相机多用 RATIONAL（type 5），两者都支持。
+     * 全零坐标（相机无定位时的写法）不算有效位置，返回 null。
+     */
+    fun gpsCoordinates(jpeg: ByteArray): Pair<Double, Double>? {
+        return try {
+            for (seg in iterateSegments(jpeg)) {
+                val m = seg.marker.toInt() and 0xFF
+                if (m == 0xE1 && seg.payloadLen > exifPrefix.size &&
+                    BinaryUtils.arrayEquals(jpeg, seg.payloadStart, exifPrefix)
+                ) {
+                    val tiffStart = seg.payloadStart + exifPrefix.size
+                    return exifGpsCoordinates(jpeg, tiffStart, seg.payloadStart + seg.payloadLen)
+                }
+                if (m == 0xDA) return null
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun exifGpsCoordinates(data: ByteArray, tiffStart: Int, tiffEnd: Int): Pair<Double, Double>? {
+        if (tiffStart < 0 || tiffStart + 8 > tiffEnd || tiffEnd > data.size) return null
+        val little = when {
+            data[tiffStart] == 0x49.toByte() && data[tiffStart + 1] == 0x49.toByte() -> true  // "II"
+            data[tiffStart] == 0x4D.toByte() && data[tiffStart + 1] == 0x4D.toByte() -> false // "MM"
+            else -> return null
+        }
+
+        fun u16(off: Int): Int {
+            if (off < 0 || off + 2 > tiffEnd) return -1
+            return if (little)
+                (data[off].toInt() and 0xFF) or ((data[off + 1].toInt() and 0xFF) shl 8)
+            else
+                ((data[off].toInt() and 0xFF) shl 8) or (data[off + 1].toInt() and 0xFF)
+        }
+
+        fun u32(off: Int): Long {
+            if (off < 0 || off + 4 > tiffEnd) return -1L
+            return if (little)
+                (data[off].toInt() and 0xFF).toLong() or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 8) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 3].toInt() and 0xFF).toLong() shl 24)
+            else
+                ((data[off].toInt() and 0xFF).toLong() shl 24) or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 8) or
+                    (data[off + 3].toInt() and 0xFF).toLong()
+        }
+
+        // RATIONAL/SRATIONAL 值：8 字节（分子、分母）；值字段装不下（>4 字节）时
+        // entry+8 存的是相对 TIFF 头的偏移
+        fun rationals(entry: Int, count: Int): List<Double>? {
+            val typ = u16(entry + 2)
+            if (typ != 5 && typ != 10) return null
+            val signed = typ == 10
+            val base = if (count * 8 > 4) {
+                val off = u32(entry + 8).toInt()
+                if (off < 0 || tiffStart + off < 0) return null
+                tiffStart + off
+            } else entry + 8
+            val out = ArrayList<Double>(count)
+            for (k in 0 until count) {
+                val p = base + k * 8
+                if (p + 8 > tiffEnd) return null
+                val n = u32(p)
+                val d = u32(p + 4)
+                if (d == 0L) { out.add(0.0); continue }
+                val v = if (signed && n > Int.MAX_VALUE.toLong()) {
+                    // 手动符号扩展（u32 恒为正）
+                    (n - (1L shl 32)).toDouble() / d.toDouble()
+                } else n.toDouble() / d.toDouble()
+                out.add(v)
+            }
+            return out
+        }
+
+        val ifd0Offset = u32(tiffStart + 4).toInt()
+        if (ifd0Offset < 0) return null
+        val ifd0 = tiffStart + ifd0Offset
+        var gpsIfd = -1
+        var count = u16(ifd0)
+        if (count <= 0) return null
+        var i = 0
+        while (i < count) {
+            val entry = ifd0 + 2 + i * 12
+            if (entry + 12 > tiffEnd) return null
+            if (u16(entry) == 0x8825) {
+                val off = u32(entry + 8).toInt()
+                if (off < 0) return null
+                gpsIfd = tiffStart + off
+                break
+            }
+            i++
+        }
+        if (gpsIfd < 0 || gpsIfd + 2 > tiffEnd) return null
+
+        var latRef = 'N'
+        var lonRef = 'E'
+        var latDms: List<Double>? = null
+        var lonDms: List<Double>? = null
+        val gpsCount = u16(gpsIfd)
+        if (gpsCount <= 0) return null
+        var g = 0
+        while (g < gpsCount) {
+            val entry = gpsIfd + 2 + g * 12
+            if (entry + 12 > tiffEnd) return null
+            when (u16(entry)) {
+                1 -> {
+                    // ASCII 内联："N"/"S"（值 ≤4 字节直接存 entry+8）
+                    val c = data[entry + 8].toInt().toChar()
+                    if (c == 'N' || c == 'S') latRef = c
+                }
+                3 -> {
+                    val c = data[entry + 8].toInt().toChar()
+                    if (c == 'E' || c == 'W') lonRef = c
+                }
+                2 -> latDms = rationals(entry, u32(entry + 4).toInt())
+                4 -> lonDms = rationals(entry, u32(entry + 4).toInt())
+            }
+            g++
+        }
+        val lat = latDms?.takeIf { it.size == 3 } ?: return null
+        val lon = lonDms?.takeIf { it.size == 3 } ?: return null
+        var latVal = lat[0] + lat[1] / 60.0 + lat[2] / 3600.0
+        var lonVal = lon[0] + lon[1] / 60.0 + lon[2] / 3600.0
+        if (latRef == 'S') latVal = -latVal
+        if (lonRef == 'W') lonVal = -lonVal
+        // 全零 = 相机无定位时的占位写法，不是真实位置
+        if (latVal == 0.0 && lonVal == 0.0) return null
+        return latVal to lonVal
+    }
+
     internal class XmpSegment(val segStart: Int, val totalLen: Int, val xmpText: String)
 
     /** 定位 XMP APP1 段，返回 XmpSegment；无则 null。 */
