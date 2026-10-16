@@ -30,6 +30,24 @@ class XmpMotionDetectionTest {
             attrs + """></rdf:RDF></x:xmpmeta>"""
 
     @Test
+    fun sourceFingerprintInjectAndExtractRoundTrip() {
+        // 源指纹写进 vlp 自定义命名空间；动图判定字段必须原样保留
+        val xmp = XmpTemplate.buildVivoSingleXmp(
+            ptsUs = 1000L, gainmapLen = null, videoLen = 5000,
+            sourceFingerprint = "abcdef0123456789")
+        assertTrue("MotionPhoto 标记必须原样保留", xmp.contains("GCamera:MotionPhoto=\"1\""))
+        assertTrue("vlp 命名空间必须声明", xmp.contains("xmlns:vlp="))
+        assertTrue(
+            "指纹必须可提取",
+            XmpTemplate.extractSourceFingerprint(xmp) == "abcdef0123456789"
+        )
+        // 无指纹时不注入（旧产物/旧测试的形状保持不变）
+        val plain = XmpTemplate.buildVivoSingleXmp(1000L, null, 5000)
+        assertTrue(XmpTemplate.extractSourceFingerprint(plain) == null)
+        assertTrue(!plain.contains("xmlns:vlp="))
+    }
+
+    @Test
     fun extractGpsAttributes_supportsElementForm() {
         // 部分机型把 GPS 写成元素形态；v1.7.24 前只认属性形态 → 位置信息随模板替换丢失
         val xmp = "<exif:GPSLatitude>39,54.6</exif:GPSLatitude>" +

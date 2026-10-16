@@ -79,8 +79,15 @@ internal object VivoSingle {
         if (sourceXmpGps.isNotEmpty()) {
             log("info", "源 XMP 含 GPS 字段（${sourceXmpGps.size} 项），已合并保留位置信息", "vivo")
         }
+        // 源指纹：源 JPEG 的 SHA-256 前 16 位 hex。写入输出 XMP（vlp:sourceFingerprint），
+        // 供「异源同名不覆盖」判定——重装应用后旁路记录会丢，指纹在产物里不会丢
+        val sourceFingerprint = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(asset.primaryJpeg)
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
         val xmp = XmpTemplate.buildVivoSingleXmp(
-            pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps)
+            pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps,
+            sourceFingerprint)
         val primary = asset.primaryJpeg
         // 主图 XMP 段位置：命中时按 [前段][新 XMP][后段] 流式写出，
         // 不再调用 replaceOrInsertXmp 生成一份与主图等长的新数组（内存优化）
@@ -129,7 +136,8 @@ internal object VivoSingle {
             " + footer ${footer.size}B）", "vivo")
         return SingleWriteResult(
             outPath, segments,
-            sourceHasGps = asset.extras["source_has_gps"] == true)
+            sourceHasGps = asset.extras["source_has_gps"] == true,
+            sourceFingerprint = sourceFingerprint)
     }
 
     /**

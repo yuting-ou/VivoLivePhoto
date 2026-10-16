@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.9.0），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0-test1 测试版），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.9.0.apk`](./VivoLivePhoto-v1.9.0.apk) 下载，内容一致。
+> [`VivoLivePhoto-v2.0.0-test1.apk`](./VivoLivePhoto-v2.0.0-test1.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,25 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.0.0-test1（测试版 · 源指纹实验，请协助真机验证）
+
+**这是一个测试版**：为修掉最后一个已知限制（两个不同目录的同名双文件先后转入同一
+输出目录时，第二个会覆盖第一个的产物），在产物 XMP 里写入**源指纹**
+（`vlp:sourceFingerprint` = 源 JPEG 的 SHA-256 前 16 位，自定义命名空间 `vlp`）。
+导出判定"既往产物"时比对指纹：同源才覆盖，异源自动改用 `(1)` 序号新文件。
+
+**理论上不影响动图识别**（动图判定靠 MotionPhoto 标记 / Container 偏移 / footer，
+指纹是自定义命名空间的附加属性，解析器会忽略未知字段），**但最终必须真机裁决**——
+这就是本测试版的目的：
+
+1. 转换一张真实的 vivo 实况照片
+2. 到相册查看：是否仍显示**动态照片**徽标、长按是否仍播放
+3. 同一张照片**再转一次**：应原地覆盖，不堆 `(1)`
+4. 都正常 → 指纹方案通过，2.0 正式版随之而来；异常 → 回退旁路记录方案
+
+- 验证：145 组单测（新增指纹注入/提取往返、管线产物携带指纹 + 同源同指纹/
+  异源异指纹合同）、Lint 0 error、R8 + apksigner 通过
 
 ### v1.9.0（稳定版里程碑）
 

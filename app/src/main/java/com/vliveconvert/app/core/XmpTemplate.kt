@@ -104,6 +104,13 @@ internal object XmpTemplate {
         return out.distinctBy { it.first }
     }
 
+    /** 从 XMP 文本提取源指纹（v1.8.x 之前的产物没有该字段 → null） */
+    fun extractSourceFingerprint(sourceXmp: String?): String? {
+        if (sourceXmp.isNullOrEmpty()) return null
+        return Regex("""vlp:sourceFingerprint="([^"]+)"""")
+            .find(sourceXmp)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+    }
+
     private fun xmlEscape(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;").replace("'", "&apos;")
@@ -112,25 +119,38 @@ internal object XmpTemplate {
      *  gpsAttrs 非空时把源照片 XMP 中的 GPS 属性合并进描述节点（保留位置元数据）。 */
     fun buildVivoSingleXmp(
         ptsUs: Long, gainmapLen: Int?, videoLen: Int,
-        gpsAttrs: List<Pair<String, String>> = emptyList()
+        gpsAttrs: List<Pair<String, String>> = emptyList(),
+        sourceFingerprint: String? = null
     ): String {
         var head = (if (gainmapLen != null) VivoSingleHeadHdr else VivoSingleHeadNonHdr)
             .replace("{pts}", ptsUs.toString())
-        if (gpsAttrs.isNotEmpty()) {
-            // 注入 exif 命名空间声明（写在 VCamera 声明行之前）
+        if (gpsAttrs.isNotEmpty() || sourceFingerprint != null) {
+            // 注入命名空间声明（写在 VCamera 声明行之前）。vlp 是本应用的自定义命名空间：
+            // 源指纹只服务于「异源不覆盖」判定，动图识别（MotionPhoto/Container）不受影响
+            val nsLines = buildList {
+                if (gpsAttrs.isNotEmpty()) {
+                    add("xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"")
+                }
+                if (sourceFingerprint != null) {
+                    add("xmlns:vlp=\"https://github.com/yuting-ou/VivoLivePhoto/xmp/\"")
+                }
+            }.joinToString("\n        ")
             head = head.replace(
                 "xmlns:VCamera=\"http://ns.vivo.com/photos/1.0/camera/\"",
-                "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n        " +
+                nsLines + "\n        " +
                     "xmlns:VCamera=\"http://ns.vivo.com/photos/1.0/camera/\""
             )
-            // GPS 属性附加在描述节点的 VCamera 属性之后（标准 RDF/XML，相册按 XML 解析，
+            // 属性附加在描述节点的 VCamera 属性之后（标准 RDF/XML，相册按 XML 解析，
             // 附加带命名空间的属性不影响 GCamera:MotionPhoto 等既有字段的识别）
-            val attrs = gpsAttrs.joinToString(" ") { (name, value) ->
+            val attrs = gpsAttrs.map { (name, value) ->
                 "exif:" + name + "=\"" + xmlEscape(value) + "\""
+            }.toMutableList()
+            if (sourceFingerprint != null) {
+                attrs.add("vlp:sourceFingerprint=\"" + sourceFingerprint + "\"")
             }
             head = head.replace(
                 "VCamera:VMediaKitVersion=\"1.0.0.9\">",
-                "VCamera:VMediaKitVersion=\"1.0.0.9\" " + attrs + ">"
+                "VCamera:VMediaKitVersion=\"1.0.0.9\" " + attrs.joinToString(" ") + ">"
             )
         }
         val parts = mutableListOf(head, VivoSingleItemPrimary)

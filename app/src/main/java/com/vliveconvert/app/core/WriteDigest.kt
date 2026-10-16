@@ -21,7 +21,9 @@ internal class SingleWriteResult(
     val path: String,
     val segments: List<SegmentDigest>,
     /** 源 JPEG「读到的字节」是否含 GPS EXIF；false = 无位置，或已被系统脱敏（见 JpegUtil.hasGpsExif） */
-    val sourceHasGps: Boolean = false
+    val sourceHasGps: Boolean = false,
+    /** 源指纹（源 JPEG 首段 SHA-256 前 16 位 hex），已写入产物 XMP 的 vlp:sourceFingerprint */
+    val sourceFingerprint: String? = null
 )
 
 /**

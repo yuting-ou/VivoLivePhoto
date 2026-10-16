@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.vliveconvert.app.core.JpegUtil
 import com.vliveconvert.app.core.OutputVerifier
 import com.vliveconvert.app.core.SingleWriteResult
 import com.vliveconvert.app.core.XmpTemplate
@@ -49,9 +50,17 @@ internal object MediaExport {
         val targetRelPath = if (useCameraDir) "DCIM/Camera" else relPath
         val stem = src.name.substringBeforeLast('.')
 
+        // 待导出产物 XMP 里的源指纹（VivoSingle 写入）——判定「既往产物是否同源」的依据
+        val expectedFingerprint = try {
+            XmpTemplate.extractSourceFingerprint(
+                JpegUtil.findXmpSegment(src.readBytes())?.xmpText)
+        } catch (_: Exception) {
+            null
+        }
+
         // 覆盖既有产物（显式指定优先；否则自动识别同源既往产物）
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
-            ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath)
+            ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
             overwriteExisting(resolver, previous, src, result, timestamp)?.let { return it }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
@@ -181,7 +190,8 @@ internal object MediaExport {
         resolver: android.content.ContentResolver,
         targetRelPath: String,
         stem: String,
-        sourcePath: String
+        sourcePath: String,
+        expectedFingerprint: String?
     ): Uri? {
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         // LIKE 模式里的 `_` / `%` 是通配符，而 vivo 文件名形如 IMG_20260831_134354 本身就含 `_`，
@@ -221,7 +231,11 @@ internal object MediaExport {
             // 源文件本身永远不是「既往产物」——同名时它占用着原名。
             // 用路径直接排除，省掉对源文件（通常最大）的一次内容读取
             if (data.isNotEmpty() && data == sourcePath) continue
-            if (!isSingleFileLivePhoto(resolver, ContentUris.withAppendedId(collection, id), exactName, seqPattern)) {
+            if (!isSameSourceOutput(
+                    resolver, ContentUris.withAppendedId(collection, id), exactName, seqPattern,
+                    expectedFingerprint
+                )
+            ) {
                 continue
             }
             return ContentUris.withAppendedId(collection, id)
@@ -234,11 +248,12 @@ internal object MediaExport {
      * 文件名必须是原名或 `基名(数字).jpg`（精确校验，排除属于其它源的嵌套括号名），
      * 且 XMP 含 MotionPhoto / MicroVideo 标记。
      */
-    private fun isSingleFileLivePhoto(
+    private fun isSameSourceOutput(
         resolver: android.content.ContentResolver,
         uri: Uri,
         exactName: String,
-        seqPattern: Regex
+        seqPattern: Regex,
+        expectedFingerprint: String?
     ): Boolean {
         // 先取文件名做精确校验（避免为不匹配的候选白读内容）
         val name = try {
@@ -256,10 +271,20 @@ internal object MediaExport {
                     if (r < 0) break
                     n += r
                 }
-                if (n <= 0) false
-                else XmpTemplate.parseMotionXmp(
-                    XmpTemplate.sniffXmpBytes(if (n < buf.size) buf.copyOf(n) else buf)
-                ).isMotion
+                if (n <= 0) return false
+                val xmpText = XmpTemplate.sniffXmpBytes(
+                    if (n < buf.size) buf.copyOf(n) else buf
+                )
+                if (!XmpTemplate.parseMotionXmp(xmpText).isMotion) return false
+                // 指纹比对（v2.0）：候选产物带指纹且与当前源不同 → 异源，绝不能覆盖
+                // （旧版产物无指纹字段 → 保持既有行为，视作同源）
+                val candidateFp = XmpTemplate.extractSourceFingerprint(xmpText)
+                if (expectedFingerprint != null && candidateFp != null &&
+                    candidateFp != expectedFingerprint
+                ) {
+                    return false
+                }
+                true
             } ?: false
         } catch (_: Exception) {
             false

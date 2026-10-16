@@ -668,6 +668,48 @@ class ConverterPipelineTest {
     }
 
     @Test
+    fun outputXmpCarriesSourceFingerprint() {
+        // v2.0 源指纹实验。合同不是"哈希算法是什么"（内部细节），而是：
+        //   同源 → 同指纹（重复转换覆盖判定依赖它）；异源 → 异指纹（防覆盖依赖它）；
+        //   动图标记（MotionPhoto）原样保留
+        val dir = Files.createTempDirectory("vlc_fp").toFile()
+        val (jpgA, _) = makePair(dir, "IMG_8200")
+        val outA = Converter.convertToVivoSingle(jpgA.absolutePath,
+            Files.createTempDirectory("vlc_fp_a").toFile().absolutePath, ::log)
+        assertTrue("结果应携带源指纹", !outA.sourceFingerprint.isNullOrBlank())
+        assertTrue("指纹应为 16 位 hex",
+            Regex("^[0-9a-f]{16}$").matches(outA.sourceFingerprint!!))
+
+        val xmpA = JpegUtil.findXmpSegment(
+            JpegUtil.splitJpegs(File(outA.path).readBytes()).first[0])!!.xmpText
+        assertTrue("产物 XMP 应写入指纹", xmpA.contains("vlp:sourceFingerprint=\"" + outA.sourceFingerprint + "\""))
+        assertTrue("动图标记不受影响", xmpA.contains("GCamera:MotionPhoto=\"1\""))
+
+        // 同源再转 → 同指纹
+        val outA2 = Converter.convertToVivoSingle(jpgA.absolutePath,
+            Files.createTempDirectory("vlc_fp_a2").toFile().absolutePath, ::log)
+        assertEquals("同源必须同指纹", outA.sourceFingerprint, outA2.sourceFingerprint)
+
+        // 异源（同 stem、不同内容）→ 异指纹。
+        // 指纹哈希的是 primary JPEG 段 = minimalJpeg（streamdata/footer 都不在其中），
+        // 所以差异必须造在 **JPEG 扫描数据**里：翻转最后一个扫描字节（图像数据，
+        // 解码器无感），结构解析完全不受影响
+        val dataA = jpgA.readBytes()
+        val scanTail = byteArrayOf(0x77, 0x12, 0x34, 0x56)   // minimalJpeg 扫描区末尾
+        val pos = BinaryUtils.indexOf(dataA, scanTail)
+        val jpgB = File(dir, "IMG_8200.jpg").apply {
+            writeBytes(dataA.copyOf().also { it[pos + 3] = 0x57 })
+        }
+        val outB = Converter.convertToVivoSingle(jpgB.absolutePath,
+            Files.createTempDirectory("vlc_fp_b").toFile().absolutePath, ::log)
+        assertTrue(
+            "不同内容的源必须得到不同指纹",
+            outB.sourceFingerprint != outA.sourceFingerprint
+        )
+    }
+
+
+    @Test
     fun xmpElementFormGpsSurvivesConversion() {
         // 部分机型把 GPS 写成**元素**形态而非属性形态；提取必须照样认得，
         // 并以属性形态注入输出（GCamera 约定的合法表达），位置信息不许丢
