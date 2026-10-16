@@ -820,7 +820,6 @@ class MainActivity : ComponentActivity() {
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
                                 statusText = ConvertCenter.statusText,
-                                backTrace = lastBackTrace,
                                 outputRelPath = outputRelPath,
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,

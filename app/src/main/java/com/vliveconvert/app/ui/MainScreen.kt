@@ -52,6 +52,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -521,15 +524,18 @@ private fun ConvertItemRow(
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    // v1.8.9 失败抖动：状态翻到失败的一瞬间左右轻抖（三次衰减），红色底色同步淡入
+    // v1.8.9 失败抖动：状态**翻转到**失败的一瞬间左右轻抖（三次衰减），红色底色同步淡入。
+    // 必须对比上一态：恢复队列里本来就有失败项时，首组合不得抖（v1.9.0 修）
+    var prevFailed by remember(ci.item.key) { mutableStateOf(ci.failed) }
     val shakeX = remember { Animatable(0f) }
     LaunchedEffect(ci.failed) {
-        if (ci.failed) {
+        if (ci.failed && !prevFailed) {
             for (d in listOf(-10f, 10f, -7f, 7f, -3f, 0f)) {
                 shakeX.snapTo(d)
                 delay(45)
             }
         }
+        prevFailed = ci.failed
     }
     Surface(
         shape = RoundedCornerShape(12.dp),
