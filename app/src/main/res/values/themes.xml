@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.VLiveConvert" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.VLiveConvert" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Android 12+ SplashScreen：品牌蓝底 + v1.8.2 符号的冲出动画（minSdk 34 全设备可用） -->
+        <item name="android:windowSplashScreenBackground">#415FFF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
+    </style>
 </resources>

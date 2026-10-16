@@ -5,6 +5,7 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -54,8 +55,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -509,10 +521,22 @@ private fun ConvertItemRow(
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
+    // v1.8.9 失败抖动：状态翻到失败的一瞬间左右轻抖（三次衰减），红色底色同步淡入
+    val shakeX = remember { Animatable(0f) }
+    LaunchedEffect(ci.failed) {
+        if (ci.failed) {
+            for (d in listOf(-10f, 10f, -7f, 7f, -3f, 0f)) {
+                shakeX.snapTo(d)
+                delay(45)
+            }
+        }
+    }
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = bg,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .graphicsLayer { translationX = shakeX.value }
+            .fillMaxWidth()
     ) {
         Row(
             Modifier.padding(10.dp),
@@ -520,13 +544,52 @@ private fun ConvertItemRow(
         ) {
             // 缩略图 + 右下角状态角标
             Box(Modifier.size(48.dp)) {
+                // v1.8.9 进度环：转换中时缩略图外圈一道旋转弧（生命感；批次进度对单项无意义，
+                // 用不确定弧而不是假进度）
+                if (busy) {
+                    val ringAngle by rememberInfiniteTransition(label = "ring").animateFloat(
+                        initialValue = 0f, targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            tween(1100, easing = LinearEasing)), label = "ringAngle"
+                    )
+                    Canvas(
+                        Modifier
+                            .size(56.dp)
+                            .align(Alignment.Center)
+                    ) {
+                        drawArc(
+                            color = status.info,
+                            startAngle = -90f + ringAngle, sweepAngle = 110f, useCenter = false,
+                            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                }
                 Box(
                     Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                 ) {
-                    MediaThumbnail(ci.item.uri, resolver, Modifier.fillMaxSize())
+                    // v1.8.9 显影动画：状态翻到完成的一瞬间，缩略图从低饱和半透明
+                    // "显影"为全彩（暗房冲印的品牌隐喻）。恢复队列里的已完成项
+                    // 首次组合即为目标值（animateFloatAsState 初组合不动画），不会误放
+                    val develop by animateFloatAsState(
+                        targetValue = if (ci.done) 1f else 0.25f,
+                        animationSpec = tween(600, delayMillis = 80,
+                            easing = LinearOutSlowInEasing),
+                        label = "develop"
+                    )
+                    MediaThumbnail(
+                        ci.item.uri, resolver,
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = 0.35f + 0.65f * develop }
+                            .then(
+                                if (develop < 1f) Modifier.blur(
+                                    (8 * (1 - develop)).dp)
+                                else Modifier
+                            )
+                    )
                 }
                 // 状态角标：填充色与符号色成对取自主题（深色下不再用浅色底配白字，
                 // 那会让符号对比度跌到 1.7:1 几乎不可读）

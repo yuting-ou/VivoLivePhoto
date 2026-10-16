@@ -398,6 +398,29 @@ class UiScreenshotTest {
         }
     }
 
+    /** 启动画面图标：系统会裁进圆形，1.25× 缩放后内容必须完整落在圆内 */
+    @Test
+    fun shotSplashIcon() {
+        val size = 432
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(0xFF415FFF.toInt())
+        val d = compose.activity.getDrawable(com.vliveconvert.app.R.drawable.splash_icon)!!
+        d.setBounds(0, 0, size, size)
+        d.draw(canvas)
+        val round = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val rc = Canvas(round)
+        val p = android.graphics.Paint().apply { isAntiAlias = true }
+        rc.drawBitmap(bmp, 0f, 0f, p)
+        p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        p.style = android.graphics.Paint.Style.STROKE
+        p.strokeWidth = size * 2f
+        rc.drawCircle(size / 2f, size / 2f, size / 3f, p)
+        val dir = File("build/ui-shots").apply { mkdirs() }
+        File(dir, "splash_icon.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, "splash_icon_round.png").outputStream().use { round.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     /** 空状态 */
     @Test
     fun shotMainEmpty() {

@@ -4,12 +4,12 @@
 单文件实况（Android）。——把一段会动的时光，收进一张照片。
 
 > 一张照片（影）里，封着一段影像（影），故名「影中影」。原名「Vivo Live Photo（yuting改进版）」，
-> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.8），
+> 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v1.8.9），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
 > 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v1.8.8.apk`](./VivoLivePhoto-v1.8.8.apk) 下载，内容一致。
+> [`VivoLivePhoto-v1.8.9.apk`](./VivoLivePhoto-v1.8.9.apk) 下载，内容一致。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -121,6 +121,23 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v1.8.9（动效四连 + 启动画面）
+
+四项动画一次到位（用户从发散清单中选定）：
+
+1. **完成「显影」动画**：转换完成的缩略图从模糊半透明**对焦显影**为全彩
+   （模糊 8dp→0 + 透明度 35%→100%，600ms）——暗房冲印的品牌隐喻。
+   `animateFloatAsState` 初组合不动画，恢复队列里的已完成项不会误放
+2. **启动画面**：Android 12+ SplashScreen——品牌蓝底 + **定稿图标完整呈现**
+   （含底色渐变与玻璃胶囊，裁圆后与桌面观感一致），播放形从框内滑入冲出
+   （AVD 400ms 减速曲线）。内容 1:1 取自 v1.8.2 定稿前景，不做简化或换风格
+3. **转换中进度环**：转换中条目缩略图外圈一道旋转弧（1100ms/圈，不确定弧——
+   批次进度对单项无意义，不做假进度）
+4. **失败抖动**：转换失败行左右轻抖三次衰减（±10→±3dp，45ms/步）+ 红底淡入
+
+- 验证：143 组单测全量通过（新增 splash 图标裁圆渲染用例——1.25× 放大后
+  内容必须完整落在系统圆遮罩内）、Lint 0 error、R8 + apksigner 通过
 
 ### v1.8.8（预测性返回 · 转场编排重做）
 

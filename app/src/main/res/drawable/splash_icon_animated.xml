@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?><!-- 启动动画：播放形从框内冲出到破框位置（呼应图标符号），框淡入 -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_icon">
+    <target android:name="play" android:animation="@animator/splash_play_in" />
+    <target android:name="frame" android:animation="@animator/splash_frame_in" />
+</animated-vector>
