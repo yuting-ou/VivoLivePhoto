@@ -49,6 +49,7 @@ class SettingsActionRowClickTest {
                     onOpenFixTime = {},
                     onMoveOutputsToCamera = { fired = true },
                     onExportCrashLogs = {},
+                onClearCrashLogs = {},
                     onOpenAbout = {}
                 )
             }

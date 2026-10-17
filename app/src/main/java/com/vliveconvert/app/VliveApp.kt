@@ -67,6 +67,24 @@ internal object CrashLog {
         0
     }
 
+    /** 清空全部崩溃日志（用户确认过的旧日志）；返回删除的份数 */
+    fun clear(context: Context): Int {
+        return try {
+            val dir = File(context.filesDir, DIR)
+            val files = dir.listFiles() ?: return 0
+            var removed = 0
+            for (f in files) {
+                if (f.delete()) removed++
+            }
+            // 导出去重记录一并清空：日志都没了，旧名字不再有意义
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().remove(KEY_EXPORTED).apply()
+            removed
+        } catch (_: Exception) {
+            0
+        }
+    }
+
     /** 一次导出的结果：exported=本次新导出份数；already=此前已导出、本次跳过份数 */
     data class CrashExport(val exported: Int, val already: Int, val hasAnyLog: Boolean)
 

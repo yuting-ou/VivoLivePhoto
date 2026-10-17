@@ -857,6 +857,7 @@ class MainActivity : ComponentActivity() {
                                 onRepairLocationDisplay = { showRepairConfirm = true },
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onExportCrashLogs = { exportCrashLogs() },
+                                onClearCrashLogs = { clearCrashLogs() },
                                 onOpenAbout = { showAbout = true }
                             )
                             Screen.About -> AboutScreen(
@@ -1831,6 +1832,14 @@ class MainActivity : ComponentActivity() {
     // ---------- 崩溃日志 ----------
 
     /** 把本地崩溃日志导出到 Download/VLiveConvert，便于反馈定位 */
+    /** 清空崩溃日志（设置页入口；条数就地在设置页刷新） */
+    private fun clearCrashLogs() {
+        val removed = CrashLog.clear(this)
+        crashLogCount = CrashLog.count(this)
+        ConvertCenter.statusText = if (removed > 0) "已清空 $removed 份崩溃日志"
+        else "没有可清空的崩溃日志"
+    }
+
     private fun exportCrashLogs() {
         lifecycleScope.launch(Dispatchers.IO) {
             // 必须兜底：这里在 IO 协程里，未捕获异常 = 直接闪退（用户正想导出的就是崩溃日志）

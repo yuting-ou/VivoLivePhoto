@@ -54,6 +54,7 @@ fun SettingsScreen(
     onRepairLocationDisplay: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
+    onClearCrashLogs: () -> Unit,
     onOpenAbout: () -> Unit,
     statusText: String = ""
 ) {
@@ -173,6 +174,8 @@ fun SettingsScreen(
                     onExportCrashLogs,
                     tint = MaterialTheme.colorScheme.error
                 )
+                CardDivider()
+                ActionRow("清空崩溃日志", onClearCrashLogs, enabled = crashLogCount > 0)
             }
 
             Spacer(Modifier.height(16.dp))

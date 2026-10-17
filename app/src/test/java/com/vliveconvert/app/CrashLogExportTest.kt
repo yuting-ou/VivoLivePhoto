@@ -127,4 +127,18 @@ class CrashLogExportTest {
         compose.onNodeWithText("知道了").performClick()
         compose.waitForIdle()
     }
+
+    /** 清空崩溃日志：文件与导出去重记录一并清除，计数归零 */
+    @Test
+    fun clearRemovesAllCrashLogsAndUploadLedger() {
+        val dir = File(activity.filesDir, "crash").apply { mkdirs() }
+        File(dir, "crash_1.txt").writeText("boom")
+        File(dir, "crash_2.txt").writeText("boom2")
+        assertEquals(2, com.vliveconvert.app.CrashLog.count(activity))
+
+        val removed = com.vliveconvert.app.CrashLog.clear(activity)
+        assertEquals(2, removed)
+        assertEquals(0, com.vliveconvert.app.CrashLog.count(activity))
+        assertTrue("目录应为空", (dir.listFiles()?.size ?: 0) == 0)
+    }
 }

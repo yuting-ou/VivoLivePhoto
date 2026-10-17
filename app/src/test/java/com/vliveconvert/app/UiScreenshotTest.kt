@@ -198,6 +198,7 @@ class UiScreenshotTest {
                 onOpenFixTime = {},
                 onMoveOutputsToCamera = {},
                 onExportCrashLogs = {},
+                onClearCrashLogs = {},
                 onOpenAbout = {}
             )
         }
