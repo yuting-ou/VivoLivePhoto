@@ -1,6 +1,9 @@
 package com.vliveconvert.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,7 +28,9 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.vliveconvert.app.R
@@ -123,13 +128,25 @@ fun AboutScreen(
             }
 
             Spacer(Modifier.height(12.dp))
+            val context = LocalContext.current
+            fun openUrl(url: String) {
+                // 外部浏览器打开（应用本体仍不联网）；无浏览器时静默忽略
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (_: Exception) {}
+            }
             Card {
                 Text("原始项目", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "https://github.com/brovast/VLiveConvert",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { openUrl("https://github.com/brovast/VLiveConvert") }
+                        .padding(vertical = 6.dp)
                 )
                 Spacer(Modifier.height(10.dp))
                 Text("本修改版源码（依 GPL-3.0 提供）", style = MaterialTheme.typography.titleSmall)
@@ -137,7 +154,12 @@ fun AboutScreen(
                 Text(
                     "https://github.com/yuting-ou/VivoLivePhoto",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { openUrl("https://github.com/yuting-ou/VivoLivePhoto") }
+                        .padding(vertical = 6.dp)
                 )
             }
 

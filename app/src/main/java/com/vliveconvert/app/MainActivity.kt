@@ -393,6 +393,8 @@ class MainActivity : ComponentActivity() {
     private var spacePauseText by mutableStateOf("")
     // 列表项移除的撤销条（滑动/按钮移除后 4 秒内可撤销）
     private val snackbarHostState = SnackbarHostState()
+    // 跟随系统取色（莫奈）：默认开，可在设置里切回品牌蓝
+    private var dynamicColor by mutableStateOf(true)
 
     // 动态照片 = 图片 + 伴生视频，必须同时申请图片与视频读取权限
     // （双文件格式需要直接读取同目录 .mp4，缺视频权限会报 EACCES）；
@@ -646,13 +648,16 @@ class MainActivity : ComponentActivity() {
         // 恢复「转换后移到相机相册」开关（默认开启）
         moveToCamera = getSharedPreferences("vliveconvert", MODE_PRIVATE)
             .getBoolean("move_to_camera", true)
+        // 恢复「跟随系统取色」开关（默认开启）
+        dynamicColor = getSharedPreferences("vliveconvert", MODE_PRIVATE)
+            .getBoolean("dynamic_color", true)
         refreshRestoreCount()
         // 恢复自定义输出目录
         outputRelPath = getSharedPreferences("vliveconvert", MODE_PRIVATE)
             .getString("output_rel_path", "Pictures/VLiveConvert") ?: "Pictures/VLiveConvert"
 
         setContent {
-            VLiveConvertTheme {
+            VLiveConvertTheme(dynamicColor = dynamicColor) {
                 // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
                 // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
                 //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
@@ -858,6 +863,12 @@ class MainActivity : ComponentActivity() {
                                     deleteOriginal = on
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("delete_original", on).apply()
+                                },
+                                dynamicColor = dynamicColor,
+                                onToggleDynamicColor = { on ->
+                                    dynamicColor = on
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("dynamic_color", on).apply()
                                 },
                                 onOpenFixTime = { openFixTime() },
                                 onRepairLocationDisplay = { showRepairConfirm = true },

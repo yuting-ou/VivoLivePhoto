@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,6 +64,8 @@ fun SettingsScreen(
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
     onClearCrashLogs: () -> Unit,
+    dynamicColor: Boolean,
+    onToggleDynamicColor: (Boolean) -> Unit,
     onOpenAbout: () -> Unit,
     statusText: String = ""
 ) {
@@ -122,7 +126,7 @@ fun SettingsScreen(
             ToolValueCard(
                 icon = Icons.Filled.Home,
                 title = "输出目录",
-                subtitle = "导出文件的保存位置",
+                subtitle = "保存位置",
                 value = outputRelPath,
                 onClick = onEditOutputPath
             )
@@ -133,8 +137,9 @@ fun SettingsScreen(
             SectionLabel("转换后处理")
             ToolSwitchCard(
                 icon = Icons.AutoMirrored.Filled.ArrowForward,
+                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
                 title = "移到相机相册",
-                subtitle = "写入 DCIM/Camera（配合删原图可免序号）",
+                subtitle = "写入相机相册，删原图时可免序号",
                 checked = moveToCamera,
                 enabled = !isBusy,
                 onToggle = onToggleMoveToCamera
@@ -151,6 +156,20 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // ── 外观 ──
+            SectionLabel("外观")
+            ToolSwitchCard(
+                icon = Icons.Filled.Star,
+                iconOffset = androidx.compose.ui.unit.DpOffset(0.dp, 0.5.dp),
+                title = "跟随系统取色（莫奈）",
+                subtitle = "用壁纸配色替换固定品牌蓝；关闭则回到品牌蓝",
+                checked = dynamicColor,
+                enabled = true,
+                onToggle = onToggleDynamicColor
+            )
+
+            Spacer(Modifier.height(16.dp))
+
             // ── 工具 ──（v2.0.5 卡片化：图标 + 一句说明，让每个工具做什么一眼可见）
             SectionLabel("工具")
             ToolCard(
@@ -162,6 +181,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             ToolCard(
                 icon = Icons.Filled.Place,
+                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
                 title = "重建位置显示",
                 subtitle = "让历史转换的照片在相册里显示拍摄位置",
                 onClick = onRepairLocationDisplay,
@@ -170,6 +190,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             ToolCard(
                 icon = Icons.AutoMirrored.Filled.ArrowForward,
+                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
                 title = "把输出移到相机相册",
                 subtitle = "把其它目录里的转换产物搬进 DCIM/Camera",
                 onClick = onMoveOutputsToCamera,
@@ -223,7 +244,8 @@ private fun SectionLabel(text: String) {
         text,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+        // start=0：实测标签墨迹曾比卡片左缘右缩 4.7dp（62px vs 48px@3x），收齐到 16dp 竖线
+        modifier = Modifier.padding(start = 0.dp, bottom = 6.dp)
     )
 }
 
@@ -235,6 +257,10 @@ private fun ToolCardShell(
     subtitle: String,
     iconTint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
     titleColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    /** 图标光学微调：Material 图标按 24dp 网格几何居中，部分字形墨迹质心偏离
+     *  （实测 ArrowForward/Place +0.9dp 右、DateRange +0.9dp 上、Star +0.5dp 上），
+     *  按质心补偿而非肉眼随意挪 */
+    iconOffset: androidx.compose.ui.unit.DpOffset = androidx.compose.ui.unit.DpOffset.Zero,
     onClick: (() -> Unit)? = null,
     trailing: @Composable () -> Unit
 ) {
@@ -254,7 +280,12 @@ private fun ToolCardShell(
                 .background(iconTint.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
+            Icon(
+                icon, contentDescription = null, tint = iconTint,
+                modifier = Modifier
+                    .offset(x = iconOffset.x, y = iconOffset.y)
+                    .size(22.dp)
+            )
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -279,7 +310,8 @@ private fun ToolCard(
     subtitle: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
-    tint: androidx.compose.ui.graphics.Color? = null
+    tint: androidx.compose.ui.graphics.Color? = null,
+    iconOffset: androidx.compose.ui.unit.DpOffset = androidx.compose.ui.unit.DpOffset.Zero
 ) {
     val iconTint = tint ?: if (enabled) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -287,7 +319,8 @@ private fun ToolCard(
                           else MaterialTheme.colorScheme.onSurfaceVariant
     ToolCardShell(
         icon = icon, title = title, subtitle = subtitle,
-        iconTint = iconTint, titleColor = titleColor, onClick = onClick
+        iconTint = iconTint, titleColor = titleColor,
+        iconOffset = iconOffset, onClick = onClick
     ) { ChevronRight() }
 }
 
@@ -299,7 +332,8 @@ private fun ToolSwitchCard(
     subtitle: String,
     checked: Boolean,
     enabled: Boolean,
-    onToggle: (Boolean) -> Unit
+    onToggle: (Boolean) -> Unit,
+    iconOffset: androidx.compose.ui.unit.DpOffset = androidx.compose.ui.unit.DpOffset.Zero
 ) {
     val iconTint = if (enabled) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurfaceVariant
@@ -308,6 +342,7 @@ private fun ToolSwitchCard(
         iconTint = iconTint,
         titleColor = if (enabled) MaterialTheme.colorScheme.onSurface
                      else MaterialTheme.colorScheme.onSurfaceVariant,
+        iconOffset = iconOffset,
         onClick = if (enabled) ({ onToggle(!checked) }) else null
     ) {
         Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
@@ -347,6 +382,8 @@ private fun ChevronRight() {
         Icons.AutoMirrored.Filled.KeyboardArrowRight,
         contentDescription = null,
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.size(20.dp)
+        // x=+4dp：chevron 字形自带右侧留白，实测墨迹右缘比开关轨道左 6.7dp
+        //（1122px vs 1142px @3x），右移后两类行的视觉右缘落在同一竖线
+        modifier = Modifier.offset(x = 4.dp).size(20.dp)
     )
 }

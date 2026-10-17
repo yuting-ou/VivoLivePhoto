@@ -50,6 +50,8 @@ class SettingsActionRowClickTest {
                     onMoveOutputsToCamera = { fired = true },
                     onExportCrashLogs = {},
                 onClearCrashLogs = {},
+                    dynamicColor = true,
+                    onToggleDynamicColor = {},
                     onOpenAbout = {}
                 )
             }

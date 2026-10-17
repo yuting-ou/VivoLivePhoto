@@ -3,9 +3,12 @@ package com.vliveconvert.app.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalContext
 
 /** vivo 品牌蓝浅色方案（#415FFF 派生） */
 private val LightColorScheme = lightColorScheme(
@@ -85,10 +88,20 @@ internal fun themeColorScheme(light: Boolean) =
 @Composable
 fun VLiveConvertTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /** 跟随系统壁纸取色（Monet / Material You）；关闭时回退品牌蓝 */
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    // 固定使用 vivo 品牌蓝配色，不跟随系统动态取色（保证品牌一致性）
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    // 莫奈取色：用系统壁纸派生配色（Android 12+，minSdk 34 恒可用）。
+    // 取色失败（影子环境/ROM 裁剪）回退品牌蓝，绝不让主题崩掉界面
+    val colorScheme = when {
+        dynamicColor -> runCatching {
+            if (darkTheme) dynamicDarkColorScheme(LocalContext.current)
+            else dynamicLightColorScheme(LocalContext.current)
+        }.getOrElse { if (darkTheme) DarkColorScheme else LightColorScheme }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
     val statusColors = if (darkTheme) DarkStatusColors else LightStatusColors
 
     CompositionLocalProvider(LocalStatusColors provides statusColors) {

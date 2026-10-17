@@ -62,7 +62,8 @@ class UiScreenshotTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     private fun render(content: @Composable () -> Unit) {
-        compose.setContent { VLiveConvertTheme { content() } }
+        // dynamicColor=false：README 截图必须确定性（莫奈取色随壁纸/影子环境而异）
+        compose.setContent { VLiveConvertTheme(dynamicColor = false) { content() } }
     }
 
     /**
@@ -199,6 +200,8 @@ class UiScreenshotTest {
                 onMoveOutputsToCamera = {},
                 onExportCrashLogs = {},
                 onClearCrashLogs = {},
+                    dynamicColor = false,
+                    onToggleDynamicColor = {},
                 onOpenAbout = {}
             )
         }
