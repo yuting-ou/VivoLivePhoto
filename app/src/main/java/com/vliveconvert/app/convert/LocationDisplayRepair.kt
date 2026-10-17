@@ -165,19 +165,22 @@ internal object LocationDisplayRepair {
         var relPath: String
         var dateTaken: Long
         var dateModified: Long
+        var dateAdded: Long
         var coords: Pair<Double, Double>
         try {
             resolver.query(uri, arrayOf(
                 MediaStore.MediaColumns.DISPLAY_NAME,
                 MediaStore.MediaColumns.RELATIVE_PATH,
                 MediaStore.MediaColumns.DATE_TAKEN,
-                MediaStore.MediaColumns.DATE_MODIFIED
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATE_ADDED
             ), null, null, null)?.use { c ->
                 if (!c.moveToFirst()) return RecreateResult.FAILED
                 name = c.getString(0) ?: return RecreateResult.FAILED
                 relPath = c.getString(1) ?: "DCIM/Camera"
                 dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
                 dateModified = if (c.isNull(3)) 0L else c.getLong(3)
+                dateAdded = if (c.isNull(4)) 0L else c.getLong(4)
             } ?: return RecreateResult.FAILED
             bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: return RecreateResult.FAILED
@@ -193,6 +196,9 @@ internal object LocationDisplayRepair {
         }
         if (dateTaken <= 0L) dateTaken = dateModified * 1000
         if (dateModified <= 0L) dateModified = dateTaken / 1000
+        // DATE_ADDED 决定微信等第三方选择器的日期分组：重建必须沿用原值。
+        // 曾漏掉此列——vivo 相册按拍摄时间排不露馅，微信里 4699 张全挤进「今天」
+        if (dateAdded <= 0L) dateAdded = dateTaken / 1000
 
         // 删除旧记录：vivo 会把文件移入「第三方删除拦截」回收站（可恢复）
         val deleted = try {
@@ -205,13 +211,20 @@ internal object LocationDisplayRepair {
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         var newUri: Uri? = null
         return try {
+            // 时间列行为（2026-10 真机实验结论，三条路径逐一验证过）：
+            // - DATE_ADDED：系统强制写成插入时刻，插入值与事后 UPDATE 都被无视——
+            //   微信等第三方选择器按此列分组，重建过的照片会归到重建当天，无法洗回
+            // - DATE_MODIFIED：IS_PENDING 流程会被写入时刻覆盖；**非 pending 直插能保住**
+            //   给定值（本条分支即因此改为 0）
+            // - DATE_TAKEN（拍摄时间）：插入值正常保留，EXIF/相册时间线不受影响
             newUri = resolver.insert(collection, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
                 put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
+                put(MediaStore.MediaColumns.DATE_ADDED, dateAdded)
                 put("latitude", coords.first)
                 put("longitude", coords.second)
             }) ?: return RecreateResult.FAILED
@@ -221,6 +234,13 @@ internal object LocationDisplayRepair {
                 put(MediaStore.MediaColumns.SIZE, bytes.size.toLong())
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
             }, null, null)
+            // 写入完成后再次固化拍摄/修改时间（MediaProvider 可能用写入时刻覆盖 DATE_MODIFIED）
+            try {
+                resolver.update(newUri, ContentValues().apply {
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
+                    put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
+                }, null, null)
+            } catch (_: Exception) {}
             // 物理文件 mtime 固化为拍摄时间（相册「修改时间」取自 mtime）
             try {
                 resolver.query(newUri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
