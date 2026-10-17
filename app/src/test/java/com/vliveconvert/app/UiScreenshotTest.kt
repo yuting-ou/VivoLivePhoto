@@ -35,6 +35,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -181,7 +182,9 @@ class UiScreenshotTest {
         render {
             SettingsScreen(
                 appName = "影中影",
-                versionName = "1.7.7",
+                versionName = ApplicationProvider.getApplicationContext<VliveApp>()
+                    .packageManager.getPackageInfo("com.yutingou.yingzhongying", 0)
+                    .versionName ?: "",
                 outputRelPath = "Pictures/VLiveConvert",
                 moveToCamera = true,
                 deleteOriginal = true,
@@ -192,7 +195,7 @@ class UiScreenshotTest {
                 onToggleMoveToCamera = {},
                 onToggleDeleteOriginal = {},
                 onRepairLocationDisplay = {},
-        onOpenFixTime = {},
+                onOpenFixTime = {},
                 onMoveOutputsToCamera = {},
                 onExportCrashLogs = {},
                 onOpenAbout = {}
@@ -205,7 +208,9 @@ class UiScreenshotTest {
     @Test
     fun shotAbout() {
         render {
-            AboutScreen(appName = "影中影", versionName = "1.7.7", onBack = {})
+            AboutScreen(appName = "影中影", versionName = ApplicationProvider.getApplicationContext<VliveApp>()
+                    .packageManager.getPackageInfo("com.yutingou.yingzhongying", 0)
+                    .versionName ?: "", onBack = {})
         }
         shot("about")
     }
