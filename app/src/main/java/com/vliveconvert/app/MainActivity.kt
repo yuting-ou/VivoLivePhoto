@@ -380,10 +380,13 @@ class MainActivity : ComponentActivity() {
     private var outputPathInput by mutableStateOf("")
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
-    // 恢复历史产物位置显示（只写媒体库坐标列）
+    // 重建历史产物的媒体库记录（让相册显示位置）
     private var isRepairingLocation by mutableStateOf(false)
     private var showRepairConfirm by mutableStateOf(false)
     private var repairProgressText by mutableStateOf("")
+    // 分批重建的空间守卫：可用空间不足时暂停，提示清空回收站
+    private var showSpacePause by mutableStateOf(false)
+    private var spacePauseText by mutableStateOf("")
 
     // 动态照片 = 图片 + 伴生视频，必须同时申请图片与视频读取权限
     // （双文件格式需要直接读取同目录 .mp4，缺视频权限会报 EACCES）；
@@ -1209,22 +1212,24 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // 位置显示恢复：确认 + 进度弹窗
+                // 位置显示重建：确认 + 进度 + 空间暂停弹窗
                 if (showRepairConfirm) {
                     AlertDialog(
                         onDismissRequest = { showRepairConfirm = false },
-                        title = { Text("恢复位置显示") },
+                        title = { Text("重建位置显示") },
                         text = {
                             Text(
-                                "将扫描相机相册中的历史转换产物，把文件里的拍摄坐标补写进媒体库" +
-                                    "（只改媒体库记录，不动照片内容，约几分钟）。" +
-                                    "完成后 vivo 相册即可显示这些照片的位置。"
+                                "将分批重建历史转换产物的媒体库记录，让 vivo 相册显示拍摄位置。\n\n" +
+                                    "· 照片内容与文件名不变，重建后字节逐字节一致\n" +
+                                    "· 旧记录会进相册「最近删除/第三方删除拦截」（可恢复）\n" +
+                                    "· 存储空间不足时自动暂停，清空回收站后点「继续」即可续跑\n\n" +
+                                    "共约 4400 张，预计 3~4 批。开始？"
                             )
                         },
                         confirmButton = {
                             Button(onClick = {
                                 showRepairConfirm = false
-                                repairLocationDisplay()
+                                rebuildLocationDisplay()
                             }) { Text("开始") }
                         },
                         dismissButton = {
@@ -1235,9 +1240,25 @@ class MainActivity : ComponentActivity() {
                 if (isRepairingLocation) {
                     AlertDialog(
                         onDismissRequest = {},
-                        title = { Text("恢复位置显示") },
+                        title = { Text("重建位置显示") },
                         text = { Text(repairProgressText) },
                         confirmButton = {}
+                    )
+                }
+                if (showSpacePause) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("需要释放存储空间") },
+                        text = { Text(spacePauseText) },
+                        confirmButton = {
+                            Button(onClick = {
+                                showSpacePause = false
+                                rebuildLocationDisplay()
+                            }) { Text("继续") }
+                        },
+                        dismissButton = {
+                            Button(onClick = { showSpacePause = false }) { Text("结束") }
+                        }
                     )
                 }
 
@@ -1950,13 +1971,17 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 恢复历史转换产物的相册位置显示：枚举相机相册里的应用产物、解析文件头坐标、
-     * 补写媒体库坐标列。只写数据库、不改文件字节（实现在 LocationDisplayRepair）。
+     * 重建历史产物的媒体库记录，让 vivo 相册显示位置（分批执行）。
+     *
+     * vivo 相册只认「出生自带坐标」的记录、事后 UPDATE 坐标列被系统静默忽略，
+     * 所以存量修复 = 行重建：同名/同字节/同时间戳重插一条带坐标的记录。
+     * 删旧记录会让文件进「第三方删除拦截」回收站——因此按可用空间分批：
+     * 低于守卫线自动暂停，提示用户清空回收站后继续（已处理名单持久化，可续跑）。
      */
-    private fun repairLocationDisplay() {
+    private fun rebuildLocationDisplay() {
         if (isRepairingLocation) return
         if (ConvertCenter.isConverting) {
-            ConvertCenter.statusText = "转换进行中，等本轮完成后再恢复位置显示"
+            ConvertCenter.statusText = "转换进行中，等本轮完成后再重建位置显示"
             return
         }
         lifecycleScope.launch(Dispatchers.IO) {
@@ -1965,22 +1990,37 @@ class MainActivity : ComponentActivity() {
                 repairProgressText = "正在扫描相机相册…"
             }
             try {
-                val stats = LocationDisplayRepair.repair(this@MainActivity) { done, total ->
-                    // mutableStateOf 可从任意线程写（快照系统保证安全），回调本身非 suspend
-                    repairProgressText = "扫描 $done/$total…"
-                }
+                val processed = LocationDisplayRepair.loadProcessed(applicationContext)
+                val stats = LocationDisplayRepair.rebuildAll(
+                    this@MainActivity, processed,
+                    onProgress = { done, total ->
+                        if (done % 25 == 0 || done == total) {
+                            // mutableStateOf 可从任意线程写（快照系统保证安全）
+                            repairProgressText = "正在重建 $done/$total…"
+                        }
+                    }
+                )
+                LocationDisplayRepair.saveProcessed(applicationContext, processed)
                 withContext(Dispatchers.Main) {
-                    ConvertCenter.statusText = "位置显示恢复完成：扫描 ${stats.scanned} 张，" +
-                        "转换产物 ${stats.outputs} 张，从视频段恢复 ${stats.restored} 张，" +
-                        "坐标列补写 ${stats.repaired} 张" +
-                        (if (stats.noGps > 0) "（${stats.noGps} 张无坐标且无法恢复）" else "")
+                    isRepairingLocation = false
+                    if (stats.pausedForSpace) {
+                        spacePauseText = "本批已重建 ${stats.rebuilt} 张（失败 ${stats.failed}，" +
+                            "无坐标跳过 ${stats.noCoords}）。\n\n可用空间已低于 10GB——请到相册" +
+                            "「最近删除 / 第三方删除拦截」清空回收站释放空间，然后点「继续」跑下一批。"
+                        showSpacePause = true
+                        ConvertCenter.statusText = "位置显示重建已暂停：请清空回收站后继续"
+                    } else {
+                        ConvertCenter.statusText = "位置显示重建完成：本批重建 ${stats.rebuilt} 张，" +
+                            "失败 ${stats.failed}，无坐标跳过 ${stats.noCoords}" +
+                            (if (stats.remaining > 0) "；剩余 ${stats.remaining} 张，再次运行可继续"
+                             else "；全部处理完毕")
+                    }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    ConvertCenter.statusText = "恢复失败：${e.message}"
+                    isRepairingLocation = false
+                    ConvertCenter.statusText = "重建失败：${e.message}"
                 }
-            } finally {
-                withContext(Dispatchers.Main) { isRepairingLocation = false }
             }
         }
     }

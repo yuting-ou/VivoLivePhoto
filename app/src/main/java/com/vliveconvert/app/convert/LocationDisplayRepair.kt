@@ -2,26 +2,28 @@ package com.vliveconvert.app.convert
 
 import android.content.ContentValues
 import android.content.Context
-import androidx.exifinterface.media.ExifInterface
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import com.vliveconvert.app.core.JpegUtil
 import java.io.File
-import kotlin.text.toByteArray
 
 /**
- * 「恢复已有照片的位置显示」：给历史转换产物找回拍摄坐标。
+ * 「重建已有照片的位置显示」：让历史转换产物在 vivo 相册里显示拍摄位置。
  *
- * 两层修复（2026-10 真机结论）：
- * 1. **字节层恢复**：老版本（原作者 1.31.x 时代）在无位置权限时转换，系统读取层
- *    剥掉了 JPEG 的 EXIF GPS；但合并产物**原样拼接了源 mp4**，vivo 相机在 mp4 的
- *    udta/©xyz 原子里始终写有 ISO 6709 坐标串——从视频段解出坐标，用 ExifInterface
- *    写回该产物 JPEG 的 EXIF（先切出 JPEG 单独处理再拼回尾部，保证视频字节零改动）。
- * 2. **显示层补写**：vivo 相册的位置显示读媒体库 latitude/longitude 列、不回读文件
- *    EXIF；把坐标（文件自带的或刚恢复的）UPDATE 回媒体库行。
+ * 机制（2026-10 真机结论）：
+ * - vivo 相册的位置显示只认「出生自带坐标」的媒体库记录（相机拍照时由系统写入）；
+ *   对已存在的记录事后 UPDATE 坐标列会被系统静默忽略（返回 0 行、无异常）。
+ * - 实测新插入带坐标的行能正常显示（v2.0.1 前向修复）。所以存量修复 = **行重建**：
+ *   读出文件全部字节与元数据 → 删除旧记录（文件进 vivo「第三方删除拦截」回收站，
+ *   可恢复）→ 以同名/同目录/同时间戳 + 坐标重新插入 → 字节原样写回。
+ * - 若文件字节无 EXIF GPS（老版本转换时被系统读取层剥掉）：从产物**自身嵌入的
+ *   视频段**恢复坐标（vivo 相机在 mp4 的 udta/©xyz 写 ISO 6709 串），写回 EXIF
+ *   后再重建（切出 JPEG 单独处理，尾部视频逐字节保留）。
  *
- * 枚举范围：相机相册里的应用产物（XMP 含 VCamera:VMediaKitVersion 标记——相机原始
- * 双文件天然没有该标记）。UPDATE 只动媒体库，除坐标恢复外不改任何文件字节。
+ * 分批与空间守卫：重建会在回收站留下一份副本（约等于产物总体积），本工具在
+ * 可用空间低于 [MIN_FREE_BYTES] 时自动暂停，提示用户清空回收站后继续；
+ * 已处理文件名持久化，可中断续跑。
  */
 internal object LocationDisplayRepair {
 
@@ -31,123 +33,215 @@ internal object LocationDisplayRepair {
     /** 头部嗅探长度：EXIF 与 XMP 都在文件头部，512KB 足够 */
     private const val SNIFF_LIMIT = 512 * 1024
 
-    data class Stats(
-        /** 扫描的图片总数 */
+    /** 可用空间低于该值自动暂停（回收站副本持续增长，给系统留足余量） */
+    private const val MIN_FREE_BYTES = 10L * 1024 * 1024 * 1024
+
+    /** 进度持久化文件名：每行一个「已处理」的显示名（含非产物，避免每批重嗅探） */
+    private const val PROGRESS_FILE = "location_rebuild_done.txt"
+
+    data class RebuildStats(
+        /** 本轮扫描到的图片数 */
         val scanned: Int,
-        /** 其中识别出的应用产物 */
-        val outputs: Int,
-        /** 文件字节无 GPS、成功从视频段恢复并写回的产物数 */
-        val restored: Int,
-        /** 坐标列补写成功的行数（含恢复的） */
-        val repaired: Int,
-        /** 应用产物中无 GPS 且视频段也恢复不出坐标的 */
-        val noGps: Int
+        /** 本轮成功重建的产物数 */
+        val rebuilt: Int,
+        /** 重建失败（IO/校验失败）的产物数 */
+        val failed: Int,
+        /** 无坐标且视频段也恢复不出的产物数（跳过，不删记录） */
+        val noCoords: Int,
+        /** 因可用空间不足而暂停 */
+        val pausedForSpace: Boolean,
+        /** 仍未处理的图片数（含非产物） */
+        val remaining: Int
     )
 
+    /** 已处理名单（跨批/跨会话续跑）；不存在的文件返回空集 */
+    fun loadProcessed(context: Context): MutableSet<String> {
+        val f = File(context.filesDir, PROGRESS_FILE)
+        return try {
+            if (f.exists()) f.readLines(Charsets.UTF_8).filter { it.isNotBlank() }.toMutableSet()
+            else mutableSetOf()
+        } catch (_: Exception) {
+            mutableSetOf()
+        }
+    }
+
+    fun saveProcessed(context: Context, processed: Set<String>) {
+        try {
+            File(context.filesDir, PROGRESS_FILE).writeText(
+                processed.joinToString("\n"), Charsets.UTF_8)
+        } catch (_: Exception) {}
+    }
+
+    fun clearProcessed(context: Context) {
+        try { File(context.filesDir, PROGRESS_FILE).delete() } catch (_: Exception) {}
+    }
+
     /**
-     * 执行修复。[onProgress] (已扫描, 待处理总数) 用于进度展示。
-     * 单行失败不中断整体（该行跳过，计入 scanned 不计入 repaired）。
+     * 分批重建。[processed] 为已处理名单（就地更新，调用方负责落盘）。
+     * [onProgress] (已扫描, 总数)。[freeSpaceBytes] 可注入用于测试。
      */
-    fun repair(context: Context, onProgress: (Int, Int) -> Unit = { _, _ -> }): Stats {
+    fun rebuildAll(
+        context: Context,
+        processed: MutableSet<String>,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        freeSpaceBytes: () -> Long = { defaultFreeSpaceBytes() },
+        minFreeBytes: Long = MIN_FREE_BYTES
+    ): RebuildStats {
         val resolver = context.contentResolver
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
-        data class Candidate(val uri: Uri)
-
-        val candidates = ArrayList<Candidate>()
+        data class Row(val uri: Uri, val name: String)
+        val rows = ArrayList<Row>()
         try {
             resolver.query(
                 images,
-                arrayOf(MediaStore.MediaColumns._ID),
+                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME),
                 "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
                     "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
                 arrayOf("DCIM/Camera", "DCIM/Camera/%"),
                 null
             )?.use { c ->
                 while (c.moveToNext()) {
-                    candidates.add(Candidate(
-                        ContentUrisWithId(images, c.getLong(0))))
+                    val name = c.getString(1) ?: continue
+                    rows.add(Row(ContentUrisWithId(images, c.getLong(0)), name))
                 }
             }
         } catch (_: Exception) {}
 
         var scanned = 0
-        var outputs = 0
-        var restored = 0
-        var repaired = 0
-        var noGps = 0
-        // 列补写失败原因诊断：只记前 3 条，避免刷爆日志
-        var diagLogged = 0
-        val total = candidates.size
-        for ((index, candidate) in candidates.withIndex()) {
+        var rebuilt = 0
+        var failed = 0
+        var noCoords = 0
+        var paused = false
+        val total = rows.size
+        for ((index, row) in rows.withIndex()) {
             scanned++
-            if (index % 50 == 0) onProgress(index, total)
+            onProgress(index, total)
+            if (row.name in processed) continue
+            if (freeSpaceBytes() < minFreeBytes) {
+                paused = true
+                break
+            }
             try {
-                val header = readHeader(resolver, candidate.uri) ?: continue
-                // 非应用产物（相机原始双文件、用户其它照片）跳过：
-                // XMP 含 VCamera:VMediaKitVersion 的才是本工具的转换产物
-                if (!containsBytes(header, APP_OUTPUT_MARKER)) continue
-                outputs++
-                var coords = JpegUtil.gpsCoordinates(header)
-                if (coords == null) {
-                    // 文件字节无 GPS（老版本无权限时被系统读取层剥掉）：
-                    // 从产物自身嵌入的视频段恢复坐标，写回 EXIF 后再走列补写
-                    val full = readAll(resolver, candidate.uri) ?: run { noGps++; continue }
-                    val recovered = GpsRecovery.recoverFromVideoSegment(full)
-                        ?: run { noGps++; continue }
-                    val newBytes = injectGpsExif(context, full, recovered)
-                        ?: run { noGps++; continue }
-                    val written = try {
-                        resolver.openOutputStream(candidate.uri, "w")?.use {
-                            it.write(newBytes)
-                            true
-                        } == true
-                    } catch (_: Exception) {
-                        false
-                    }
-                    if (!written) { noGps++; continue }
-                    restored++
-                    coords = recovered
-                    // EXIF 增长会改变文件大小，SIZE 列必须同步
-                    try {
-                        resolver.update(candidate.uri, ContentValues().apply {
-                            put(MediaStore.MediaColumns.SIZE, newBytes.size.toLong())
-                        }, null, null)
-                    } catch (_: Exception) {}
+                val header = readHeader(resolver, row.uri) ?: continue
+                // 非应用产物（相机原始文件、用户其它照片）：标记已处理，后续批次跳过嗅探
+                if (!containsBytes(header, APP_OUTPUT_MARKER)) {
+                    processed.add(row.name)
+                    continue
                 }
-                val updated = try {
-                    resolver.update(candidate.uri, ContentValues().apply {
-                        put("latitude", coords.first)
-                        put("longitude", coords.second)
-                    }, null, null)
-                } catch (e: Exception) {
-                    if (diagLogged < 3) {
-                        android.util.Log.e("GpsRepair", "列补写异常 uri=$candidate", e)
-                        diagLogged++
+                val result = recreateRow(context, row.uri)
+                when (result) {
+                    RecreateResult.OK -> {
+                        rebuilt++
+                        processed.add(row.name)
                     }
-                    0
-                }
-                if (updated > 0) {
-                    repaired++
-                } else if (diagLogged < 3) {
-                    // 返回 0 行：Provider 忽略/拒绝了坐标列写入——记一条用于真机诊断
-                    android.util.Log.w(
-                        "GpsRepair", "列补写返回 $updated 行 uri=$candidate")
-                    diagLogged++
+                    RecreateResult.NO_COORDS -> {
+                        // 无坐标也无视频段坐标：不删记录，标记已处理避免反复重试
+                        noCoords++
+                        processed.add(row.name)
+                    }
+                    RecreateResult.FAILED -> failed++
                 }
             } catch (_: Exception) {
-                // 单个文件损坏/读取失败：跳过，继续整体修复
+                failed++
             }
         }
         onProgress(total, total)
-        return Stats(scanned, outputs, restored, repaired, noGps)
+        val remaining = rows.count { it.name !in processed }
+        return RebuildStats(scanned, rebuilt, failed, noCoords, paused, remaining)
+    }
+
+    enum class RecreateResult { OK, NO_COORDS, FAILED }
+
+    /**
+     * 行重建（单张）：字节与元数据读出 → 删除旧记录（文件进回收站）→
+     * 同名/同目录/同时间戳 + 坐标重新插入 → 字节原样写回。
+     * 坐标来源：文件 EXIF；缺失时从嵌入视频段恢复（并写回 EXIF）。
+     */
+    fun recreateRow(context: Context, uri: Uri): RecreateResult {
+        val resolver = context.contentResolver
+        var bytes: ByteArray
+        var name: String
+        var relPath: String
+        var dateTaken: Long
+        var dateModified: Long
+        var coords: Pair<Double, Double>
+        try {
+            resolver.query(uri, arrayOf(
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.DATE_TAKEN,
+                MediaStore.MediaColumns.DATE_MODIFIED
+            ), null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return RecreateResult.FAILED
+                name = c.getString(0) ?: return RecreateResult.FAILED
+                relPath = c.getString(1) ?: "DCIM/Camera"
+                dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
+                dateModified = if (c.isNull(3)) 0L else c.getLong(3)
+            } ?: return RecreateResult.FAILED
+            bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return RecreateResult.FAILED
+            val exifCoords = JpegUtil.gpsCoordinates(bytes)
+            coords = exifCoords ?: GpsRecovery.recoverFromVideoSegment(bytes)
+                ?: return RecreateResult.NO_COORDS
+            if (exifCoords == null) {
+                // 从视频段恢复出的坐标写回 EXIF（切 JPEG/拼尾部，视频逐字节保留）
+                bytes = injectGpsExif(context, bytes, coords) ?: return RecreateResult.FAILED
+            }
+        } catch (_: Exception) {
+            return RecreateResult.FAILED
+        }
+        if (dateTaken <= 0L) dateTaken = dateModified * 1000
+        if (dateModified <= 0L) dateModified = dateTaken / 1000
+
+        // 删除旧记录：vivo 会把文件移入「第三方删除拦截」回收站（可恢复）
+        val deleted = try {
+            resolver.delete(uri, null, null)
+        } catch (_: Exception) {
+            return RecreateResult.FAILED
+        }
+        if (deleted <= 0) return RecreateResult.FAILED
+
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        var newUri: Uri? = null
+        return try {
+            newUri = resolver.insert(collection, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
+                put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
+                put("latitude", coords.first)
+                put("longitude", coords.second)
+            }) ?: return RecreateResult.FAILED
+            resolver.openOutputStream(newUri, "w")?.use { it.write(bytes) }
+                ?: return RecreateResult.FAILED
+            resolver.update(newUri, ContentValues().apply {
+                put(MediaStore.MediaColumns.SIZE, bytes.size.toLong())
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }, null, null)
+            // 物理文件 mtime 固化为拍摄时间（相册「修改时间」取自 mtime）
+            try {
+                resolver.query(newUri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
+                    ?.use { c ->
+                        if (c.moveToFirst()) c.getString(0)?.let { path ->
+                            File(path).setLastModified(dateTaken)
+                        }
+                    }
+            } catch (_: Exception) {}
+            RecreateResult.OK
+        } catch (_: Exception) {
+            // 新行写失败：删除半成品，原内容仍在回收站可恢复
+            newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
+            RecreateResult.FAILED
+        }
     }
 
     /**
      * 把坐标写进合并产物的 EXIF：**必须先切出 JPEG 部分（SOI..EOI）单独交给
      * ExifInterface**——它重写文件时会截掉 EOI 之后的全部数据，直接喂合并文件
-     * 会毁掉嵌入的视频。改写后的 JPEG 与原样尾部重新拼接；自检失败则返回 null
-     * （调用方保持原文件不动）。
+     * 会毁掉嵌入的视频。改写后的 JPEG 与原样尾部重新拼接；自检失败返回 null。
      */
     private fun injectGpsExif(
         context: Context,
@@ -172,7 +266,6 @@ internal object LocationDisplayRepair {
                     saveAttributes()
                 }
                 val newJpeg = tmp.readBytes()
-                // 自检：改写后的 JPEG 必须能解出坐标且仍是合法 JPEG
                 if (JpegUtil.gpsCoordinates(newJpeg) == null) return null
                 newJpeg + tail
             } finally {
@@ -181,6 +274,13 @@ internal object LocationDisplayRepair {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun defaultFreeSpaceBytes(): Long = try {
+        // 拿不到空间信息（0/异常）时视作充足，避免环境差异把功能误停
+        File("/storage/emulated/0").usableSpace.takeIf { it > 0 } ?: Long.MAX_VALUE
+    } catch (_: Exception) {
+        Long.MAX_VALUE
     }
 
     private fun ContentUrisWithId(collection: Uri, id: Long): Uri =
@@ -199,17 +299,6 @@ internal object LocationDisplayRepair {
                 n += r
             }
             if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
-        }
-    }
-
-    private fun readAll(
-        resolver: android.content.ContentResolver,
-        uri: Uri
-    ): ByteArray? {
-        return try {
-            resolver.openInputStream(uri)?.use { it.readBytes() }
-        } catch (_: Exception) {
-            null
         }
     }
 

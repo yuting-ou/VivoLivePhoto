@@ -162,7 +162,7 @@ fun SettingsScreen(
             SettingsCard {
                 ActionRow("修复文件时间", onOpenFixTime)
                 CardDivider()
-                ActionRow("恢复已有照片的位置显示", onRepairLocationDisplay, enabled = !isBusy)
+                ActionRow("重建位置显示（相册可显示位置）", onRepairLocationDisplay, enabled = !isBusy)
                 CardDivider()
                 ActionRow("把输出移到相机相册", onMoveOutputsToCamera, enabled = !isBusy)
                 CardDivider()
