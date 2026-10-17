@@ -48,7 +48,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -544,13 +547,46 @@ private fun ConvertItemRow(
         }
         prevFailed = ci.failed
     }
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = bg,
-        modifier = modifier
-            .graphicsLayer { translationX = shakeX.value }
-            .fillMaxWidth()
+    // 左滑移除（v2.0.3）：与行内移除按钮同一动作；转换中的项目禁用滑除
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart && !busy) {
+                onRemove()
+                true
+            } else {
+                false
+            }
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = !busy,
+        backgroundContent = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    "移除",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(end = 20.dp)
+                )
+            }
+        },
+        modifier = modifier.fillMaxWidth()
     ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = bg,
+            modifier = Modifier
+                .graphicsLayer { translationX = shakeX.value }
+                .fillMaxWidth()
+        ) {
         Row(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -701,6 +737,7 @@ private fun ConvertItemRow(
                     )
                 }
             }
+        }
         }
     }
 }

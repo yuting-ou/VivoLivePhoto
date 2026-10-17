@@ -1929,8 +1929,13 @@ class MainActivity : ComponentActivity() {
         return s
     }
 
-    /** 查询指定相对路径下的全部图片（按加入时间降序；兼容带/不带尾斜杠两种存储形态） */
+    /** 查询指定相对路径下的全部图片（按加入时间降序；目录匹配大小写不敏感、兼容有无尾斜杠） */
     private fun queryImagesIn(relPath: String): List<MediaItem> {
+        // LIKE 通配符转义：用户自定义目录名可含 % 与 _（ESCAPE '\'）
+        val escaped = relPath
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
         val result = mutableListOf<MediaItem>()
         try {
             contentResolver.query(
@@ -1943,8 +1948,9 @@ class MainActivity : ComponentActivity() {
                     MediaStore.Images.Media.DATE_MODIFIED,
                     MediaStore.Images.Media.SIZE
                 ),
-                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?,?)",
-                arrayOf("$relPath/", relPath),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? ESCAPE '\\' OR " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? ESCAPE '\\'",
+                arrayOf(escaped, "$escaped/%"),
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 val iId = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)

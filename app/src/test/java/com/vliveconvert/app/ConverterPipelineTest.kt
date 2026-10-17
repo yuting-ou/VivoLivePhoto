@@ -787,6 +787,12 @@ class ConverterPipelineTest {
 
     @Test
     fun siblingMp4MatchesUppercaseExtension() {
+        // macOS 的 APFS（默认不区分大小写）上写出的 "IMG_9201.MP4" 与 "IMG_9201.mp4"
+        // 是同一路径，本用例的前提不成立——跳过而非失败；Linux/CI 上照常执行
+        org.junit.Assume.assumeTrue(
+            "APFS 大小写不敏感，此用例仅在区分大小写的文件系统上有意义",
+            !System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+        )
         // 相机若写出 `.MP4`，该照片会被判为「非双文件」而在选择器里静默消失。
         // 注意这里断言的是**选择器的收录入口** isDualLivePhotoPath——此前选择器
         // 内部另有一份硬拼小写 `.mp4` 的私有预筛，即使核心解析兼容了 `.MP4`，
