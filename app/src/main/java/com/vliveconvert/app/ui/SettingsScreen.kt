@@ -20,7 +20,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -112,79 +119,89 @@ fun SettingsScreen(
 
             // ── 输出 ──
             SectionLabel("输出")
-            SettingsCard {
-                ClickableRow(
-                    title = "输出目录",
-                    subtitle = "导出文件的保存位置",
-                    onClick = onEditOutputPath
-                ) {
-                    Text(
-                        outputRelPath,
-                        style = MaterialTheme.typography.bodyMedium,
-                        // 用 onSurface 而非 onSurfaceVariant：后者与副标题同色，取值会「融」进副标题、
-                        // 看不出这是当前值；也不能用 primary——它在卡片底色 surfaceContainerLow 上仅
-                        // 4.40:1，低于正文 AA。onSurface 既拉出层级又满足对比度（≈14:1）
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(140.dp)
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    ChevronRight()
-                }
-            }
+            ToolValueCard(
+                icon = Icons.Filled.Home,
+                title = "输出目录",
+                subtitle = "导出文件的保存位置",
+                value = outputRelPath,
+                onClick = onEditOutputPath
+            )
 
             Spacer(Modifier.height(16.dp))
 
             // ── 转换后处理 ──
             SectionLabel("转换后处理")
-            SettingsCard {
-                SwitchRow(
-                    title = "移到相机相册",
-                    subtitle = "写入 DCIM/Camera（配合删除原图可免序号）",
-                    checked = moveToCamera,
-                    enabled = !isBusy,
-                    onToggle = onToggleMoveToCamera
-                )
-                CardDivider()
-                SwitchRow(
-                    title = "删除原图",
-                    subtitle = "删除原 .jpg 与伴生 .mp4（可恢复）",
-                    checked = deleteOriginal,
-                    enabled = !isBusy,
-                    onToggle = onToggleDeleteOriginal
-                )
-            }
+            ToolSwitchCard(
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                title = "移到相机相册",
+                subtitle = "写入 DCIM/Camera（配合删原图可免序号）",
+                checked = moveToCamera,
+                enabled = !isBusy,
+                onToggle = onToggleMoveToCamera
+            )
+            Spacer(Modifier.height(8.dp))
+            ToolSwitchCard(
+                icon = Icons.Filled.Delete,
+                title = "删除原图",
+                subtitle = "删除原 .jpg 与伴生 .mp4（可恢复）",
+                checked = deleteOriginal,
+                enabled = !isBusy,
+                onToggle = onToggleDeleteOriginal
+            )
 
             Spacer(Modifier.height(16.dp))
 
-            // ── 工具 ──
+            // ── 工具 ──（v2.0.5 卡片化：图标 + 一句说明，让每个工具做什么一眼可见）
             SectionLabel("工具")
-            SettingsCard {
-                ActionRow("修复文件时间", onOpenFixTime)
-                CardDivider()
-                ActionRow("重建位置显示（相册可显示位置）", onRepairLocationDisplay, enabled = !isBusy)
-                CardDivider()
-                ActionRow("把输出移到相机相册", onMoveOutputsToCamera, enabled = !isBusy)
-                CardDivider()
-                // 常驻：曾用 if (count>0) 包住——闪退后想导日志，若此页组合时还没有日志
-                // （或刷新前），这行根本不存在 =「点击不了」。0 份点了就明说
-                ActionRow(
-                    "导出崩溃日志（$crashLogCount）",
-                    onExportCrashLogs,
-                    tint = MaterialTheme.colorScheme.error
-                )
-                CardDivider()
-                ActionRow("清空崩溃日志", onClearCrashLogs, enabled = crashLogCount > 0)
-            }
+            ToolCard(
+                icon = Icons.Filled.DateRange,
+                title = "修复文件时间",
+                subtitle = "按拍摄时间校正已导出文件的「修改时间」",
+                onClick = onOpenFixTime
+            )
+            Spacer(Modifier.height(8.dp))
+            ToolCard(
+                icon = Icons.Filled.Place,
+                title = "重建位置显示",
+                subtitle = "让历史转换的照片在相册里显示拍摄位置",
+                onClick = onRepairLocationDisplay,
+                enabled = !isBusy
+            )
+            Spacer(Modifier.height(8.dp))
+            ToolCard(
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                title = "把输出移到相机相册",
+                subtitle = "把其它目录里的转换产物搬进 DCIM/Camera",
+                onClick = onMoveOutputsToCamera,
+                enabled = !isBusy
+            )
+            Spacer(Modifier.height(8.dp))
+            ToolCard(
+                icon = Icons.Filled.Share,
+                title = "导出崩溃日志（$crashLogCount）",
+                subtitle = "导出到 Download/VLiveConvert 供排查",
+                onClick = onExportCrashLogs,
+                tint = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(8.dp))
+            ToolCard(
+                icon = Icons.Filled.Delete,
+                title = "清空崩溃日志",
+                subtitle = "删除全部本地崩溃日志（不可恢复）",
+                onClick = onClearCrashLogs,
+                enabled = crashLogCount > 0
+            )
 
             Spacer(Modifier.height(16.dp))
 
             // ── 关于 ──（GPL-3.0 合规：许可证文本随包内置，可在应用内查看）
             SectionLabel("关于")
-            SettingsCard {
-                ActionRow("关于与开源许可", onOpenAbout)
-            }
+            ToolCard(
+                icon = Icons.Filled.Info,
+                title = "关于与开源许可",
+                subtitle = "版本信息与 GPL-3.0 许可证全文",
+                onClick = onOpenAbout
+            )
 
             Spacer(Modifier.height(24.dp))
 
@@ -210,103 +227,38 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/** 分组卡片容器（子项之间用 CardDivider 分隔） */
+/** 卡片外壳：图标块 + 标题/说明 + 右侧内容（chevron / switch / 当前值） */
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-    ) { content() }
-}
-
-@Composable
-private fun CardDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    )
-}
-
-@Composable
-private fun ClickableRow(
-    title: String,
-    subtitle: String? = null,
-    onClick: () -> Unit,
-    trailing: @Composable () -> Unit = {}
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickableNoRipple(onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            if (subtitle != null) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        trailing()
-    }
-}
-
-@Composable
-private fun ActionRow(
-    title: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    tint: androidx.compose.ui.graphics.Color? = null
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            // 忙时不摘掉 clickable：原先这里直接不换 clickable，点击就是空气——
-            // 与「开始转换」置灰后点不动是同一类静默缺陷。文字仍变淡作为提示，
-            // 具体原因由处理函数说清楚。
-            // v1.7.23：clickableNoRipple → clickable（带涟漪）。用户反馈整页没有任何
-            // 点击反馈感；M3 Card 会把内容裁到圆角，矩形涟漪不会溢出卡片
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            color = tint ?: if (enabled) MaterialTheme.colorScheme.onSurface
-                          else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
-        )
-        ChevronRight()
-    }
-}
-
-@Composable
-private fun SwitchRow(
+private fun ToolCardShell(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit
+    iconTint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
+    titleColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable () -> Unit
 ) {
+    val base = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(14.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerLow)
     Row(
-        Modifier
-            .fillMaxWidth()
+        (if (onClick != null) base.clickable(onClick = onClick) else base)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(iconTint.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(title, style = MaterialTheme.typography.titleSmall, color = titleColor)
             Spacer(Modifier.height(2.dp))
             Text(
                 subtitle,
@@ -314,8 +266,78 @@ private fun SwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(8.dp))
+        trailing()
+    }
+}
+
+/** 工具卡片：点按执行（chevron 指引） */
+@Composable
+private fun ToolCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    tint: androidx.compose.ui.graphics.Color? = null
+) {
+    val iconTint = tint ?: if (enabled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+    val titleColor = tint ?: if (enabled) MaterialTheme.colorScheme.onSurface
+                          else MaterialTheme.colorScheme.onSurfaceVariant
+    ToolCardShell(
+        icon = icon, title = title, subtitle = subtitle,
+        iconTint = iconTint, titleColor = titleColor, onClick = onClick
+    ) { ChevronRight() }
+}
+
+/** 开关卡片：点按或拨动开关切换 */
+@Composable
+private fun ToolSwitchCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    val iconTint = if (enabled) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurfaceVariant
+    ToolCardShell(
+        icon = icon, title = title, subtitle = subtitle,
+        iconTint = iconTint,
+        titleColor = if (enabled) MaterialTheme.colorScheme.onSurface
+                     else MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = if (enabled) ({ onToggle(!checked) }) else null
+    ) {
         Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+    }
+}
+
+/** 值卡片：右侧展示当前值 + chevron（如输出目录） */
+@Composable
+private fun ToolValueCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    value: String,
+    onClick: () -> Unit
+) {
+    ToolCardShell(
+        icon = icon, title = title, subtitle = subtitle, onClick = onClick
+    ) {
+        // onSurface 而非 onSurfaceVariant：后者与副标题同色会「融」进说明；
+        // 也不能用 primary——在卡片底色上仅 4.40:1，低于正文 AA。onSurface ≈14:1
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.width(150.dp)
+        )
+        Spacer(Modifier.width(2.dp))
+        ChevronRight()
     }
 }
 

@@ -45,6 +45,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -387,6 +391,8 @@ class MainActivity : ComponentActivity() {
     // 分批重建的空间守卫：可用空间不足时暂停，提示清空回收站
     private var showSpacePause by mutableStateOf(false)
     private var spacePauseText by mutableStateOf("")
+    // 列表项移除的撤销条（滑动/按钮移除后 4 秒内可撤销）
+    private val snackbarHostState = SnackbarHostState()
 
     // 动态照片 = 图片 + 伴生视频，必须同时申请图片与视频读取权限
     // （双文件格式需要直接读取同目录 .mp4，缺视频权限会报 EACCES）；
@@ -898,11 +904,7 @@ class MainActivity : ComponentActivity() {
                                     ConvertCenter.clearQueue(applicationContext)
                                     ConvertCenter.statusText = "已清空"
                                 },
-                                onRemove = { ci ->
-                                    ConvertCenter.items.removeAll { it.item.key == ci.item.key }
-                                    ConvertCenter.persistQueue(
-                                        applicationContext, ConvertCenter.itemsSnapshot())
-                                }
+                                onRemove = { ci -> removeItemWithUndo(ci) }
                             )
                         }
                     }
@@ -987,6 +989,16 @@ class MainActivity : ComponentActivity() {
                             label = "screenTransition"
                         ) { screen -> renderScreen(screen) }
                     }
+
+                    // 移除撤销条（Gmail 式）：滑动/按钮移除后 4 秒内可撤销。
+                    // bottom 抬高到底栏按钮上方——主界面底栏常驻（输出信息 + 开始转换），
+                    // 贴底会被按钮压住半截
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 160.dp, start = 16.dp, end = 16.dp)
+                    )
                 }
 
                 // 转换前的影响面预估：把可确定的事实摊开再开跑
@@ -1983,6 +1995,29 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
         return result
+    }
+
+    /** 从转换列表移除一项，并给出 4 秒撤销窗口（滑动与行内按钮共用） */
+    private fun removeItemWithUndo(ci: ConvertItem) {
+        val index = ConvertCenter.items.indexOfFirst { it.item.key == ci.item.key }
+        if (index < 0) return
+        ConvertCenter.items.removeAt(index)
+        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+        lifecycleScope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "已移除 ${ci.item.name}",
+                actionLabel = "撤销",
+                withDismissAction = true,
+                // Short（≈4s）太短：用户看到提示再抬手去点，条子已经在退场了。
+                // 用 Long（≈10s）——Gmail 式撤销的常用窗口，够反应又不至于赖着不走
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                val at = index.coerceAtMost(ConvertCenter.items.size)
+                ConvertCenter.items.add(at, ci)
+                ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+            }
+        }
     }
 
     /**

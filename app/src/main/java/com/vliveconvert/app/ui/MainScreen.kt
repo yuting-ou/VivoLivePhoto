@@ -556,7 +556,11 @@ private fun ConvertItemRow(
             } else {
                 false
             }
-        }
+        },
+        // 阈值从默认 50% 提高到 60%：半程滑一半就反弹，防手滑误删
+        // （业界共识：滑动类破坏性操作要么要求明确的完整手势，要么给撤销；
+        //   本应用两者都做——阈值 + 移除后 Snackbar 撤销）
+        positionalThreshold = { totalDistance -> totalDistance * 0.6f }
     )
     SwipeToDismissBox(
         state = dismissState,
