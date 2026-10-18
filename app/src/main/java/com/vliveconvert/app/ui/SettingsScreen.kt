@@ -36,9 +36,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -268,8 +270,20 @@ private fun ToolCardShell(
         .fillMaxWidth()
         .clip(RoundedCornerShape(14.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerLow)
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressScale = rememberPressScale(interaction, pressedScale = 0.98f)
     Row(
-        (if (onClick != null) base.clickable(onClick = onClick) else base)
+        (if (onClick != null) {
+            base.clickable(
+                interactionSource = interaction,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClick = onClick
+            )
+        } else base)
+            .graphicsLayer {
+                scaleX = pressScale.value
+                scaleY = pressScale.value
+            }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

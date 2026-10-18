@@ -10,6 +10,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -43,6 +44,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -54,6 +56,35 @@ import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+
+/**
+ * 按压缩放反馈（Emil：任何可点击元素都必须对手指有回应）：
+ * 按下 0.97、松开弹回，临界阻尼弹簧（无过冲），120ms 量级内完成。
+ */
+@Composable
+internal fun rememberPressScale(
+    interactionSource: MutableInteractionSource,
+    pressedScale: Float = 0.97f
+): androidx.compose.runtime.State<Float> {
+    val pressed by interactionSource.collectIsPressedAsState()
+    return androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessHigh),
+        label = "pressScale"
+    )
+}
+
+
+/**
+ * 强 ease-out 入场曲线（Emil Kowalski 的 0.23,1,0.32,1）：
+ * Compose/Material 默认 FastOutSlowInEasing 起步慢，入场会比实际时长更显拖沓；
+ * 入场类动画统一改用这条「起步即冲」的曲线。退场保持更快时长即可。
+ */
+internal val EaseOutStrong = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+
 
 /**
  * 缩略图内存 LRU 缓存（按需加载）：
@@ -90,8 +121,9 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(
             visible = bitmap != null,
-            enter = fadeIn(tween(220)) + scaleIn(tween(260), initialScale = 0.92f),
-            exit = fadeOut(tween(150))
+            enter = fadeIn(tween(200, easing = EaseOutStrong)) +
+                scaleIn(tween(240, easing = EaseOutStrong), initialScale = 0.92f),
+            exit = fadeOut(tween(140))
         ) {
             if (bitmap != null) {
                 Image(
@@ -224,9 +256,13 @@ fun CircleTriCheckbox(
  * 无涟漪点击（文本按钮用）。
  * 全应用唯一实现：此前 MainScreen 与 SettingsScreen 各有一份完全相同的私有副本。
  */
-internal fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
+internal fun Modifier.clickableNoRipple(
+    onClick: () -> Unit,
+    interactionSource: MutableInteractionSource? = null
+): Modifier = composed {
+    val source = interactionSource ?: remember { MutableInteractionSource() }
     clickable(
-        interactionSource = remember { MutableInteractionSource() },
+        interactionSource = source,
         indication = null,
         onClick = onClick
     )
@@ -254,10 +290,17 @@ fun InlineTextButton(
     style: TextStyle = MaterialTheme.typography.labelLarge,
     shape: Shape = RoundedCornerShape(8.dp)
 ) {
+    // 无涟漪的紧凑按钮只能靠缩放表达"按到了"：0.96 足够可见又不跳
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale by rememberPressScale(interaction, pressedScale = 0.96f)
     Box(
         modifier
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .minimumInteractiveComponentSize()
-            .clickableNoRipple(onClick),
+            .clickableNoRipple(onClick, interaction),
         contentAlignment = Alignment.Center
     ) {
         Text(

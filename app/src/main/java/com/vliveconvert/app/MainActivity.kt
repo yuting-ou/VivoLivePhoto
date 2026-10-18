@@ -679,6 +679,9 @@ class MainActivity : ComponentActivity() {
                 // 单张照片转换只需 ~300ms，短于底栏过渡时长，不停一拍用户只看到「闪一下」
                 androidx.compose.runtime.LaunchedEffect(ConvertCenter.finishedBeat) {
                     if (ConvertCenter.finishedBeat) {
+                        // 多模态：批次完成节拍与触觉同帧（成功是有意义的时刻，给一次 CONFIRM）
+                        window?.decorView?.performHapticFeedback(
+                            android.view.HapticFeedbackConstants.CONFIRM)
                         kotlinx.coroutines.delay(FINISHED_BEAT_MS)
                         ConvertCenter.finishedBeat = false
                         ConvertCenter.progress = 0f
@@ -974,8 +977,8 @@ class MainActivity : ComponentActivity() {
                                 // 位移弹簧 + 短淡入淡出；稳态收敛 ~200ms
                                 val move = spring<IntOffset>(
                                     dampingRatio = 0.9f, stiffness = 520f)
-                                val fadeInSpec = tween<Float>(180)
-                                val fadeOutSpec = tween<Float>(150)
+                                val fadeInSpec = tween<Float>(180, easing = com.vliveconvert.app.ui.EaseOutStrong)
+                                val fadeOutSpec = tween<Float>(130)
                                 if (predictiveCommitArmed) {
                                     EnterTransition.None togetherWith ExitTransition.None
                                 } else if (targetState == Screen.Main && initialState != Screen.Main) {

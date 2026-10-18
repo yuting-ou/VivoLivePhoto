@@ -301,10 +301,10 @@ fun FixTimeScreen(
                         items(groupItems, key = { it.key }) { item ->
                             FixCell(
                                 modifier = Modifier.animateItem(
-                                    fadeInSpec = tween(220),
+                                    fadeInSpec = tween(200, easing = EaseOutStrong),
                                     placementSpec = spring(
                                         dampingRatio = 0.9f, stiffness = 380f),
-                                    fadeOutSpec = tween(180)
+                                    fadeOutSpec = tween(140)
                                 ),
                                 item = item,
                                 selected = selected.any { it.id == item.id },

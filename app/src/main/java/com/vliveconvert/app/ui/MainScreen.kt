@@ -14,7 +14,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +79,7 @@ import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -229,18 +233,28 @@ fun MainScreen(
         AnimatedContent(
             targetState = statusText,
             transitionSpec = {
-                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 3 })
-                    .togetherWith(fadeOut(tween(150)))
+                (fadeIn(tween(200, easing = EaseOutStrong)) +
+                    slideInVertically(tween(200, easing = EaseOutStrong)) { it / 3 })
+                    .togetherWith(fadeOut(tween(130)))
             },
             label = "statusSummary"
         ) { text ->
             if (text.isNotEmpty()) {
+                val statusInteraction = remember { MutableInteractionSource() }
+                val statusPressed by statusInteraction.collectIsPressedAsState()
+                // 整行无涟漪：按下让文字整行轻微变淡，松手即复原（90ms 内完成）
+                val statusAlpha by animateFloatAsState(
+                    targetValue = if (statusPressed) 0.55f else 1f,
+                    animationSpec = tween(90),
+                    label = "statusRowPress"
+                )
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .graphicsLayer { alpha = statusAlpha }
                         // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
                         .minimumInteractiveComponentSize()
-                        .clickableNoRipple(onShowStatusDetail)
+                        .clickableNoRipple(onShowStatusDetail, statusInteraction)
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -295,10 +309,11 @@ fun MainScreen(
             AnimatedContent(
                 targetState = items.isEmpty(),
                 transitionSpec = {
-                    (fadeIn(tween(260)) + scaleIn(
-                        initialScale = 0.96f, animationSpec = tween(260))) togetherWith
-                        (fadeOut(tween(200)) + scaleOut(
-                            targetScale = 0.96f, animationSpec = tween(200)))
+                    (fadeIn(tween(240, easing = EaseOutStrong)) + scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = tween(240, easing = EaseOutStrong))) togetherWith
+                        (fadeOut(tween(160)) + scaleOut(
+                            targetScale = 0.96f, animationSpec = tween(160)))
                 },
                 label = "emptyListSwitch"
             ) { empty ->
@@ -345,13 +360,13 @@ fun MainScreen(
                 // （无过冲：100% 恒为 100%；新批次归零时快速泄回，读作"重置"）
                 val shownProgress by animateFloatAsState(
                     targetValue = progress,
-                    animationSpec = spring(stiffness = 240f, dampingRatio = 1f),
+                    animationSpec = spring(stiffness = 360f, dampingRatio = 1f),
                     label = "shownProgress"
                 )
                 AnimatedContent(
                     targetState = if (isConverting) 2 else if (finishedBeat) 1 else 0,
                     transitionSpec = {
-                        (fadeIn(tween(220)) togetherWith fadeOut(tween(180))) using
+                        (fadeIn(tween(200, easing = EaseOutStrong)) togetherWith fadeOut(tween(150))) using
                             SizeTransform(clip = false)
                     },
                     label = "bottomBar"
@@ -385,9 +400,18 @@ fun MainScreen(
                             )
                             Spacer(Modifier.height(10.dp))
                             if (barState == 2) {
+                                val cancelInteraction = remember { MutableInteractionSource() }
+                                val cancelScale = rememberPressScale(cancelInteraction)
                                 OutlinedButton(
                                     onClick = onCancelConvert,
-                                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                                    interactionSource = cancelInteraction,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(46.dp)
+                                        .graphicsLayer {
+                                            scaleX = cancelScale.value
+                                            scaleY = cancelScale.value
+                                        }
                                 ) { Text("取消转换") }
                             } else {
                                 // 完成节拍：留一块与取消键等高的空位，
@@ -426,9 +450,17 @@ fun MainScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 // 添加收窄为方形图标按钮（空态中央已有大 ＋，列表头也有「清空」，
                                 // 图标足够达意），横向空间让给主操作——主次更分明
+                                val addInteraction = remember { MutableInteractionSource() }
+                                val addScale = rememberPressScale(addInteraction)
                                 OutlinedButton(
                                     onClick = onAddMore,
-                                    modifier = Modifier.size(48.dp),
+                                    interactionSource = addInteraction,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .graphicsLayer {
+                                            scaleX = addScale.value
+                                            scaleY = addScale.value
+                                        },
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
                                     Icon(
@@ -437,12 +469,21 @@ fun MainScreen(
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
+                                val startInteraction = remember { MutableInteractionSource() }
+                                val startScale = rememberPressScale(startInteraction)
                                 Button(
                                     onClick = onStartConvert,
+                                    interactionSource = startInteraction,
                                     // 不置灰：置灰的主按钮点下去连 onClick 都不派发，
                                     // 界面也没有一处解释「为什么按不动」——用户视角就是「点了没反应」。
                                     // 让 startConvert() 里那句原本走不到的提示替它说话
-                                    modifier = Modifier.weight(1f).height(48.dp)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .graphicsLayer {
+                                            scaleX = startScale.value
+                                            scaleY = startScale.value
+                                        }
                                 ) {
                                     Icon(
                                         Icons.Filled.PlayArrow,
@@ -471,13 +512,23 @@ private fun EmptyState(onAdd: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 中央大 + 号：用户的第一反应就是点它，必须真的能点（点按有涟漪反馈）
+        // 中央大 + 号：用户的第一反应就是点它，必须真的能点（涟漪 + 按压缩放）
+        val addInteraction = remember { MutableInteractionSource() }
+        val addScale by rememberPressScale(addInteraction, pressedScale = 0.94f)
         Box(
             Modifier
                 .size(84.dp)
+                .graphicsLayer {
+                    scaleX = addScale
+                    scaleY = addScale
+                }
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer)
-                .clickable(onClick = onAdd),
+                .clickable(
+                    interactionSource = addInteraction,
+                    indication = LocalIndication.current,
+                    onClick = onAdd
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -536,10 +587,13 @@ private fun ConvertItemRow(
 
     // v1.8.9 失败抖动：状态**翻转到**失败的一瞬间左右轻抖（三次衰减），红色底色同步淡入。
     // 必须对比上一态：恢复队列里本来就有失败项时，首组合不得抖（v1.9.0 修）
+    val hapticView = LocalView.current
     var prevFailed by remember(ci.item.key) { mutableStateOf(ci.failed) }
     val shakeX = remember { Animatable(0f) }
     LaunchedEffect(ci.failed) {
         if (ci.failed && !prevFailed) {
+            // 多模态：与抖动同帧的失败触觉（因果明确、仅在失败瞬间给一次）
+            hapticView.performHapticFeedback(android.view.HapticFeedbackConstants.REJECT)
             for (d in listOf(-10f, 10f, -7f, 7f, -3f, 0f)) {
                 shakeX.snapTo(d)
                 delay(45)
@@ -551,6 +605,8 @@ private fun ConvertItemRow(
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart && !busy) {
+                // 提交瞬间的触觉「到位感」；撤销条随后出现，失败可撤销
+                hapticView.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
                 onRemove()
                 true
             } else {
@@ -603,7 +659,7 @@ private fun ConvertItemRow(
                     val ringAngle by rememberInfiniteTransition(label = "ring").animateFloat(
                         initialValue = 0f, targetValue = 360f,
                         animationSpec = infiniteRepeatable(
-                            tween(1100, easing = LinearEasing)), label = "ringAngle"
+                            tween(900, easing = LinearEasing)), label = "ringAngle"
                     )
                     Canvas(
                         Modifier
