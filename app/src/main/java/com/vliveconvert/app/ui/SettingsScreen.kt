@@ -377,13 +377,19 @@ private fun ToolValueCard(
     ) {
         // onSurface 而非 onSurfaceVariant：后者与副标题同色会「融」进说明；
         // 也不能用 primary——在卡片底色上仅 4.40:1，低于正文 AA。onSurface ≈14:1
+        //
+        // 值列宽度随字号收缩：标题「输出目录」是 4 个汉字，2× 字号需要约 112dp，
+        // 而 360dp 窄屏卡片内只有约 218dp 可分配——固定 150dp 会把标题挤成竖排。
+        // 正常字号仍是 150dp，路径显示与旧版一致。
+        val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+        val valueWidth = (218f - 60f * fontScale).coerceIn(96f, 150f).dp
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(150.dp)
+            modifier = Modifier.width(valueWidth)
         )
         Spacer(Modifier.width(2.dp))
         ChevronRight()

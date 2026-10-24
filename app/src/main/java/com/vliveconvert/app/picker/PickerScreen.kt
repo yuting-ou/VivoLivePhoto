@@ -56,13 +56,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.MediaThumbnail
+import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateKey
 import com.vliveconvert.app.ui.dateLabel
 import kotlinx.coroutines.CoroutineScope
@@ -102,6 +103,14 @@ fun PickerScreen(
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
+    // 选择查询表：每个格子/日期头若都线性扫 selected，八千张规模就是 O(n²)；
+    // 真机全选 8550 张会把主线程打到 ANR。派生一次、全局 O(1) 查询。
+    val selectedIds by remember {
+        derivedStateOf { selected.mapTo(HashSet(selected.size)) { it.id } }
+    }
+    val selectedIndex by remember {
+        derivedStateOf { selected.withIndex().associate { it.value.id to it.index } }
+    }
 
     // 进入/离开相册：进入 diff+续扫，离开取消（保留进度）
     DisposableEffect(bucketId) {
@@ -136,17 +145,21 @@ fun PickerScreen(
 
     // 单项选择切换（追加到末尾，序号递增）
     val toggleItem: (MediaItem) -> Unit = { item ->
-        val idx = selected.indexOfFirst { it.id == item.id }
-        if (idx >= 0) selected.removeAt(idx) else selected.add(item)
+        val idx = selectedIndex[item.id]
+        if (idx != null) selected.removeAt(idx) else selected.add(item)
     }
     // 成组选择切换（日期栏/全选）：组内全选 → 全部取消；否则按传入顺序补齐未选
     val toggleGroup: (List<MediaItem>) -> Unit = { group ->
-        val ids = group.map { it.id }.toSet()
-        val allIn = group.isNotEmpty() && group.all { g -> selected.any { it.id == g.id } }
-        if (allIn) {
-            selected.removeAll { it.id in ids }
-        } else {
-            for (g in group) if (selected.none { it.id == g.id }) selected.add(g)
+        if (group.isNotEmpty()) {
+            if (group.all { it.id in selectedIds }) {
+                val ids = group.mapTo(HashSet(group.size)) { it.id }
+                selected.removeAll { it.id in ids }
+            } else {
+                // 一次 addAll：逐张 add 会触发 N 次快照通知与重组，
+                // 是「全选九千张」卡死的放大器
+                val toAdd = group.filter { it.id !in selectedIds }
+                if (toAdd.isNotEmpty()) selected.addAll(toAdd)
+            }
         }
     }
 
@@ -216,18 +229,26 @@ fun PickerScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.weight(1f))
-            val allSel = n > 0 && displayOrder.all { g -> selected.any { it.id == g.id } }
-            val someSel = displayOrder.any { g -> selected.any { it.id == g.id } }
-            Text("全选", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.size(4.dp))
-            CircleTriCheckbox(
-                state = when {
-                    allSel -> ToggleableState.On
-                    someSel -> ToggleableState.Indeterminate
-                    else -> ToggleableState.Off
-                },
-                onClick = { if (n > 0) toggleGroup(displayOrder) }
-            )
+            val allSel = n > 0 && displayOrder.all { it.id in selectedIds }
+            val someSel = displayOrder.any { it.id in selectedIds }
+            // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("全选", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.size(4.dp))
+                CircleTriCheckbox(
+                    state = when {
+                        allSel -> ToggleableState.On
+                        someSel -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
+                    },
+                    onClick = { if (n > 0) toggleGroup(displayOrder) }
+                )
+            }
         }
 
         // ── 缩略图网格（3 列） ──
@@ -258,7 +279,8 @@ fun PickerScreen(
                 else -> AlbumGridPage(
                     bucketId = bucketId,
                     scanner = scanner,
-                    selected = selected,
+                    selectedIds = selectedIds,
+                    selectedIndex = selectedIndex,
                     onToggle = toggleItem,
                     onToggleGroup = toggleGroup,
                     running = running
@@ -299,7 +321,8 @@ fun PickerScreen(
 private fun AlbumGridPage(
     bucketId: Long?,
     scanner: PickerScanner,
-    selected: SnapshotStateList<MediaItem>,
+    selectedIds: Set<Long>,
+    selectedIndex: Map<Long, Int>,
     onToggle: (MediaItem) -> Unit,
     onToggleGroup: (List<MediaItem>) -> Unit,
     running: Boolean
@@ -327,8 +350,8 @@ private fun AlbumGridPage(
     ) {
         for ((dk, groupItems) in groups) {
             stickyHeader(key = "hdr_$dk") {
-                val allSel = groupItems.all { g -> selected.any { it.id == g.id } }
-                val someSel = groupItems.any { g -> selected.any { it.id == g.id } }
+                val allSel = groupItems.all { it.id in selectedIds }
+                val someSel = groupItems.any { it.id in selectedIds }
                 DateHeader(
                     label = dateLabel(groupItems.first().sortTime),
                     checkState = when {
@@ -342,8 +365,8 @@ private fun AlbumGridPage(
             items(groupItems, key = { it.key }) { item ->
                 GridCell(
                     item = item,
-                    selected = selected.any { it.id == item.id },
-                    selectionIndex = selected.indexOfFirst { it.id == item.id },
+                    selected = item.id in selectedIds,
+                    selectionIndex = selectedIndex[item.id] ?: -1,
                     onToggle = { onToggle(item) }
                 )
             }

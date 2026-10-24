@@ -436,7 +436,9 @@ fun MainScreen(
                                         " · 删原图 ${if (deleteOriginal) "开" else "关"}",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
+                                    // 最多两行：2× 字号下单行会把「删原图 开/关」省略掉，
+                                    // 而这是安全状态，不能被截断（正常字号仍是一行）
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )

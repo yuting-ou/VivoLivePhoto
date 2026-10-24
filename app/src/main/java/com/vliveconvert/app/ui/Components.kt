@@ -15,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,7 +23,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -48,10 +52,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -337,5 +349,69 @@ fun dateLabel(time: Long): String {
             "${cal.get(Calendar.MONTH) + 1}月${cal.get(Calendar.DAY_OF_MONTH)}日"
         else ->
             "${cal.get(Calendar.YEAR)}年${cal.get(Calendar.MONTH) + 1}月${cal.get(Calendar.DAY_OF_MONTH)}日"
+    }
+}
+
+/**
+ * 与应用一致的撤销条（替代 M3 默认的反相近黑 Snackbar）：
+ * 默认反相色在莫奈浅色主题里像一块黑砖，与卡片体系割裂；
+ * 这里改用 surfaceContainerHigh 浮层 + 细描边 + 阴影，动作色用 primary。
+ */
+@Composable
+fun ThemedSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
+    SnackbarHost(hostState, modifier) { data -> ThemedSnackbar(data) }
+}
+
+/** 单条撤销条本体（拆出便于截图预览与复用） */
+@Composable
+fun ThemedSnackbar(
+    snackbarData: androidx.compose.material3.SnackbarData,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(14.dp)
+    // 自绘而不是套 M3 Snackbar：后者的默认皮肤会在布局边界内再缩进一层，
+    // 从外面加描边/阴影总会露出「双层壳」；这里直接用应用卡片同款 Surface
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 8.dp,
+        border = BorderStroke(
+            1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    ) {
+        Row(
+            Modifier
+                .heightIn(min = 48.dp)
+                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                snackbarData.visuals.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            snackbarData.visuals.actionLabel?.let { label ->
+                InlineTextButton(
+                    text = label,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    onClick = { snackbarData.performAction() },
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            if (snackbarData.visuals.withDismissAction) {
+                IconButton(onClick = { snackbarData.dismiss() }) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "关闭",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
     }
 }

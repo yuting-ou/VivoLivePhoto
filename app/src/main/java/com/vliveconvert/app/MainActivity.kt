@@ -46,7 +46,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Button
@@ -84,12 +83,14 @@ import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.ConvertService
 import com.vliveconvert.app.service.Preflight
+import com.vliveconvert.app.service.mergeClearedUndo
 import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
+import com.vliveconvert.app.ui.ThemedSnackbarHost
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -913,11 +914,7 @@ class MainActivity : ComponentActivity() {
                                 onCancelConvert = { cancelConvert() },
                                 onAddMore = { openBuiltInPicker() },
                                 onStartConvert = { startConvert() },
-                                onClearAll = {
-                                    ConvertCenter.items.clear()
-                                    ConvertCenter.clearQueue(applicationContext)
-                                    ConvertCenter.statusText = "已清空"
-                                },
+                                onClearAll = { clearAllWithUndo() },
                                 onRemove = { ci -> removeItemWithUndo(ci) }
                             )
                         }
@@ -1007,7 +1004,7 @@ class MainActivity : ComponentActivity() {
                     // 移除撤销条（Gmail 式）：滑动/按钮移除后 4 秒内可撤销。
                     // bottom 抬高到底栏按钮上方——主界面底栏常驻（输出信息 + 开始转换），
                     // 贴底会被按钮压住半截
-                    SnackbarHost(
+                    ThemedSnackbarHost(
                         hostState = snackbarHostState,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -1452,16 +1449,24 @@ class MainActivity : ComponentActivity() {
             ConvertCenter.statusText = "先勾选要添加的照片"
             return
         }
-        var added = 0
-        for (item in picked) {
-            if (ConvertCenter.items.any { it.item.id == item.id }) continue
-            ConvertCenter.items.add(ConvertItem(item = item))
-            added++
-        }
-        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+        // 去重用 id 集合 + 一次 addAll：逐张 `items.any` 在八千张规模是 O(n²)，
+        // 真机全选 8550 张后点「添加」会卡到 ANR（Input dispatching timed out）
+        val existing = ConvertCenter.items.mapTo(HashSet(ConvertCenter.items.size)) { it.item.id }
+        val toAdd = picked.asSequence()
+            .filter { it.id !in existing }
+            .distinctBy { it.id }
+            .map { ConvertItem(item = it) }
+            .toList()
+        if (toAdd.isNotEmpty()) ConvertCenter.items.addAll(toAdd)
+        val added = toAdd.size
+        val snapshot = ConvertCenter.itemsSnapshot()
         ConvertCenter.statusText = if (added > 0)
             "已添加 $added 张，共 ${ConvertCenter.items.size} 张待转换"
         else "所选照片已在列表中"
+        // 队列 JSON 序列化不上主线程：8550 条约 2MB，足够把输入派发拖过 5 秒
+        lifecycleScope.launch(Dispatchers.IO) {
+            ConvertCenter.persistQueue(applicationContext, snapshot)
+        }
     }
 
     // ---------- 转换 ----------
@@ -2016,6 +2021,35 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 从转换列表移除一项，并给出 4 秒撤销窗口（滑动与行内按钮共用） */
+    /**
+     * 清空待转换列表（Gmail 式撤销）：清空不是删照片，但重扫 18k 相册要十几秒，
+     * 误触后没有后悔药比单个移除更痛。快照列表与落盘队列，Long 窗口内可原位恢复。
+     * 转换中列表头不显示「清空」，故不存在撤销与在跑批次抢队列的情况。
+     */
+    private fun clearAllWithUndo() {
+        val snapshot = ConvertCenter.itemsSnapshot()
+        if (snapshot.isEmpty()) return
+        ConvertCenter.items.clear()
+        ConvertCenter.clearQueue(applicationContext)
+        ConvertCenter.statusText = "已清空"
+        lifecycleScope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "已清空 ${snapshot.size} 张",
+                actionLabel = "撤销",
+                withDismissAction = true,
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed && !ConvertCenter.isConverting) {
+                val merged = mergeClearedUndo(snapshot, ConvertCenter.itemsSnapshot())
+                val restored = merged.size - ConvertCenter.items.size
+                ConvertCenter.items.clear()
+                ConvertCenter.items.addAll(merged)
+                ConvertCenter.persistQueue(applicationContext, merged)
+                ConvertCenter.statusText = "已恢复 $restored 张"
+            }
+        }
+    }
+
     private fun removeItemWithUndo(ci: ConvertItem) {
         val index = ConvertCenter.items.indexOfFirst { it.item.key == ci.item.key }
         if (index < 0) return

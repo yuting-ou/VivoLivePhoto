@@ -239,3 +239,13 @@ internal fun mergeRestored(
     parsed: List<ConvertItem>,
     current: List<ConvertItem>
 ): List<ConvertItem> = current + parsed.filter { p -> current.none { it.item.id == p.item.id } }
+
+/**
+ * 「清空」撤销时的合并（纯函数，可 JVM 单测）：
+ * 清空快照排在前（恢复原顺序），清空后新加入的条目保持在后；
+ * 同一照片在两边都出现时只保留当前条目——撤销不能回退用户刚加进来的状态。
+ */
+internal fun mergeClearedUndo(
+    cleared: List<ConvertItem>,
+    current: List<ConvertItem>
+): List<ConvertItem> = cleared.filter { c -> current.none { it.item.id == c.item.id } } + current
