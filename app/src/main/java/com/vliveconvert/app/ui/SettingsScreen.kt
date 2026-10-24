@@ -34,13 +34,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -74,29 +77,24 @@ fun SettingsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .glassWallpaper()
     ) {
         // ── 顶栏 ──
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .statusBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .padding(start = 14.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            Text(
-                "设置",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
+            GlassIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "返回",
+                onClick = onBack,
+                size = 38.dp
             )
+            Spacer(Modifier.width(10.dp))
+            Text("设置", style = glassTitleStyle())
         }
 
         // 设置页的动作反馈就地显示——v1.7.20 前反馈只写主页状态栏，
@@ -104,11 +102,10 @@ fun SettingsScreen(
         if (statusText.isNotEmpty()) {
             Text(
                 statusText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = glassRowSubStyle(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 20.dp, vertical = 6.dp)
             )
         }
 
@@ -117,7 +114,7 @@ fun SettingsScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 20.dp)
                 // 边到边显示下，滚动内容底部会与系统导航栏重叠，最后一行无法滚出遮挡区
                 .navigationBarsPadding()
         ) {
@@ -125,106 +122,116 @@ fun SettingsScreen(
 
             // ── 输出 ──
             SectionLabel("输出")
-            ToolValueCard(
-                icon = Icons.Filled.Home,
-                title = "输出目录",
-                subtitle = "保存位置",
-                value = outputRelPath,
-                onClick = onEditOutputPath
-            )
+            GlassCard(radius = 24.dp) {
+                ToolValueCard(
+                    icon = Icons.Filled.Home,
+                    title = "输出目录",
+                    subtitle = "保存位置",
+                    value = outputRelPath,
+                    onClick = onEditOutputPath
+                )
+            }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             // ── 转换后处理 ──
             SectionLabel("转换后处理")
-            ToolSwitchCard(
-                icon = Icons.AutoMirrored.Filled.ArrowForward,
-                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
-                title = "移到相机相册",
-                subtitle = "写入相机相册，删原图时可免序号",
-                checked = moveToCamera,
-                enabled = !isBusy,
-                onToggle = onToggleMoveToCamera
-            )
-            Spacer(Modifier.height(8.dp))
-            ToolSwitchCard(
-                icon = Icons.Filled.Delete,
-                title = "删除原图",
-                subtitle = "删除原 .jpg 与伴生 .mp4（可恢复）",
-                checked = deleteOriginal,
-                enabled = !isBusy,
-                onToggle = onToggleDeleteOriginal
-            )
+            GlassCard(radius = 24.dp) {
+                ToolSwitchCard(
+                    icon = Icons.AutoMirrored.Filled.ArrowForward,
+                    iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
+                    title = "移到相机相册",
+                    subtitle = "写入相机相册，删原图时可免序号",
+                    checked = moveToCamera,
+                    enabled = !isBusy,
+                    onToggle = onToggleMoveToCamera
+                )
+                GlassDivider(startInset = 53.dp)
+                ToolSwitchCard(
+                    icon = Icons.Filled.Delete,
+                    title = "删除原图",
+                    subtitle = "删除原 .jpg 与伴生 .mp4（可恢复）",
+                    checked = deleteOriginal,
+                    enabled = !isBusy,
+                    onToggle = onToggleDeleteOriginal
+                )
+            }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             // ── 外观 ──
             SectionLabel("外观")
-            ToolSwitchCard(
-                icon = Icons.Filled.Star,
-                iconOffset = androidx.compose.ui.unit.DpOffset(0.dp, 0.5.dp),
-                title = "跟随系统取色（莫奈）",
-                subtitle = "用壁纸配色替换固定品牌蓝；关闭则回到品牌蓝",
-                checked = dynamicColor,
-                enabled = true,
-                onToggle = onToggleDynamicColor
-            )
+            GlassCard(radius = 24.dp) {
+                ToolSwitchCard(
+                    icon = Icons.Filled.Star,
+                    iconOffset = androidx.compose.ui.unit.DpOffset(0.dp, 0.5.dp),
+                    title = "跟随系统取色（莫奈）",
+                    subtitle = "用壁纸配色替换固定品牌蓝；关闭则回到品牌蓝",
+                    checked = dynamicColor,
+                    enabled = true,
+                    onToggle = onToggleDynamicColor
+                )
+            }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // ── 工具 ──（v2.0.5 卡片化：图标 + 一句说明，让每个工具做什么一眼可见）
+            // ── 工具 ──
             SectionLabel("工具")
-            ToolCard(
-                icon = Icons.Filled.DateRange,
-                title = "修复文件时间",
-                subtitle = "按拍摄时间校正已导出文件的「修改时间」",
-                onClick = onOpenFixTime
-            )
-            Spacer(Modifier.height(8.dp))
-            ToolCard(
-                icon = Icons.Filled.Place,
-                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
-                title = "重建位置显示",
-                subtitle = "让历史转换的照片在相册里显示拍摄位置",
-                onClick = onRepairLocationDisplay,
-                enabled = !isBusy
-            )
-            Spacer(Modifier.height(8.dp))
-            ToolCard(
-                icon = Icons.AutoMirrored.Filled.ArrowForward,
-                iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
-                title = "把输出移到相机相册",
-                subtitle = "把其它目录里的转换产物搬进 DCIM/Camera",
-                onClick = onMoveOutputsToCamera,
-                enabled = !isBusy
-            )
-            Spacer(Modifier.height(8.dp))
-            ToolCard(
-                icon = Icons.Filled.Share,
-                title = "导出崩溃日志（$crashLogCount）",
-                subtitle = "导出到 Download/VLiveConvert 供排查",
-                onClick = onExportCrashLogs,
-                tint = MaterialTheme.colorScheme.error
-            )
-            Spacer(Modifier.height(8.dp))
-            ToolCard(
-                icon = Icons.Filled.Delete,
-                title = "清空崩溃日志",
-                subtitle = "删除全部本地崩溃日志（不可恢复）",
-                onClick = onClearCrashLogs,
-                enabled = crashLogCount > 0
-            )
+            GlassCard(radius = 24.dp) {
+                ToolCard(
+                    icon = Icons.Filled.DateRange,
+                    title = "修复文件时间",
+                    subtitle = "按拍摄时间校正已导出文件的「修改时间」",
+                    onClick = onOpenFixTime
+                )
+                GlassDivider(startInset = 53.dp)
+                ToolCard(
+                    icon = Icons.Filled.Place,
+                    iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
+                    title = "重建位置显示",
+                    subtitle = "让历史转换的照片在相册里显示拍摄位置",
+                    onClick = onRepairLocationDisplay,
+                    enabled = !isBusy
+                )
+                GlassDivider(startInset = 53.dp)
+                ToolCard(
+                    icon = Icons.AutoMirrored.Filled.ArrowForward,
+                    iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
+                    title = "把输出移到相机相册",
+                    subtitle = "把其它目录里的转换产物搬进 DCIM/Camera",
+                    onClick = onMoveOutputsToCamera,
+                    enabled = !isBusy
+                )
+                GlassDivider(startInset = 53.dp)
+                ToolCard(
+                    icon = Icons.Filled.Share,
+                    title = "导出崩溃日志（$crashLogCount）",
+                    subtitle = "导出到 Download/VLiveConvert 供排查",
+                    onClick = onExportCrashLogs,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                GlassDivider(startInset = 53.dp)
+                ToolCard(
+                    icon = Icons.Filled.Delete,
+                    title = "清空崩溃日志",
+                    subtitle = "删除全部本地崩溃日志（不可恢复）",
+                    onClick = onClearCrashLogs,
+                    enabled = crashLogCount > 0
+                )
+            }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // ── 关于 ──（GPL-3.0 合规：许可证文本随包内置，可在应用内查看）
+            // ── 关于 ──
             SectionLabel("关于")
-            ToolCard(
-                icon = Icons.Filled.Info,
-                title = "关于与开源许可",
-                subtitle = "版本信息与 GPL-3.0 许可证全文",
-                onClick = onOpenAbout
-            )
+            GlassCard(radius = 24.dp) {
+                ToolCard(
+                    icon = Icons.Filled.Info,
+                    title = "关于与开源许可",
+                    subtitle = "版本信息与 GPL-3.0 许可证全文",
+                    onClick = onOpenAbout
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
 
@@ -244,10 +251,8 @@ fun SettingsScreen(
 private fun SectionLabel(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        // start=0：实测标签墨迹曾比卡片左缘右缩 4.7dp（62px vs 48px@3x），收齐到 16dp 竖线
-        modifier = Modifier.padding(start = 0.dp, bottom = 6.dp)
+        style = glassSectionLabelStyle(),
+        modifier = Modifier.padding(start = 4.dp, bottom = 7.dp)
     )
 }
 
@@ -266,49 +271,45 @@ private fun ToolCardShell(
     onClick: (() -> Unit)? = null,
     trailing: @Composable () -> Unit
 ) {
-    val base = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(14.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerLow)
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressScale = rememberPressScale(interaction, pressedScale = 0.98f)
+    val pressScale = rememberPressScale(interaction, pressedScale = 0.985f)
     Row(
-        (if (onClick != null) {
-            base.clickable(
-                interactionSource = interaction,
-                indication = androidx.compose.foundation.LocalIndication.current,
-                onClick = onClick
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = androidx.compose.foundation.LocalIndication.current,
+                        onClick = onClick
+                    )
+                } else Modifier
             )
-        } else base)
             .graphicsLayer {
                 scaleX = pressScale.value
                 scaleY = pressScale.value
             }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(iconTint.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
+        // 玻璃圆钮 + 彩色字形：不再是 iOS 16 的实色小方块
+        GlassCircle(size = 30.dp, tint = iconTint) {
             Icon(
                 icon, contentDescription = null, tint = iconTint,
                 modifier = Modifier
                     .offset(x = iconOffset.x, y = iconOffset.y)
-                    .size(22.dp)
+                    .size(16.dp)
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = titleColor)
-            Spacer(Modifier.height(2.dp))
+            Text(title, style = glassRowTitleStyle(), color = titleColor)
+            Spacer(Modifier.height(1.dp))
             Text(
                 subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = glassRowSubStyle(),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(Modifier.width(8.dp))
@@ -359,7 +360,29 @@ private fun ToolSwitchCard(
         iconOffset = iconOffset,
         onClick = if (enabled) ({ onToggle(!checked) }) else null
     ) {
-        Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+        // iOS 式开关：白色滑块 + 饱和轨道。
+        // 深色主题的 primary 是浅薰衣草色，白滑块会糊在轨道上，故轨道改用 primaryContainer
+        val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+        val track = if (dark) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.primary
+        Switch(
+            checked = checked,
+            onCheckedChange = onToggle,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = track,
+                checkedBorderColor = Color.Transparent,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                uncheckedBorderColor = Color.Transparent,
+                disabledCheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                disabledCheckedTrackColor = track.copy(alpha = 0.5f),
+                disabledUncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                disabledUncheckedTrackColor =
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+            )
+        )
     }
 }
 

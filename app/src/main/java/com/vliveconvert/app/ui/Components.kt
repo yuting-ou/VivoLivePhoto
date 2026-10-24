@@ -64,6 +64,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -202,9 +207,13 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
 fun CircleTriCheckbox(
     state: ToggleableState,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    contentDescription: String? = null
 ) {
-    val borderColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // 玻璃语言：未选是半透明深灰细环，选中/半选是白色折射环，不再用 2dp 黑圈
+    val borderColor = if (state == ToggleableState.Off)
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f)
+    else Color.White.copy(alpha = 0.55f)
     val fillColor = MaterialTheme.colorScheme.primary
     val checkColor = MaterialTheme.colorScheme.onPrimary
     val interactionSource = remember { MutableInteractionSource() }
@@ -217,14 +226,21 @@ fun CircleTriCheckbox(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null
-            ) { onClick?.invoke() },
+            ) { onClick?.invoke() }
+            .semantics {
+                role = Role.Checkbox
+                toggleableState = state
+                if (contentDescription != null) this.contentDescription = contentDescription
+            },
         contentAlignment = Alignment.Center
     ) {
         // 视觉圆（26dp，与修复前完全一致）：描边 + 三态图形
         Box(
             Modifier
                 .size(26.dp)
-                .border(2.dp, borderColor, CircleShape),
+                .background(if (state == ToggleableState.Off) Color.White.copy(alpha = 0.18f)
+                            else Color.Transparent, CircleShape)
+                .border(1.5.dp, borderColor, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Canvas(Modifier.size(26.dp)) {

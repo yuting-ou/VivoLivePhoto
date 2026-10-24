@@ -1,7 +1,6 @@
 package com.vliveconvert.app.picker
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -28,6 +27,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,25 +37,29 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -66,19 +70,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
+import com.vliveconvert.app.ui.GlassDivider
+import com.vliveconvert.app.ui.HazeGlassCard
+import com.vliveconvert.app.ui.glassHazeSource
+import com.vliveconvert.app.ui.glassSurface
+import com.vliveconvert.app.ui.glassWallpaper
+import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateKey
@@ -101,6 +117,7 @@ fun PickerScreen(
     onConfirm: (List<MediaItem>) -> Unit
 ) {
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
+    var showAlbumMenu by remember { mutableStateOf(false) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
     // 选择查询表：每个格子/日期头若都线性扫 selected，八千张规模就是 O(n²)；
@@ -163,213 +180,305 @@ fun PickerScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // ── 顶栏 ──
+    val hazeState = rememberGlassHazeState()
+    val density = LocalDensity.current
+    // 初始给一个估值，卡片测量后校正；避免首帧网格从顶部跳下来
+    var headerHeight by remember { mutableStateOf(104.dp) }
+    var dateCapsuleHeight by remember { mutableStateOf(56.dp) }
+
+    val gridState = remember(bucketId) { LazyGridState() }
+    // 日期胶囊：跟随第一个可见照片的日期，始终停在导航下方，不用再把日期条塞进网格
+    val groupedByDate = remember(displayOrder) { displayOrder.groupBy { dateKey(it.sortTime) } }
+    val currentDateKey by remember(displayOrder, gridState) {
+        derivedStateOf {
+            displayOrder.getOrNull(gridState.firstVisibleItemIndex)?.let { dateKey(it.sortTime) }
+        }
+    }
+    val currentGroup = currentDateKey?.let { groupedByDate[it] }.orEmpty()
+    val showDateCapsule = currentGroup.isNotEmpty()
+    LaunchedEffect(showDateCapsule) {
+        if (!showDateCapsule) dateCapsuleHeight = 0.dp
+    }
+    val dateInset = if (showDateCapsule) dateCapsuleHeight + 8.dp else 0.dp
+
+    Box(Modifier.fillMaxSize()) {
+        // 壁纸 + 网格是 Haze 的采样源；浮动导航不在源里，
+        // 否则玻璃会把自己也采进背景，形成反馈
+        Box(
+            Modifier
+                .fillMaxSize()
+                .glassWallpaper()
+                .glassHazeSource(hazeState)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            ) {
+                when {
+                    results == null -> Box(
+                        Modifier.fillMaxSize().padding(top = headerHeight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("没有可用相册", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    results.isEmpty() && !running -> Column(
+                        Modifier.fillMaxSize()
+                            .padding(top = headerHeight + 14.dp, bottom = 48.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("没有找到双文件实况照片", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text("拍摄时请保持相机的「实况」开关开启",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    else -> AlbumGridPage(
+                        orderedItems = displayOrder,
+                        gridState = gridState,
+                        selectedIds = selectedIds,
+                        selectedIndex = selectedIndex,
+                        onToggle = toggleItem,
+                        running = running,
+                        contentPadding = PaddingValues(
+                            top = headerHeight + dateInset + 14.dp, bottom = 10.dp)
+                    )
+                }
+            }
+        }
+
+        // ── 悬浮玻璃导航：取消 / 标题（点按切换相册）/ 添加 + 全选工具行 ──
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp)
         ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
+            HazeGlassCard(
+                hazeState = hazeState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coords ->
+                        val h = with(density) { coords.size.height.toDp() }
+                        if (h != headerHeight) headerHeight = h
+                    },
+                radius = 28.dp,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("选择双文件实况", style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("仅显示 .jpg + .mp4 成对的双文件实况照片",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            // 相册 chip 横滑条
-            if (albums.size > 1) {
-                LazyRow(
-                    Modifier.padding(vertical = 8.dp),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    items(albums, key = { it.bucketId }) { album ->
-                        AlbumChip(
-                            album = album,
-                            selected = album.bucketId == bucketId,
-                            onClick = { currentBucketId = album.bucketId }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "取消",
+                            style = TextStyle(fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .clickableNoRipple(onBack)
+                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                        )
+                        Spacer(Modifier.weight(1f))
+                        val primary = MaterialTheme.colorScheme.primary
+                        Box(
+                            Modifier
+                                .heightIn(min = 32.dp)
+                                .clip(CircleShape)
+                                .shadow(10.dp, CircleShape, clip = false,
+                                    ambientColor = primary.copy(alpha = 0.35f),
+                                    spotColor = primary.copy(alpha = 0.28f))
+                                .background(Brush.verticalGradient(listOf(
+                                    lerp(primary, Color.White, 0.18f), primary)))
+                                .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
+                                .clickable { onConfirm(selected.toList()) }
+                                .padding(horizontal = 14.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("添加", style = TextStyle(fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimary))
+                        }
+                    }
+                    Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
+                        val albumName = albums.firstOrNull { it.bucketId == bucketId }?.name
+                            ?: "相册"
+                        val count = results?.size ?: 0
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickableNoRipple(onClick = {
+                                if (albums.size > 1) showAlbumMenu = true
+                            })
+                        ) {
+                            Text("选择照片", style = TextStyle(fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "$albumName · $count 张",
+                                    style = TextStyle(fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
+                                if (albums.size > 1) {
+                                    Icon(Icons.Filled.KeyboardArrowDown, null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                        DropdownMenu(expanded = showAlbumMenu,
+                            onDismissRequest = { showAlbumMenu = false }) {
+                            albums.forEach { album ->
+                                DropdownMenuItem(
+                                    text = { Text("${album.name} · ${album.count} 张") },
+                                    onClick = {
+                                        currentBucketId = album.bucketId
+                                        showAlbumMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                GlassDivider()
+                Spacer(Modifier.height(4.dp))
+                // ── 工具行：张数（左） + 已选 + 全选（右） ──
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (running) "扫描中 ${progress.first}/$total"
+                        else "${results?.size ?: 0} 张双文件实况",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    )
+                    // 选中计数必须是独立文本节点：批量选择测试与无障碍朗读都按它验收
+                    if (selected.isNotEmpty()) {
+                        Text("已选 ${selected.size} 张", fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.size(12.dp))
+                    }
+                    val allSel = n > 0 && displayOrder.all { it.id in selectedIds }
+                    val someSel = displayOrder.any { it.id in selectedIds }
+                    // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("全选", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.size(4.dp))
+                        CircleTriCheckbox(
+                            state = when {
+                                allSel -> ToggleableState.On
+                                someSel -> ToggleableState.Indeterminate
+                                else -> ToggleableState.Off
+                            },
+                            onClick = { if (n > 0) toggleGroup(displayOrder) }
                         )
                     }
                 }
-            }
-
-            // 扫描进度条
-            AnimatedVisibility(visible = running) {
-                LinearProgressIndicator(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        }
-
-        // ── 工具行：张数（左） + 全选（右） ──
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                if (running) "扫描中 ${progress.first}/$total" else "${results?.size ?: 0} 张双文件实况",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.weight(1f))
-            val allSel = n > 0 && displayOrder.all { it.id in selectedIds }
-            val someSel = displayOrder.any { it.id in selectedIds }
-            // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("全选", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.size(4.dp))
-                CircleTriCheckbox(
-                    state = when {
-                        allSel -> ToggleableState.On
-                        someSel -> ToggleableState.Indeterminate
-                        else -> ToggleableState.Off
-                    },
-                    onClick = { if (n > 0) toggleGroup(displayOrder) }
-                )
-            }
-        }
-
-        // ── 缩略图网格（3 列） ──
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-            when {
-                results == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("没有可用相册", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                results.isEmpty() && !running -> Column(
-                    Modifier.fillMaxSize().padding(bottom = 48.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        Icons.Filled.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("没有找到双文件实况照片", style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (running) {
                     Spacer(Modifier.height(4.dp))
-                    Text("拍摄时请保持相机的「实况」开关开启",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(
+                        Modifier.fillMaxWidth().height(3.dp).clip(CircleShape)
+                    )
                 }
-                else -> AlbumGridPage(
-                    bucketId = bucketId,
-                    scanner = scanner,
-                    selectedIds = selectedIds,
-                    selectedIndex = selectedIndex,
-                    onToggle = toggleItem,
-                    onToggleGroup = toggleGroup,
-                    running = running
-                )
             }
-        }
-
-        // ── 底部确认栏 ──
-        Surface(tonalElevation = 3.dp) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    if (selected.isEmpty()) "" else "已选 ${selected.size} 张",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = { onConfirm(selected.toList()) }
-                    // 不置灰：一张没勾就点「添加」时由 addPickedItems 说明原因
-                ) { Text("添加") }
+            if (showDateCapsule) {
+                Spacer(Modifier.height(8.dp))
+                val allSel = currentGroup.all { it.id in selectedIds }
+                val someSel = currentGroup.any { it.id in selectedIds }
+                // 药丸按内容收缩，勾选圈紧贴日期；拉满整行会把圈甩到屏幕另一端
+                HazeGlassCard(
+                    hazeState = hazeState,
+                    modifier = Modifier
+                        .onGloballyPositioned { coords ->
+                            val h = with(density) { coords.size.height.toDp() }
+                            if (h != dateCapsuleHeight) dateCapsuleHeight = h
+                        },
+                    radius = 22.dp,
+                    contentPadding = PaddingValues(start = 14.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
+                ) {
+                    Row(
+                        Modifier.heightIn(min = 40.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${dateLabel(currentGroup.first().sortTime)} · ${currentGroup.size} 张",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // fill=false：字号放大后胶囊仍随内容收缩，超宽时截断文字而不是挤出屏幕
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        CircleTriCheckbox(
+                            state = when {
+                                allSel -> ToggleableState.On
+                                someSel -> ToggleableState.Indeterminate
+                                else -> ToggleableState.Off
+                            },
+                            onClick = { toggleGroup(currentGroup) },
+                            contentDescription = "全选 ${dateLabel(currentGroup.first().sortTime)} 的照片"
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * 单个相册的网格页：固定按日期降序分组显示。
- * 日期分组 + 粘性标题；必须先排序取快照再 groupBy 归组逐组发射
- * （扫描期间流式追加未排序，直接遍历发射会导致 stickyHeader 重复 key 崩溃）。
+ * 单个相册的网格页：只按顺序铺照片。
+ * 日期分组由外层的浮动日期胶囊承担，所以这里不再发 stickyHeader，
+ * 照片可以完整地从导航/日期玻璃下滚过。
  */
 @Composable
 private fun AlbumGridPage(
-    bucketId: Long?,
-    scanner: PickerScanner,
+    orderedItems: List<MediaItem>,
+    gridState: LazyGridState,
     selectedIds: Set<Long>,
     selectedIndex: Map<Long, Int>,
     onToggle: (MediaItem) -> Unit,
-    onToggleGroup: (List<MediaItem>) -> Unit,
-    running: Boolean
+    running: Boolean,
+    contentPadding: PaddingValues = PaddingValues()
 ) {
-    val state = remember(bucketId) { if (bucketId != null) scanner.stateOf(bucketId) else null }
-    val results = state?.results
-
-    if (results == null) return
-
-    // 排序+分组快照缓存：仅列表长度变化时重算。
-    // 扫描期间进度轮询每 200ms 触发重组，不缓存会导致每次都全量排序（千张列表卡顿）。
-    // 注意必须提到 LazyGrid 内容 lambda 之外：该 lambda 非 @Composable 上下文
-    val groups = remember(results, results.size) {
-        results.sortedByDescending { it.sortTime }.groupBy { dateKey(it.sortTime) }
-    }
-
     LazyVerticalGrid(
-        state = rememberLazyGridState(),
+        state = gridState,
         columns = GridCells.Fixed(3),
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 2.dp),
+        contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        for ((dk, groupItems) in groups) {
-            stickyHeader(key = "hdr_$dk") {
-                val allSel = groupItems.all { it.id in selectedIds }
-                val someSel = groupItems.any { it.id in selectedIds }
-                DateHeader(
-                    label = dateLabel(groupItems.first().sortTime),
-                    checkState = when {
-                        allSel -> ToggleableState.On
-                        someSel -> ToggleableState.Indeterminate
-                        else -> ToggleableState.Off
-                    },
-                    onToggleAll = { onToggleGroup(groupItems) }
-                )
-            }
-            items(groupItems, key = { it.key }) { item ->
-                GridCell(
-                    item = item,
-                    selected = item.id in selectedIds,
-                    selectionIndex = selectedIndex[item.id] ?: -1,
-                    onToggle = { onToggle(item) }
-                )
-            }
+        items(orderedItems, key = { it.key }) { item ->
+            GridCell(
+                item = item,
+                selected = item.id in selectedIds,
+                selectionIndex = selectedIndex[item.id] ?: -1,
+                onToggle = { onToggle(item) }
+            )
         }
         // 扫描中：网格底部加载圈
         if (running) {
@@ -434,27 +543,6 @@ private fun AlbumChip(
     }
 }
 
-/** 粘性日期标题：右端圆形三态复选框可全选/取消该日期下所有照片 */
-@Composable
-private fun DateHeader(label: String, checkState: ToggleableState, onToggleAll: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(start = 12.dp, end = 10.dp, top = 2.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
-        )
-        CircleTriCheckbox(state = checkState, onClick = onToggleAll)
-    }
-}
-
 /**
  * 网格单元：勾选徽章在右上角；选中以几何中心缩放 + 圆角增大过渡。
  */
@@ -467,7 +555,7 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
     val scale by transition.animateFloat(label = "scale") { if (it) 0.86f else 1f }
     // 圆角：未选 6dp、选中 16dp；以 0..1 分数动画映射 Dp
     val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
-    val cornerRadius = lerp(6.dp, 16.dp, cornerFraction)
+    val cornerRadius = lerp(10.dp, 16.dp, cornerFraction)
 
     // 徽章背景色：透明→primary（颜色平滑过渡）
     val badgeBg by animateColorAsState(
@@ -536,7 +624,12 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
                     scaleY = badgeScale
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .background(badgeBg, CircleShape),
+                .background(badgeBg, CircleShape)
+                .border(
+                    width = if (selected) 1.dp else 0.dp,
+                    color = Color.White.copy(alpha = 0.55f),
+                    shape = CircleShape
+                ),
             contentAlignment = Alignment.Center
         ) {
             AnimatedContent(
@@ -559,7 +652,7 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
                 if (idx >= 0) {
                     Text(
                         text = "${idx + 1}",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )

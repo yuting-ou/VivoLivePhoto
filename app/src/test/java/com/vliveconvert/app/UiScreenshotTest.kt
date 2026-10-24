@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.vliveconvert.app.picker.AlbumInfo
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
@@ -54,16 +56,18 @@ import java.io.File
  * 产物：app/build/ui-shots/ 目录下的 png 文件
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+@Config(sdk = [34], qualifiers = "w360dp-h792dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UiScreenshotTest {
 
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
 
-    private fun render(content: @Composable () -> Unit) {
+    private fun render(dark: Boolean = false, content: @Composable () -> Unit) {
         // dynamicColor=false：README 截图必须确定性（莫奈取色随壁纸/影子环境而异）
-        compose.setContent { VLiveConvertTheme(dynamicColor = false) { content() } }
+        compose.setContent {
+            VLiveConvertTheme(darkTheme = dark, dynamicColor = false) { content() }
+        }
     }
 
     /**
@@ -102,9 +106,10 @@ class UiScreenshotTest {
         locationMissing: Boolean = false,
         reconvertCount: Int = 0,
         pendingRestoreCount: Int = 0,
-        isConverting: Boolean = false
+        isConverting: Boolean = false,
+        dark: Boolean = false
     ) {
-        render {
+        render(dark) {
             MainScreen(
                 items = items,
                 appName = "影中影",
@@ -174,6 +179,9 @@ class UiScreenshotTest {
                 onFix = {}
             )
         }
+        // 勾选全部：验收选中态单元格 + 底部「已选 N 项」玻璃 Dock
+        compose.onNodeWithText("全选").performClick()
+        compose.waitForIdle()
         shot("fixtime")
     }
 
@@ -474,5 +482,57 @@ class UiScreenshotTest {
             isConverting = true
         )
         shot("main_converting")
+    }
+
+    /** 深色玻璃主界面：同一套玻璃层在暗色主题下的可读性 */
+    @Test
+    fun shotDarkMainWithItems() {
+        mainScreen(
+            items = listOf(
+                ConvertItem(item = item(1, "IMG_20260831_134432.jpg"), status = "待转换"),
+                ConvertItem(item = item(2, "IMG_20260831_140512.jpg"), status = "转换中…"),
+                ConvertItem(item = item(3, "IMG_20260831_141030.jpg"),
+                    status = "完成：已导出到 DCIM/Camera", done = true),
+                ConvertItem(item = item(4, "IMG_20260831_150200.jpg"),
+                    status = "完成：已导出到 DCIM/Camera",
+                    done = true, lostGps = true, outUri = "content://media/external/images/media/9")
+            ),
+            statusText = "转换完成：成功 2 个，失败 0 个（输出目录：DCIM/Camera）",
+            reconvertCount = 1,
+            pendingRestoreCount = 2,
+            dark = true
+        )
+        shot("main_dark")
+    }
+
+    /** 深色玻璃设置页 */
+    @Test
+    fun shotDarkSettings() {
+        render(dark = true) {
+            SettingsScreen(
+                appName = "影中影",
+                versionName = ApplicationProvider.getApplicationContext<VliveApp>()
+                    .packageManager.getPackageInfo("com.yutingou.yingzhongying", 0)
+                    .versionName ?: "",
+                outputRelPath = "Pictures/VLiveConvert",
+                moveToCamera = true,
+                deleteOriginal = true,
+                crashLogCount = 2,
+                isBusy = false,
+                onBack = {},
+                onEditOutputPath = {},
+                onToggleMoveToCamera = {},
+                onToggleDeleteOriginal = {},
+                onRepairLocationDisplay = {},
+                onOpenFixTime = {},
+                onMoveOutputsToCamera = {},
+                onExportCrashLogs = {},
+                onClearCrashLogs = {},
+                dynamicColor = false,
+                onToggleDynamicColor = {},
+                onOpenAbout = {}
+            )
+        }
+        shot("settings_dark")
     }
 }

@@ -59,11 +59,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,6 +103,7 @@ fun FixTimeScreen(
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
+    val hazeState = rememberGlassHazeState()
 
     // 修复完成后清空选择
     LaunchedEffect(selectionReset) {
@@ -154,61 +157,64 @@ fun FixTimeScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // ── 顶栏 ──
+    Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-                .statusBarsPadding()
+                .fillMaxSize()
+                .glassWallpaper()
+                .glassHazeSource(hazeState)
         ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("修复文件时间", style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("按文件名中的拍摄时间修正「修改时间」",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            // 相册 chip 横滑条
-            if (albums.size > 1) {
-                LazyRow(
-                    Modifier.padding(vertical = 8.dp),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(albums, key = { it.bucketId }) { album ->
-                        AlbumChip(
-                            album = album,
-                            selected = album.bucketId == bucketId,
-                            onClick = { currentBucketId = album.bucketId }
-                        )
-                    }
-                }
-            }
-            AnimatedVisibility(visible = scanning) {
-                LinearProgressIndicator(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+        // ── 顶栏：玻璃返回 + 大标题 ──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "返回",
+                onClick = onBack,
+                size = 38.dp
+            )
+            Spacer(Modifier.size(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "修复文件时间",
+                    style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp,
+                        color = MaterialTheme.colorScheme.onBackground)
                 )
+                Text("按文件名中的拍摄时间修正「修改时间」", style = glassSubtitleStyle())
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        // 相册 chip 横滑条
+        if (albums.size > 1) {
+            LazyRow(
+                Modifier.padding(top = 6.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(albums, key = { it.bucketId }) { album ->
+                    AlbumChip(
+                        album = album,
+                        selected = album.bucketId == bucketId,
+                        onClick = { currentBucketId = album.bucketId }
+                    )
+                }
+            }
+        }
+        AnimatedVisibility(visible = scanning) {
+            LinearProgressIndicator(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)
+                    .height(3.dp).clip(CircleShape)
+            )
         }
 
         // ── 工具行 ──
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -219,16 +225,23 @@ fun FixTimeScreen(
             Spacer(Modifier.weight(1f))
             val allSel = n > 0 && displayOrder.all { g -> selected.any { it.id == g.id } }
             val someSel = displayOrder.any { g -> selected.any { it.id == g.id } }
-            Text("全选", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.size(4.dp))
-            CircleTriCheckbox(
-                state = when {
-                    allSel -> ToggleableState.On
-                    someSel -> ToggleableState.Indeterminate
-                    else -> ToggleableState.Off
-                },
-                onClick = { if (n > 0) toggleGroup(displayOrder) }
-            )
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("全选", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.size(4.dp))
+                CircleTriCheckbox(
+                    state = when {
+                        allSel -> ToggleableState.On
+                        someSel -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
+                    },
+                    onClick = { if (n > 0) toggleGroup(displayOrder) }
+                )
+            }
         }
 
         // ── 状态条 ──
@@ -237,12 +250,12 @@ fun FixTimeScreen(
                 statusText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)
             )
         }
 
         // ── 网格 ──
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().navigationBarsPadding()) {
             when {
                 results == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("没有可用相册", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -267,6 +280,7 @@ fun FixTimeScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 2.dp),
+                    contentPadding = PaddingValues(bottom = 190.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
@@ -274,28 +288,31 @@ fun FixTimeScreen(
                         stickyHeader(key = "hdr_$dk") {
                             val allSel = groupItems.all { g -> selected.any { it.id == g.id } }
                             val someSel = groupItems.any { g -> selected.any { it.id == g.id } }
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .padding(start = 12.dp, end = 10.dp, top = 2.dp, bottom = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    dateLabel(groupTime(groupItems.first())),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                CircleTriCheckbox(
-                                    state = when {
-                                        allSel -> ToggleableState.On
-                                        someSel -> ToggleableState.Indeterminate
-                                        else -> ToggleableState.Off
-                                    },
-                                    onClick = { toggleGroup(groupItems) }
-                                )
+                            Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .glassSurface(radius = 18.dp)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.30f))
+                                        .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        dateLabel(groupTime(groupItems.first())),
+                                        style = TextStyle(fontSize = 16.sp,
+                                            fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CircleTriCheckbox(
+                                        state = when {
+                                            allSel -> ToggleableState.On
+                                            someSel -> ToggleableState.Indeterminate
+                                            else -> ToggleableState.Off
+                                        },
+                                        onClick = { toggleGroup(groupItems) }
+                                    )
+                                }
                             }
                         }
                         items(groupItems, key = { it.key }) { item ->
@@ -325,34 +342,39 @@ fun FixTimeScreen(
                 }
             }
         }
+        }
 
-        // ── 底栏 ──
-        Surface(tonalElevation = 3.dp) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+        // ── 底部悬浮玻璃 Dock（Haze 采样网格真实模糊） ──
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            HazeGlassCard(
+                hazeState = hazeState,
+                modifier = Modifier.fillMaxWidth(),
+                radius = 30.dp,
+                contentPadding = PaddingValues(10.dp)
             ) {
                 if (isFixing) {
                     LinearProgressIndicator(
                         progress = { progress },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape)
                     )
+                    Spacer(Modifier.height(10.dp))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (selected.isNotEmpty()) {
                     Text(
-                        if (selected.isEmpty()) "" else "已选 ${selected.size} 项",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "已选 ${selected.size} 项",
+                        style = glassRowSubStyle(),
+                        modifier = Modifier.padding(start = 6.dp, bottom = 6.dp)
                     )
-                    Button(
-                        onClick = { onFix(selected.toList()) }
-                        // 不置灰：没勾选就点「修复」时由 startFixTimes 说明原因，
-                        // 而不是把点击吞掉（与主按钮同一套纪律）
-                    ) { Text(if (isFixing) "修复中…" else "修复所选时间") }
                 }
+                GlossyButton(
+                    text = if (isFixing) "修复中…" else "修复所选时间",
+                    onClick = { onFix(selected.toList()) }
+                )
             }
         }
     }
@@ -360,20 +382,31 @@ fun FixTimeScreen(
 
 @Composable
 private fun AlbumChip(album: AlbumInfo, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-                       else MaterialTheme.colorScheme.onSurfaceVariant
+    val shape = CircleShape
+    val primary = MaterialTheme.colorScheme.primary
+    val fill = if (selected) {
+        Brush.verticalGradient(listOf(primary.copy(alpha = 0.28f), primary.copy(alpha = 0.12f)))
+    } else {
+        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.72f),
+            Color.White.copy(alpha = 0.34f)))
+    }
+    Box(
+        Modifier
+            .height(34.dp)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, Color.White.copy(alpha = 0.65f), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             album.name,
-            style = MaterialTheme.typography.labelMedium,
+            style = TextStyle(fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (selected) primary else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -416,9 +449,10 @@ private fun FixCell(
     val transition = updateTransition(selected, label = "fixCell")
     val scale by transition.animateFloat(label = "scale") { if (it) 0.88f else 1f }
     val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
-    val cornerRadius = lerp(6.dp, 16.dp, cornerFraction)
+    val cornerRadius = lerp(14.dp, 20.dp, cornerFraction)
     val badgeBg by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.35f),
+        targetValue = if (selected) MaterialTheme.colorScheme.primary
+                       else Color.Black.copy(alpha = 0.28f),
         animationSpec = tween(200), label = "badgeBg"
     )
     val badgeScale by animateFloatAsState(
@@ -439,7 +473,7 @@ private fun FixCell(
     Box(
         modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onToggle)
     ) {
         Box(
@@ -454,57 +488,61 @@ private fun FixCell(
                 .clip(RoundedCornerShape(cornerRadius))
                 .border(
                     width = if (selected) 2.dp else 0.dp,
-                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
                     shape = RoundedCornerShape(cornerRadius)
                 )
         ) {
             MediaThumbnail(item.uri, resolver, Modifier.fillMaxSize())
+            // 底部：文件名 + 「现在 → 目标」时间对照（修复前确认改动是否符合预期）
+            // 必须与缩略图同层：选中时整块一起缩放，否则时间条会溢出选中框
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(
+                        Color.Transparent, Color.Black.copy(alpha = 0.72f))))
+                    .padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 7.dp)
+            ) {
+                Text(
+                    item.name,
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "现 $currentText",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "→ $targetText",
+                    color = if (targetText == "无时间") Color(0xFFFFCDD2) else Color.White,
+                    fontSize = 10.sp,
+                    maxLines = 1
+                )
+            }
         }
-        // 底部：文件名 + 「现在 → 目标」时间对照（修复前确认改动是否符合预期）
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .padding(horizontal = 4.dp, vertical = 2.dp)
-        ) {
-            Text(
-                item.name,
-                color = Color.White,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "现 $currentText",
-                color = Color.White.copy(alpha = 0.72f),
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "→ $targetText",
-                color = if (targetText == "无时间") Color(0xFFFFCDD2) else Color.White,
-                fontSize = 10.sp,
-                maxLines = 1
-            )
-        }
-        // 右上角勾选徽章
+        // 右上角勾选徽章：白色折射环，选中为 primary 玻璃圆
         Box(
             Modifier
                 .align(Alignment.TopEnd)
-                .padding(4.dp)
-                .size(20.dp)
+                .padding(6.dp)
+                .size(22.dp)
                 .graphicsLayer {
                     scaleX = badgeScale
                     scaleY = badgeScale
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .background(badgeBg, CircleShape),
+                .background(badgeBg, CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             if (selected) {
-                Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("✓", color = MaterialTheme.colorScheme.onPrimary,
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

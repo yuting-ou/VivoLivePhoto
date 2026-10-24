@@ -8,8 +8,12 @@
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
-> 点开 `VivoLivePhoto.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.1.0.apk`](./VivoLivePhoto-v2.1.0.apk) 下载，内容一致。
+> 点开 `VivoLivePhoto-v2.2.0-test1.apk` 即可直接安装（推荐）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.2.0-test1.apk`](./VivoLivePhoto-v2.2.0-test1.apk) 下载，内容一致。
+>
+> **本轮是界面测试版**：液态玻璃 + Haze 实时背景模糊，转换核心与数据逻辑零改动。
+> 请协助真机验证滚动流畅度、深色可读性与大字号布局；如有问题可回退
+> [v2.1.0](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.1.0)。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
 > **互不冲突、可并存安装**——此前若提示「软件包与现有软件包存在冲突 / 开发者签名异常」，
@@ -21,11 +25,17 @@
 |---|---|---|
 | ![主界面](docs/screenshots/main_items.png) | ![转换中](docs/screenshots/main_converting.png) | ![空状态](docs/screenshots/main_empty.png) |
 
-| 设置 | 修复时间 |
-|---|---|
-| ![设置](docs/screenshots/settings.png) | ![修复时间](docs/screenshots/fixtime.png) |
+| 设置 | 修复时间 | 选择照片（日期胶囊） |
+|---|---|---|
+| ![设置](docs/screenshots/settings.png) | ![修复时间](docs/screenshots/fixtime.png) | ![选择照片](docs/screenshots/picker.png) |
 
-（截图由 JVM 单测真实渲染产出，与安装包同源；转换完成有角标弹入与底栏交叉过渡动效）
+| 深色主界面 | 深色设置 |
+|---|---|
+| ![深色主界面](docs/screenshots/main_dark.png) | ![深色设置](docs/screenshots/settings_dark.png) |
+
+（截图由 JVM 单测真实渲染产出，与安装包同源；Robolectric 无硬件加速，截图中的玻璃是
+不透明回退膜，真机/模拟器上由 Haze 实时采样并模糊玻璃下方的照片。转换完成有角标弹入
+与底栏交叉过渡动效）
 
 ## 背景
 
@@ -45,6 +55,7 @@ VLiveConvert 把 vivo 双文件实况转成「单文件实况」——一个 .jp
 
 ## 功能
 
+- 🧊 液态玻璃界面：浮动玻璃导航与 Dock、日期胶囊，Haze 实时采样背景模糊，深浅色自适应
 - 📷 内置选择器：自动扫描相册，只列出双文件实况照片（普通实况、人像实况都支持），普通照片不掺杂
 - ⚡ 批量转换，按内存动态并发
 - 📥 转换后自动移入相机相册：导出文件直接写入 `DCIM/Camera`（重名自动追加序号，可关闭）
@@ -117,10 +128,33 @@ app/src/main/java/com/vliveconvert/app/
 │   └── VivoSingle.kt        # 单文件写出（uuid 剥离、lpex 合成、footer/XMP 拼装）
 ├── convert/Converter.kt     # 管线：detect → read → write
 ├── picker/                  # 内置选择器：MediaStore 直查 + 会话化多线程扫描（只收录双文件）
-└── ui/                      # Compose 界面：主列表 / 设置页 / 权限引导 / 修复时间 / 共享组件
+└── ui/                      # Compose 界面：主列表 / 设置页 / 权限引导 / 修复时间 / 液态玻璃设计系统
 ```
 
 ## 改进版变更记录
+
+### v2.2.0-test1（液态玻璃界面 · 测试版，请协助真机验证）
+
+**纯界面重构，转换核心与数据逻辑零改动。** 目标是 iOS 26 风格的「液态玻璃」：
+真实背景采样模糊 + 半透明分层 + 顶缘高光 + 折射描边 + 环境阴影，深浅色分别取膜。
+
+- **真实背景模糊**：接入 [Haze 1.6.10](https://github.com/chrisbanes/haze)（Apache-2.0）。
+  主界面 Dock、修复时间 Dock、选择器导航卡与日期胶囊实时采样并模糊其下方的照片/壁纸，
+  不再是静态半透明白底
+- **浮动玻璃导航/Dock**：从列表布局中拆出、悬浮在内容上方，照片从玻璃下方穿过；
+  列表底部留出滚动余量，最后一行仍能完整滚出
+- **日期胶囊**：原来的网格内吸顶日期条会被浮动导航遮住；改为导航下方的悬浮药丸，
+  跟随第一张可见照片的日期，右侧圆圈可整天全选/取消（带无障碍描述与 UI 用例）
+- **浅色/深色双膜**：深色走「暗烟玻璃」并加厚底膜，避免高亮照片透上来吃掉文字；
+  未选勾选框描边加深，亮背景上仍可辨认
+- **大字号**：2× 字号下选择器标题、取消/添加不再互相挤压；日期胶囊随内容收缩，
+  超宽时省略文字而不是挤出屏幕
+- **许可合规**：关于页新增第三方组件与 Apache-2.0 完整文本（Haze / chrisbanes）
+- **测试**：全量 178 条 JVM 用例通过（4 条按平台跳过）；Robolectric 下自动关闭 Haze、
+  走不透明回退膜，避免软件画布崩溃
+- **性能（模拟器，非真机）**：发布包选择器滚动 302 帧、jank 0.33%（legacy 0%）、
+  99 分位 21ms；真机滚动流畅度与深色可读性请以本轮反馈为准
+- 已知：README 截图是 JVM 回退膜，真机才看得到实时模糊；Haze 需要硬件加速
 
 ### v2.1.0（全选不再卡死 + 清空可撤销 + 大字号适配）
 
