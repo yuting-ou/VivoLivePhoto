@@ -103,6 +103,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
 import com.vliveconvert.app.ui.theme.statusColors
+import dev.chrisbanes.haze.HazeState
 
 /**
  * 主界面：待转换列表 + 开始转换。
@@ -141,10 +142,10 @@ fun MainScreen(
     onAddMore: () -> Unit,
     onStartConvert: () -> Unit,
     onClearAll: () -> Unit,
-    onRemove: (ConvertItem) -> Unit
+    onRemove: (ConvertItem) -> Unit,
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     val pendingCount = items.count { !it.done && !it.failed }
-    val hazeState = rememberGlassHazeState()
     // 列表滚动到 Dock 下方时，最后一行仍能滚出来；短列表不垫，避免玻璃面板拖出一截空白
     val dockInset = if (isConverting || finishedBeat) 176.dp else 132.dp
     val listBottomInset = if (items.size >= 5) dockInset else 0.dp

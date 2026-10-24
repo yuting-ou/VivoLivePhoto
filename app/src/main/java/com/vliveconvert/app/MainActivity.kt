@@ -44,14 +44,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,10 +85,12 @@ import com.vliveconvert.app.service.mergeClearedUndo
 import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
+import com.vliveconvert.app.ui.GlassDialog
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ThemedSnackbarHost
+import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -372,6 +372,31 @@ class MainActivity : ComponentActivity() {
             BackDecision.CLOSE_PICKER -> showPicker = false
             BackDecision.CLOSE_SETTINGS -> showSettings = false
             null -> {}
+        }
+    }
+
+    /**
+     * 返回键关闭最上层的应用内玻璃弹窗。
+     * 重建进度/空间暂停不可中断：只消费返回，不关闭弹窗。
+     */
+    private fun dismissTopDialog() {
+        when {
+            isRepairingLocation || showSpacePause -> Unit
+            showPreflightDialog -> showPreflightDialog = false
+            showAllFilesDialog -> showAllFilesDialog = false
+            showLocationDialog -> {
+                showLocationDialog = false
+                pendingLocationAction = null
+            }
+            showLocationSettingsDialog -> {
+                showLocationSettingsDialog = false
+                pendingLocationAction = null
+            }
+            showSettingsDialog -> showSettingsDialog = false
+            showStatusDetail -> showStatusDetail = false
+            crashExportMessage != null -> crashExportMessage = null
+            showRepairConfirm -> showRepairConfirm = false
+            showOutputPathDialog -> showOutputPathDialog = false
         }
     }
 
@@ -659,6 +684,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VLiveConvertTheme(dynamicColor = dynamicColor) {
+                // 全应用共享的采样状态：页面玻璃与弹窗玻璃都采同一份背景，
+                // 弹窗才能模糊它背后真实的内容，而不是另开窗口糊自己
+                val appHazeState = rememberGlassHazeState()
                 // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
                 // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
                 //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
@@ -706,9 +734,17 @@ class MainActivity : ComponentActivity() {
                 // 让系统做跨任务/回到桌面的预测性返回动画（enableOnBackInvokedCallback 已开）。
                 BackHandler(enabled = ConvertCenter.isConverting) { /* 转换中不响应返回 */ }
                 BackHandler(enabled = showStatusDetail) { showStatusDetail = false }
+                // 弹层改为应用内浮层后，必须自己接管返回：先于页面级预测性返回判定，
+                // 否则按一次返回会把底下的页面（甚至 Activity）弹掉。
+                val anyDialogOpen = showPreflightDialog || showAllFilesDialog ||
+                    showLocationDialog || showLocationSettingsDialog || showSettingsDialog ||
+                    showStatusDetail || crashExportMessage != null || showRepairConfirm ||
+                    isRepairingLocation || showSpacePause || showOutputPathDialog
+                BackHandler(enabled = anyDialogOpen) { dismissTopDialog() }
                 PredictiveBackHandler(
                     enabled = hasReadPermission() && !ConvertCenter.isConverting &&
-                        (showAbout || showFixTime || showPicker || showSettings)
+                        (showAbout || showFixTime || showPicker || showSettings) &&
+                        !anyDialogOpen
                 ) { progress ->
                     var sawGesture = false
                     var eventCount = 0
@@ -816,7 +852,8 @@ class MainActivity : ComponentActivity() {
                             Screen.Permission -> PermissionScreen(
                                 onRequest = { requestReadPermissions(null) },
                                 statusText = ConvertCenter.statusText,
-                                appName = getString(R.string.app_display_name)
+                                appName = getString(R.string.app_display_name),
+                                hazeState = appHazeState
                             )
                             Screen.Picker -> PickerScreen(
                                 albums = pickerAlbums,
@@ -826,7 +863,8 @@ class MainActivity : ComponentActivity() {
                                 onConfirm = { picked ->
                                     showPicker = false
                                     addPickedItems(picked)
-                                }
+                                },
+                                hazeState = appHazeState
                             )
                             Screen.FixTime -> FixTimeScreen(
                                 albums = fixAlbums,
@@ -837,7 +875,8 @@ class MainActivity : ComponentActivity() {
                                 statusText = fixStatus,
                                 selectionReset = fixSelectionReset,
                                 onBack = { animateBackPop() },
-                                onFix = { selected -> startFixTimes(selected) }
+                                onFix = { selected -> startFixTimes(selected) },
+                                hazeState = appHazeState
                             )
                             Screen.Settings -> SettingsScreen(
                                 appName = getString(R.string.app_display_name),
@@ -879,12 +918,14 @@ class MainActivity : ComponentActivity() {
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onExportCrashLogs = { exportCrashLogs() },
                                 onClearCrashLogs = { clearCrashLogs() },
-                                onOpenAbout = { showAbout = true }
+                                onOpenAbout = { showAbout = true },
+                                hazeState = appHazeState
                             )
                             Screen.About -> AboutScreen(
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
-                                onBack = { animateBackPop() }
+                                onBack = { animateBackPop() },
+                                hazeState = appHazeState
                             )
                             Screen.Main -> MainScreen(
                                 items = ConvertCenter.items.toList(),
@@ -915,7 +956,8 @@ class MainActivity : ComponentActivity() {
                                 onAddMore = { openBuiltInPicker() },
                                 onStartConvert = { startConvert() },
                                 onClearAll = { clearAllWithUndo() },
-                                onRemove = { ci -> removeItemWithUndo(ci) }
+                                onRemove = { ci -> removeItemWithUndo(ci) },
+                                hazeState = appHazeState
                             )
                         }
                     }
@@ -1015,354 +1057,347 @@ class MainActivity : ComponentActivity() {
                 // 转换前的影响面预估：把可确定的事实摊开再开跑
                 preflight?.let { info ->
                     if (showPreflightDialog) {
-                        AlertDialog(
+                        GlassDialog(
+                            hazeState = appHazeState,
                             onDismissRequest = { showPreflightDialog = false },
-                            title = { Text("开始转换") },
-                            text = {
-                                val hasLoc = hasMediaLocationPermission()
-                                Column {
-                                    PreflightLine("待转换", "${info.pendingCount} 张")
-                                    if (info.missingSources > 0) {
-                                        PreflightLine(
-                                            "源文件已丢失",
-                                            "${info.missingSources} 张（将转换失败）",
-                                            MaterialTheme.colorScheme.error
+                            title = "开始转换",
+                            confirmLabel = "开始转换",
+                            onConfirm = {
+                                showPreflightDialog = false
+                                if (skipPreflightNext) {
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("skip_preflight", true).apply()
+                                }
+                                ConvertCenter.start(this)
+                            },
+                            dismissLabel = "取消",
+                            onDismissAction = { showPreflightDialog = false }
+                        ) {
+                            val hasLoc = hasMediaLocationPermission()
+                            Column {
+                                PreflightLine("待转换", "${info.pendingCount} 张")
+                                if (info.missingSources > 0) {
+                                    PreflightLine(
+                                        "源文件已丢失",
+                                        "${info.missingSources} 张（将转换失败）",
+                                        MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                PreflightLine(
+                                    "源文件体积",
+                                    Preflight.formatSize(info.totalSourceBytes) +
+                                        "（输出体积与之相当）"
+                                )
+                                PreflightLine(
+                                    "输出位置",
+                                    if (moveToCamera) "DCIM/Camera" else outputRelPath
+                                )
+                                if (deleteOriginal) {
+                                    // 只有转换成功的条目才会进入删除流程：源文件已丢失的必然失败，
+                                    // 不计入可删除数（宁可少报，也不能让「将删除」多于实际）
+                                    PreflightLine(
+                                        "将删除原图",
+                                        "${info.pendingCount - info.missingSources} 个 .jpg" +
+                                            (if (info.companionVideoCount > 0)
+                                                " + ${info.companionVideoCount} 个 .mp4"
+                                             else "") +
+                                            "（可在提示的入口恢复）",
+                                        MaterialTheme.colorScheme.error
+                                    )
+                                } else {
+                                    PreflightLine("原图", "保留")
+                                }
+                                PreflightLine(
+                                    "位置信息",
+                                    if (hasLoc) "将保留"
+                                    else "未授予位置权限，输出将不含位置信息",
+                                    if (hasLoc) null else MaterialTheme.colorScheme.error
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                if (deleteOriginal) {
+                                    // 不给「不再提示」这个选项：勾了它也不会生效，
+                                    // 摆出来等于承诺一件做不到的事
+                                    Text(
+                                        "本批会删除原图（不可逆），因此每次都需要确认。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                } else {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = skipPreflightNext,
+                                            onCheckedChange = { skipPreflightNext = it }
                                         )
-                                    }
-                                    PreflightLine(
-                                        "源文件体积",
-                                        Preflight.formatSize(info.totalSourceBytes) +
-                                            "（输出体积与之相当）"
-                                    )
-                                    PreflightLine(
-                                        "输出位置",
-                                        if (moveToCamera) "DCIM/Camera" else outputRelPath
-                                    )
-                                    if (deleteOriginal) {
-                                        // 只有转换成功的条目才会进入删除流程：源文件已丢失的必然失败，
-                                        // 不计入可删除数（宁可少报，也不能让「将删除」多于实际）
-                                        PreflightLine(
-                                            "将删除原图",
-                                            "${info.pendingCount - info.missingSources} 个 .jpg" +
-                                                (if (info.companionVideoCount > 0)
-                                                    " + ${info.companionVideoCount} 个 .mp4"
-                                                 else "") +
-                                                "（可在提示的入口恢复）",
-                                            MaterialTheme.colorScheme.error
-                                        )
-                                    } else {
-                                        PreflightLine("原图", "保留")
-                                    }
-                                    PreflightLine(
-                                        "位置信息",
-                                        if (hasLoc) "将保留"
-                                        else "未授予位置权限，输出将不含位置信息",
-                                        if (hasLoc) null else MaterialTheme.colorScheme.error
-                                    )
-                                    Spacer(Modifier.height(10.dp))
-                                    if (deleteOriginal) {
-                                        // 不给「不再提示」这个选项：勾了它也不会生效，
-                                        // 摆出来等于承诺一件做不到的事
                                         Text(
-                                            "本批会删除原图（不可逆），因此每次都需要确认。",
+                                            "以后不再提示",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    } else {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(
-                                                checked = skipPreflightNext,
-                                                onCheckedChange = { skipPreflightNext = it }
-                                            )
-                                            Text(
-                                                "以后不再提示",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
                                     }
                                 }
-                            },
-                            confirmButton = {
-                                Button(onClick = {
-                                    showPreflightDialog = false
-                                    if (skipPreflightNext) {
-                                        getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                            .edit().putBoolean("skip_preflight", true).apply()
-                                    }
-                                    ConvertCenter.start(this)
-                                }) { Text("开始转换") }
-                            },
-                            dismissButton = {
-                                OutlinedButton(onClick = { showPreflightDialog = false })
-                                { Text("取消") }
                             }
-                        )
+                        }
                     }
                 }
 
                 // 所有文件访问权限引导（删除原图 / 修复时间功能需要时）
                 if (showAllFilesDialog) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { showAllFilesDialog = false },
-                        title = { Text("需要「所有文件访问权限」") },
-                        text = {
-                            Text(
-                                "以下功能依赖「所有文件访问权限」：\n\n" +
-                                "• 修复文件时间：修改已导出文件的「修改时间」属性\n\n" +
-                                "• 转换后删除原图：删除不再弹系统确认框，被删文件会进入 vivo 相册的" +
-                                "「第三方删除拦截」，可在相册中恢复；未授权时删除走系统回收站" +
-                                "（30 天内可在本应用恢复）\n\n" +
-                                "是否前往授权？"
-                            )
+                        title = "需要「所有文件访问权限」",
+                        confirmLabel = "去授权",
+                        onConfirm = {
+                            showAllFilesDialog = false
+                            openAllFilesAccessSettings()
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                showAllFilesDialog = false
-                                openAllFilesAccessSettings()
-                            }) { Text("去授权") }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = { showAllFilesDialog = false }) { Text("暂不") }
-                        }
-                    )
+                        dismissLabel = "暂不",
+                        onDismissAction = { showAllFilesDialog = false }
+                    ) {
+                        Text(
+                            "以下功能依赖「所有文件访问权限」：\n\n" +
+                            "• 修复文件时间：修改已导出文件的「修改时间」属性\n\n" +
+                            "• 转换后删除原图：删除不再弹系统确认框，被删文件会进入 vivo 相册的" +
+                            "「第三方删除拦截」，可在相册中恢复；未授权时删除走系统回收站" +
+                            "（30 天内可在本应用恢复）\n\n" +
+                            "是否前往授权？"
+                        )
+                    }
                 }
 
                 // 位置权限门禁弹窗：未授予时开始转换必丢 GPS，需用户显式确认
                 if (showLocationDialog) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = {
                             showLocationDialog = false
                             pendingLocationAction = null // 关闭弹窗即取消挂起的转换
                         },
-                        title = { Text("缺少「位置」权限") },
-                        text = {
-                            Text(
-                                "未授予「位置」权限时，Android 会在本应用读取照片时实时剥离 " +
-                                "GPS 位置信息（系统脱敏），转换后的照片将丢失地点信息，且事后无法找回。\n\n" +
-                                "强烈建议先授予「位置」权限再开始转换。"
-                            )
+                        title = "缺少「位置」权限",
+                        confirmLabel = "去授权",
+                        onConfirm = {
+                            showLocationDialog = false
+                            // 直接发起系统授权框。不用 rationale 预判——
+                            // 「从未申请过」时 rationale 同样返回 false，
+                            // 旧实现据此把首次申请错误路由到系统设置，
+                            // 导致授权框永远弹不出来（死循环 → 用户被迫「仍要转换」）
+                            locationPermissionLauncher.launch(
+                                Manifest.permission.ACCESS_MEDIA_LOCATION)
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                showLocationDialog = false
-                                // 直接发起系统授权框。不用 rationale 预判——
-                                // 「从未申请过」时 rationale 同样返回 false，
-                                // 旧实现据此把首次申请错误路由到系统设置，
-                                // 导致授权框永远弹不出来（死循环 → 用户被迫「仍要转换」）
-                                locationPermissionLauncher.launch(
-                                    Manifest.permission.ACCESS_MEDIA_LOCATION)
-                            }) { Text("去授权") }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = {
-                                showLocationDialog = false
-                                pendingLocationAction = null // 消费挂起动作（强转路径自行继续）
-                                proceedConvertAfterPermissionCheck(force = true)
-                            }) { Text("仍要转换") }
+                        dismissLabel = "仍要转换",
+                        onDismissAction = {
+                            showLocationDialog = false
+                            pendingLocationAction = null // 消费挂起动作（强转路径自行继续）
+                            proceedConvertAfterPermissionCheck(force = true)
                         }
-                    )
+                    ) {
+                        Text(
+                            "未授予「位置」权限时，Android 会在本应用读取照片时实时剥离 " +
+                            "GPS 位置信息（系统脱敏），转换后的照片将丢失地点信息，且事后无法找回。\n\n" +
+                            "强烈建议先授予「位置」权限再开始转换。"
+                        )
+                    }
                 }
 
                 // 位置权限「不再询问」后的设置引导弹窗：授予后返回自动继续挂起的动作
                 if (showLocationSettingsDialog) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = {
                             showLocationSettingsDialog = false
                             pendingLocationAction = null // 关闭弹窗即取消挂起动作
                         },
-                        title = { Text("需要手动开启位置权限") },
-                        text = {
-                            Text(
-                                "系统不再弹出「位置」权限授权框（可能已选「不再询问」或系统限制）。\n\n" +
-                                "请到：应用详情 → 权限 → 位置，手动开启后返回本应用，" +
-                                (if (pendingActionIsReconvert) "重新转换会自动继续。"
-                                 else "转换会自动继续。") + "\n\n" +
-                                "若权限页没有相关开关，也可尝试给本应用开启" +
-                                "「所有文件访问权限」后重新转换。"
-                            )
+                        title = "需要手动开启位置权限",
+                        confirmLabel = "去设置",
+                        onConfirm = {
+                            showLocationSettingsDialog = false
+                            openAppDetailSettings()
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                showLocationSettingsDialog = false
-                                openAppDetailSettings()
-                            }) { Text("去设置") }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = {
-                                showLocationSettingsDialog = false
-                                val action = pendingLocationAction
-                                pendingLocationAction = null
-                                if (action != null && !pendingActionIsReconvert) {
-                                    // 普通转换：用户明确选择无位置继续
-                                    proceedConvertAfterPermissionCheck(force = true)
-                                } else if (action != null) {
-                                    // 重转：无权限时执行无意义，仅取消
-                                    ConvertCenter.statusText =
-                                        "未授予「位置」权限，已取消重新转换（授权后可再点「重新转换」）"
-                                }
-                            }) { Text(if (pendingActionIsReconvert) "取消" else "仍要转换") }
+                        dismissLabel = if (pendingActionIsReconvert) "取消" else "仍要转换",
+                        onDismissAction = {
+                            showLocationSettingsDialog = false
+                            val action = pendingLocationAction
+                            pendingLocationAction = null
+                            if (action != null && !pendingActionIsReconvert) {
+                                // 普通转换：用户明确选择无位置继续
+                                proceedConvertAfterPermissionCheck(force = true)
+                            } else if (action != null) {
+                                // 重转：无权限时执行无意义，仅取消
+                                ConvertCenter.statusText =
+                                    "未授予「位置」权限，已取消重新转换（授权后可再点「重新转换」）"
+                            }
                         }
-                    )
+                    ) {
+                        Text(
+                            "系统不再弹出「位置」权限授权框（可能已选「不再询问」或系统限制）。\n\n" +
+                            "请到：应用详情 → 权限 → 位置，手动开启后返回本应用，" +
+                            (if (pendingActionIsReconvert) "重新转换会自动继续。"
+                             else "转换会自动继续。") + "\n\n" +
+                            "若权限页没有相关开关，也可尝试给本应用开启" +
+                            "「所有文件访问权限」后重新转换。"
+                        )
+                    }
                 }
 
                 // 状态详情：主界面只显示单行摘要，完整文案（含 GPS 警告）在此展开
                 if (showStatusDetail) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { showStatusDetail = false },
-                        title = { Text("状态详情") },
-                        text = {
-                            Text(
-                                ConvertCenter.statusText.ifEmpty { "暂无状态信息" },
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        confirmButton = {
-                            Button(onClick = { showStatusDetail = false }) { Text("知道了") }
-                        }
-                    )
+                        title = "状态详情",
+                        confirmLabel = "知道了",
+                        onConfirm = { showStatusDetail = false }
+                    ) {
+                        Text(
+                            ConvertCenter.statusText.ifEmpty { "暂无状态信息" },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
 
                 // 崩溃日志导出结果：弹窗（v1.7.23）。此前反馈写在顶栏小字里，
                 // 用户看半天注意不到，连点 N 次导出几十份重复文件
                 crashExportMessage?.let { msg ->
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { crashExportMessage = null },
-                        title = { Text("导出崩溃日志") },
-                        text = { Text(msg) },
-                        confirmButton = {
-                            Button(onClick = { crashExportMessage = null }) { Text("知道了") }
-                        }
-                    )
+                        title = "导出崩溃日志",
+                        confirmLabel = "知道了",
+                        onConfirm = { crashExportMessage = null }
+                    ) {
+                        Text(msg)
+                    }
                 }
 
                 // 位置显示重建：确认 + 进度 + 空间暂停弹窗
                 if (showRepairConfirm) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { showRepairConfirm = false },
-                        title = { Text("重建位置显示") },
-                        text = {
-                            Text(
-                                "将分批重建历史转换产物的媒体库记录，让 vivo 相册显示拍摄位置。\n\n" +
-                                    "· 照片内容与文件名不变，重建后字节逐字节一致\n" +
-                                    "· 旧记录会进相册「最近删除/第三方删除拦截」（可恢复）\n" +
-                                    "· 存储空间不足时自动暂停，清空回收站后点「继续」即可续跑\n\n" +
-                                    "⚠ 重要副作用：重建会把照片的「加入相册时间」重置为操作当天，" +
-                                    "且该时间由系统强制托管、事后无法恢复——微信等按" +
-                                    "「加入时间」分组的应用会把这些照片全部归入「今天」。\n" +
-                                    "照片的拍摄时间、EXIF、相册时间线不受影响。\n\n" +
-                                    "共约 4400 张，预计 3~4 批。确认开始？"
-                            )
+                        title = "重建位置显示",
+                        confirmLabel = "开始",
+                        onConfirm = {
+                            showRepairConfirm = false
+                            rebuildLocationDisplay()
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                showRepairConfirm = false
-                                rebuildLocationDisplay()
-                            }) { Text("开始") }
-                        },
-                        dismissButton = {
-                            Button(onClick = { showRepairConfirm = false }) { Text("取消") }
-                        }
-                    )
+                        dismissLabel = "取消",
+                        onDismissAction = { showRepairConfirm = false }
+                    ) {
+                        Text(
+                            "将分批重建历史转换产物的媒体库记录，让 vivo 相册显示拍摄位置。\n\n" +
+                                "· 照片内容与文件名不变，重建后字节逐字节一致\n" +
+                                "· 旧记录会进相册「最近删除/第三方删除拦截」（可恢复）\n" +
+                                "· 存储空间不足时自动暂停，清空回收站后点「继续」即可续跑\n\n" +
+                                "⚠ 重要副作用：重建会把照片的「加入相册时间」重置为操作当天，" +
+                                "且该时间由系统强制托管、事后无法恢复——微信等按" +
+                                "「加入时间」分组的应用会把这些照片全部归入「今天」。\n" +
+                                "照片的拍摄时间、EXIF、相册时间线不受影响。\n\n" +
+                                "共约 4400 张，预计 3~4 批。确认开始？"
+                        )
+                    }
                 }
                 if (isRepairingLocation) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = {},
-                        title = { Text("重建位置显示") },
-                        text = { Text(repairProgressText) },
-                        confirmButton = {}
-                    )
+                        title = "重建位置显示",
+                        dismissOnBack = false,
+                        dismissOnOutside = false
+                    ) {
+                        Text(repairProgressText)
+                        Spacer(Modifier.height(14.dp))
+                        LinearProgressIndicator(
+                            Modifier.fillMaxWidth().height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                        )
+                    }
                 }
                 if (showSpacePause) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = {},
-                        title = { Text("需要释放存储空间") },
-                        text = { Text(spacePauseText) },
-                        confirmButton = {
-                            Button(onClick = {
-                                showSpacePause = false
-                                rebuildLocationDisplay()
-                            }) { Text("继续") }
+                        title = "需要释放存储空间",
+                        confirmLabel = "继续",
+                        onConfirm = {
+                            showSpacePause = false
+                            rebuildLocationDisplay()
                         },
-                        dismissButton = {
-                            Button(onClick = { showSpacePause = false }) { Text("结束") }
-                        }
-                    )
+                        dismissLabel = "结束",
+                        onDismissAction = { showSpacePause = false },
+                        dismissOnBack = false,
+                        dismissOnOutside = false
+                    ) {
+                        Text(spacePauseText)
+                    }
                 }
 
                 // 输出目录修改弹窗
                 if (showOutputPathDialog) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { showOutputPathDialog = false },
-                        title = { Text("输出目录") },
-                        text = {
-                            Column {
-                                Text(
-                                    "相对主存储的路径，导出的单文件实况会保存到这里；留空恢复默认。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = outputPathInput,
-                                    onValueChange = { outputPathInput = it },
-                                    singleLine = true,
-                                    label = { Text("例如 Pictures/VLiveConvert") }
-                                )
+                        title = "输出目录",
+                        confirmLabel = "确定",
+                        onConfirm = {
+                            val raw = outputPathInput.trim()
+                            if (raw.isEmpty()) {
+                                outputRelPath = "Pictures/VLiveConvert"
+                                getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                    .edit().putString("output_rel_path", outputRelPath).apply()
+                                showOutputPathDialog = false
+                                ConvertCenter.statusText = "输出目录已恢复默认：$outputRelPath"
+                            } else {
+                                val s = sanitizeRelPath(raw)
+                                if (s == null) {
+                                    ConvertCenter.statusText =
+                                        "路径无效：不能包含 \\ : * ? \" < > | 或 ..（可留空恢复默认）"
+                                } else {
+                                    outputRelPath = s
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putString("output_rel_path", s).apply()
+                                    showOutputPathDialog = false
+                                    ConvertCenter.statusText = "输出目录已设为：$s"
+                                }
                             }
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                val raw = outputPathInput.trim()
-                                if (raw.isEmpty()) {
-                                    outputRelPath = "Pictures/VLiveConvert"
-                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                        .edit().putString("output_rel_path", outputRelPath).apply()
-                                    showOutputPathDialog = false
-                                    ConvertCenter.statusText = "输出目录已恢复默认：$outputRelPath"
-                                } else {
-                                    val s = sanitizeRelPath(raw)
-                                    if (s == null) {
-                                        ConvertCenter.statusText =
-                                            "路径无效：不能包含 \\ : * ? \" < > | 或 ..（可留空恢复默认）"
-                                    } else {
-                                        outputRelPath = s
-                                        getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                            .edit().putString("output_rel_path", s).apply()
-                                        showOutputPathDialog = false
-                                        ConvertCenter.statusText = "输出目录已设为：$s"
-                                    }
-                                }
-                            }) { Text("确定") }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = { showOutputPathDialog = false }) { Text("取消") }
-                        }
-                    )
+                        dismissLabel = "取消",
+                        onDismissAction = { showOutputPathDialog = false }
+                    ) {
+                        Text(
+                            "相对主存储的路径，导出的单文件实况会保存到这里；留空恢复默认。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = outputPathInput,
+                            onValueChange = { outputPathInput = it },
+                            singleLine = true,
+                            label = { Text("例如 Pictures/VLiveConvert") }
+                        )
+                    }
                 }
 
                 // 跳转设置对话框（用户选了「不再询问」）
                 if (showSettingsDialog) {
-                    AlertDialog(
+                    GlassDialog(
+                        hazeState = appHazeState,
                         onDismissRequest = { showSettingsDialog = false },
-                        title = { Text("需要手动授予照片和视频权限") },
-                        text = {
-                            Text(
-                                "您之前选择了「不再询问」，系统不再弹出权限对话框。\n\n" +
-                                "请前往应用详情页 → 权限 → 照片和视频，手动授予访问权限后返回本应用。\n\n" +
-                                "注意：必须同时授予「照片」和「视频」权限，否则双文件实况将无法找到附带的伴生视频。"
-                            )
+                        title = "需要手动授予照片和视频权限",
+                        confirmLabel = "去设置",
+                        onConfirm = {
+                            showSettingsDialog = false
+                            openAppDetailSettings()
                         },
-                        confirmButton = {
-                            Button(onClick = {
-                                showSettingsDialog = false
-                                openAppDetailSettings()
-                            }) { Text("去设置") }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = { showSettingsDialog = false }) { Text("取消") }
-                        }
-                    )
+                        dismissLabel = "取消",
+                        onDismissAction = { showSettingsDialog = false }
+                    ) {
+                        Text(
+                            "您之前选择了「不再询问」，系统不再弹出权限对话框。\n\n" +
+                            "请前往应用详情页 → 权限 → 照片和视频，手动授予访问权限后返回本应用。\n\n" +
+                            "注意：必须同时授予「照片」和「视频」权限，否则双文件实况将无法找到附带的伴生视频。"
+                        )
+                    }
                 }
             }
         }
@@ -2195,6 +2230,23 @@ private fun PreflightLine(
     value: String,
     tint: androidx.compose.ui.graphics.Color? = null
 ) {
+    // 固定 84dp 标签列在 2× 字号下会把「源文件体积」挤成两行；
+    // 大字号改成上下两行，正常字号仍保持紧凑的左右对齐
+    if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                color = tint ?: MaterialTheme.colorScheme.onSurface
+            )
+        }
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()

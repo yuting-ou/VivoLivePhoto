@@ -127,6 +127,9 @@ class ConvertFlowUiTest {
             true, internalState("showPreflightDialog"))
         val info = internalState("preflight")
         assertTrue("预检信息应已计算", info != null)
+        // 玻璃弹窗是应用内浮层，不再是独立系统 window：内容必须同窗可读
+        compose.onNodeWithText("源文件体积").assertExists()
+        compose.onNodeWithText("以后不再提示").assertExists()
     }
 
     // ---------- 2) 无位置权限：点击后必弹位置门禁（同样不许「无反应」） ----------

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
+import dev.chrisbanes.haze.HazeState
 
 /**
  * 权限引导界面（未授予媒体权限时显示）。
@@ -34,12 +35,14 @@ fun PermissionScreen(
     onRequest: () -> Unit,
     statusText: String,
     /** 应用内品牌名（统一取自 R.string.app_display_name） */
-    appName: String
+    appName: String,
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
+            .glassHazeSource(hazeState)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {

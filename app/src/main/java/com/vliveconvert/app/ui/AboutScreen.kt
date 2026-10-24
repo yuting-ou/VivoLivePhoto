@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -50,7 +51,8 @@ import kotlinx.coroutines.withContext
 fun AboutScreen(
     appName: String,
     versionName: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     // 许可证全文约 35KB：读取放到 IO 线程，避免在组合（主线程）阶段做资源 I/O；
     // null = 读取中，读取失败回退为指向官方链接的提示。
@@ -78,6 +80,7 @@ fun AboutScreen(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
+            .glassHazeSource(hazeState)
     ) {
         Row(
             Modifier

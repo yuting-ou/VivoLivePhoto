@@ -75,6 +75,7 @@ import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.picker.AlbumInfo
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.SingleLiveScanner
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import java.io.File
@@ -98,12 +99,12 @@ fun FixTimeScreen(
     statusText: String,
     selectionReset: Int,
     onBack: () -> Unit,
-    onFix: (List<MediaItem>) -> Unit
+    onFix: (List<MediaItem>) -> Unit,
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
-    val hazeState = rememberGlassHazeState()
 
     // 修复完成后清空选择
     LaunchedEffect(selectionReset) {

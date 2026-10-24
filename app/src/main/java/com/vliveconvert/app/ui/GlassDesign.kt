@@ -1,26 +1,37 @@
 package com.vliveconvert.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +48,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -155,6 +167,8 @@ fun HazeGlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 30.dp,
     contentPadding: PaddingValues = PaddingValues(10.dp),
+    /** 弹窗等文字密集场景加一层膜，保证高亮照片透上来时仍可读 */
+    dense: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val hazeEnabled = hazeAvailable()
@@ -163,14 +177,25 @@ fun HazeGlassCard(
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     // 有真实模糊时白膜必须更薄，否则会把背景糊成一块白板
     val fillTop = base.copy(alpha = if (hazeEnabled) {
-        // 深色主题要走「暗烟玻璃」：照片的高亮会透上来，浅色文字必须压暗底才能读
-        if (dark) 0.56f else 0.30f
+        // 深色主题要走「暗烟玻璃」：照片的高亮会透上来，浅色文字必须压暗底才能读。
+        // 弹窗（dense）文字密集，比浮动 Dock 更不透明，避免背后大字透上来抢读。
+        when {
+            dense && dark -> 0.96f
+            dense -> 0.92f
+            dark -> 0.56f
+            else -> 0.30f
+        }
     } else {
         // 非硬件加速回退：浮动 Dock 会压在列表上，必须足够不透明才不露出底下文字
         if (dark) 0.92f else 0.88f
     })
     val fillBottom = base.copy(alpha = if (hazeEnabled) {
-        if (dark) 0.42f else 0.10f
+        when {
+            dense && dark -> 0.94f
+            dense -> 0.88f
+            dark -> 0.42f
+            else -> 0.10f
+        }
     } else {
         if (dark) 0.80f else 0.74f
     })
@@ -185,7 +210,7 @@ fun HazeGlassCard(
     ) {
         if (hazeEnabled) {
             Box(Modifier.matchParentSize().hazeEffect(hazeState) {
-                blurRadius = 24.dp
+                blurRadius = if (dense) 40.dp else 24.dp
                 noiseFactor = 0.05f
                 tints = listOf(HazeTint(base.copy(alpha = if (dark) 0.20f else 0.06f)))
                 fallbackTint = HazeTint(base.copy(alpha = if (dark) 0.72f else 0.62f))
@@ -198,6 +223,130 @@ fun HazeGlassCard(
             listOf(edgeTop, edgeBottom,
                 Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shape))
         Column(Modifier.padding(contentPadding), content = content)
+    }
+}
+
+/**
+ * 应用内玻璃弹窗：不另开系统窗口，直接盖在当前页面上，
+ * 因此弹窗玻璃可以采样并模糊它背后的真实内容（Haze 的 source 必须在同窗口内）。
+ */
+@Composable
+fun GlassDialog(
+    hazeState: HazeState,
+    onDismissRequest: () -> Unit,
+    title: String,
+    confirmLabel: String? = null,
+    onConfirm: (() -> Unit)? = null,
+    dismissLabel: String? = null,
+    onDismissAction: (() -> Unit)? = null,
+    dismissOnBack: Boolean = true,
+    dismissOnOutside: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val dark = isDarkGlass()
+    BackHandler(enabled = dismissOnBack) { onDismissRequest() }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = if (dark) 0.52f else 0.28f))
+            .imePadding()
+            .then(if (dismissOnOutside) Modifier.pointerInput(Unit) {
+                detectTapGestures { onDismissRequest() }
+            } else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        HazeGlassCard(
+            hazeState = hazeState,
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .fillMaxWidth()
+                .heightIn(max = maxHeight * 0.82f)
+                // 吃掉落在卡片空白处的点击，避免穿透到遮罩触发关闭
+                .pointerInput(Unit) { detectTapGestures { } },
+            radius = 30.dp,
+            contentPadding = PaddingValues(20.dp),
+            dense = true
+        ) {
+            Column(
+                Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    title,
+                    style = TextStyle(fontSize = 19.sp, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface)
+                )
+                Spacer(Modifier.height(10.dp))
+                ProvideTextStyle(TextStyle(fontSize = 14.sp, lineHeight = 21.sp,
+                    color = MaterialTheme.colorScheme.onSurface)) {
+                    content()
+                }
+            }
+            if (confirmLabel != null || dismissLabel != null) {
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (dismissLabel != null) {
+                        GlassDialogSecondaryButton(dismissLabel) {
+                            onDismissAction?.invoke() ?: onDismissRequest()
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    if (confirmLabel != null) {
+                        GlassDialogPrimaryButton(confirmLabel) {
+                            onConfirm?.invoke()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassDialogPrimaryButton(text: String, onClick: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
+    val contentColor = if (primary.luminance() > 0.42f)
+        MaterialTheme.colorScheme.onPrimary else Color.White
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .heightIn(min = 40.dp)
+            .clip(CircleShape)
+            .shadow(10.dp, CircleShape, clip = false,
+                ambientColor = primary.copy(alpha = 0.35f),
+                spotColor = primary.copy(alpha = 0.28f))
+            .background(Brush.verticalGradient(listOf(
+                lerp(primary, Color.White, 0.18f), primary)))
+            .border(1.dp, Color.White.copy(alpha = 0.60f), CircleShape)
+            .clickable(interactionSource = interaction,
+                indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            color = contentColor))
+    }
+}
+
+@Composable
+private fun GlassDialogSecondaryButton(text: String, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .heightIn(min = 40.dp)
+            .clip(CircleShape)
+            .clickable(interactionSource = interaction,
+                indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant))
     }
 }
 

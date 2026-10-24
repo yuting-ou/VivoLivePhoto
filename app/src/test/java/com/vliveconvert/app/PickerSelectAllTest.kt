@@ -52,7 +52,7 @@ class PickerSelectAllTest {
     }
 
     @Test
-    fun dateCapsuleSelectsWholeDay() {
+    fun dateHeaderSelectsWholeDay() {
         val items = renderPicker(6)
         val desc = "全选 ${dateLabel(items.first().sortTime)} 的照片"
 
@@ -63,23 +63,43 @@ class PickerSelectAllTest {
         compose.onNodeWithContentDescription(desc).performClick()
         compose.waitForIdle()
         assertTrue(
-            "日期胶囊再点一次应取消当天全部",
+            "日期标题再点一次应取消当天全部",
             compose.onAllNodesWithText("已选 6 张").fetchSemanticsNodes().isEmpty()
         )
     }
 
-    private fun renderPicker(count: Long): List<MediaItem> {
+    @Test
+    fun photosAreSeparatedByDateHeaders() {
+        val day = 86_400_000L
+        val items = listOf(
+            media(1, 1_754_000_000_000L),
+            media(2, 1_754_000_000_000L + 60_000L),
+            media(3, 1_754_000_000_000L - 10 * day),
+            media(4, 1_754_000_000_000L - 10 * day + 60_000L)
+        )
+        renderItems(items)
+
+        val newer = dateLabel(items.first().sortTime)
+        val older = dateLabel(items.last().sortTime)
+        assertTrue("两个日期必须渲染成两个分段标题", newer != older)
+        compose.onNodeWithText(newer).assertExists()
+        compose.onNodeWithText(older).assertExists()
+    }
+
+    private fun media(id: Long, taken: Long) = MediaItem(
+        id = id, path = "/storage/emulated/0/DCIM/Camera/IMG_$id.jpg",
+        name = "IMG_$id.jpg", bucketId = 7L,
+        dateTaken = taken, dateModified = taken, size = 1024L
+    )
+
+    private fun renderPicker(count: Long): List<MediaItem> =
+        (1L..count).map { id -> media(id, 1_754_000_000_000L + id * 60_000L) }
+            .also { renderItems(it) }
+
+    private fun renderItems(items: List<MediaItem>) {
         val bucket = 7L
         val scanner = PickerScanner(MediaRepo(compose.activity.contentResolver))
         val state = scanner.stateOf(bucket)
-        val items = (1L..count).map { id ->
-            MediaItem(
-                id = id, path = "/storage/emulated/0/DCIM/Camera/IMG_$id.jpg",
-                name = "IMG_$id.jpg", bucketId = bucket,
-                dateTaken = 1_754_000_000_000L + id * 60_000L,
-                dateModified = 1_754_000_000L + id, size = 1024L
-            )
-        }
         state.results.addAll(items)
         state.total = items.size
         state.doneCount.set(items.size)
@@ -94,6 +114,5 @@ class PickerSelectAllTest {
                 onConfirm = {}
             )
         }
-        return items
     }
 }

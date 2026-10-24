@@ -11,6 +11,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.service.ConvertCenter
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -235,5 +236,18 @@ class ToolReachabilityTest {
         compose.onNodeWithText("详情 ›").performClick()
         compose.waitForIdle()
         assertTrue("点「详情 ›」必须展开状态详情", flag("showStatusDetail"))
+        // 玻璃弹窗改为应用内浮层（不再是独立 window），语义树必须能直接读到
+        compose.onNodeWithText("状态详情").assertExists()
+
+        compose.onNodeWithText("知道了").performClick()
+        compose.waitForIdle()
+        assertFalse("「知道了」必须关闭弹窗", flag("showStatusDetail"))
+
+        // 返回键也必须只关弹窗、不退出页面
+        compose.onNodeWithText("详情 ›").performClick()
+        compose.waitForIdle()
+        compose.activity.onBackPressedDispatcher.onBackPressed()
+        compose.waitForIdle()
+        assertFalse("返回键应先关闭弹窗", flag("showStatusDetail"))
     }
 }

@@ -95,6 +95,7 @@ import com.vliveconvert.app.ui.glassHazeSource
 import com.vliveconvert.app.ui.glassSurface
 import com.vliveconvert.app.ui.glassWallpaper
 import com.vliveconvert.app.ui.rememberGlassHazeState
+import dev.chrisbanes.haze.HazeState
 import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateKey
@@ -114,7 +115,8 @@ fun PickerScreen(
     scanner: PickerScanner,
     scannerScope: CoroutineScope,
     onBack: () -> Unit,
-    onConfirm: (List<MediaItem>) -> Unit
+    onConfirm: (List<MediaItem>) -> Unit,
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     var showAlbumMenu by remember { mutableStateOf(false) }
@@ -180,26 +182,17 @@ fun PickerScreen(
         }
     }
 
-    val hazeState = rememberGlassHazeState()
     val density = LocalDensity.current
     // 初始给一个估值，卡片测量后校正；避免首帧网格从顶部跳下来
     var headerHeight by remember { mutableStateOf(104.dp) }
-    var dateCapsuleHeight by remember { mutableStateOf(56.dp) }
 
     val gridState = remember(bucketId) { LazyGridState() }
-    // 日期胶囊：跟随第一个可见照片的日期，始终停在导航下方，不用再把日期条塞进网格
-    val groupedByDate = remember(displayOrder) { displayOrder.groupBy { dateKey(it.sortTime) } }
-    val currentDateKey by remember(displayOrder, gridState) {
-        derivedStateOf {
-            displayOrder.getOrNull(gridState.firstVisibleItemIndex)?.let { dateKey(it.sortTime) }
-        }
+    // 日期分段：照片必须按天断开，只靠一个浮动日期标签会全部堆在一起。
+    // groupBy 保留插入顺序，displayOrder 已按时间倒序，所以分段顺序也正确。
+    val sections = remember(displayOrder) {
+        displayOrder.groupBy { dateKey(it.sortTime) }
+            .map { (key, items) -> PickerSection(key, items) }
     }
-    val currentGroup = currentDateKey?.let { groupedByDate[it] }.orEmpty()
-    val showDateCapsule = currentGroup.isNotEmpty()
-    LaunchedEffect(showDateCapsule) {
-        if (!showDateCapsule) dateCapsuleHeight = 0.dp
-    }
-    val dateInset = if (showDateCapsule) dateCapsuleHeight + 8.dp else 0.dp
 
     Box(Modifier.fillMaxSize()) {
         // 壁纸 + 网格是 Haze 的采样源；浮动导航不在源里，
@@ -244,14 +237,15 @@ fun PickerScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     else -> AlbumGridPage(
-                        orderedItems = displayOrder,
+                        sections = sections,
                         gridState = gridState,
                         selectedIds = selectedIds,
                         selectedIndex = selectedIndex,
                         onToggle = toggleItem,
+                        onToggleGroup = toggleGroup,
                         running = running,
                         contentPadding = PaddingValues(
-                            top = headerHeight + dateInset + 14.dp, bottom = 10.dp)
+                            top = headerHeight + 12.dp, bottom = 10.dp)
                     )
                 }
             }
@@ -401,64 +395,25 @@ fun PickerScreen(
                     )
                 }
             }
-            if (showDateCapsule) {
-                Spacer(Modifier.height(8.dp))
-                val allSel = currentGroup.all { it.id in selectedIds }
-                val someSel = currentGroup.any { it.id in selectedIds }
-                // 药丸按内容收缩，勾选圈紧贴日期；拉满整行会把圈甩到屏幕另一端
-                HazeGlassCard(
-                    hazeState = hazeState,
-                    modifier = Modifier
-                        .onGloballyPositioned { coords ->
-                            val h = with(density) { coords.size.height.toDp() }
-                            if (h != dateCapsuleHeight) dateCapsuleHeight = h
-                        },
-                    radius = 22.dp,
-                    contentPadding = PaddingValues(start = 14.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
-                ) {
-                    Row(
-                        Modifier.heightIn(min = 40.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "${dateLabel(currentGroup.first().sortTime)} · ${currentGroup.size} 张",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            // fill=false：字号放大后胶囊仍随内容收缩，超宽时截断文字而不是挤出屏幕
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        CircleTriCheckbox(
-                            state = when {
-                                allSel -> ToggleableState.On
-                                someSel -> ToggleableState.Indeterminate
-                                else -> ToggleableState.Off
-                            },
-                            onClick = { toggleGroup(currentGroup) },
-                            contentDescription = "全选 ${dateLabel(currentGroup.first().sortTime)} 的照片"
-                        )
-                    }
-                }
-            }
         }
     }
 }
 
 /**
- * 单个相册的网格页：只按顺序铺照片。
- * 日期分组由外层的浮动日期胶囊承担，所以这里不再发 stickyHeader，
- * 照片可以完整地从导航/日期玻璃下滚过。
+ * 单个相册的网格页：按日期分段铺照片。
+ * 日期标题随内容滚动、不做粘性——粘性标题会被浮动导航整条盖住；
+ * 非粘性标题既能清楚分隔每天，又不会永久遮照片。
  */
+private data class PickerSection(val key: String, val items: List<MediaItem>)
+
 @Composable
 private fun AlbumGridPage(
-    orderedItems: List<MediaItem>,
+    sections: List<PickerSection>,
     gridState: LazyGridState,
     selectedIds: Set<Long>,
     selectedIndex: Map<Long, Int>,
     onToggle: (MediaItem) -> Unit,
+    onToggleGroup: (List<MediaItem>) -> Unit,
     running: Boolean,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -472,17 +427,37 @@ private fun AlbumGridPage(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        items(orderedItems, key = { it.key }) { item ->
-            GridCell(
-                item = item,
-                selected = item.id in selectedIds,
-                selectionIndex = selectedIndex[item.id] ?: -1,
-                onToggle = { onToggle(item) }
-            )
+        sections.forEach { section ->
+            item(
+                key = "hdr_${section.key}",
+                span = { GridItemSpan(3) },
+                contentType = "header"
+            ) {
+                val allSel = section.items.all { it.id in selectedIds }
+                val someSel = section.items.any { it.id in selectedIds }
+                DateSectionHeader(
+                    label = dateLabel(section.items.first().sortTime),
+                    count = section.items.size,
+                    checkState = when {
+                        allSel -> ToggleableState.On
+                        someSel -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
+                    },
+                    onToggleAll = { onToggleGroup(section.items) }
+                )
+            }
+            items(section.items, key = { it.key }, contentType = { "photo" }) { item ->
+                GridCell(
+                    item = item,
+                    selected = item.id in selectedIds,
+                    selectionIndex = selectedIndex[item.id] ?: -1,
+                    onToggle = { onToggle(item) }
+                )
+            }
         }
         // 扫描中：网格底部加载圈
         if (running) {
-            item(span = { GridItemSpan(3) }) {
+            item(span = { GridItemSpan(3) }, contentType = "progress") {
                 Box(
                     Modifier.fillMaxWidth().padding(vertical = 20.dp),
                     contentAlignment = Alignment.Center
@@ -491,6 +466,40 @@ private fun AlbumGridPage(
                 }
             }
         }
+    }
+}
+
+/** 日期分段标题：日期 + 当天张数，右侧圆圈可整天全选/取消 */
+@Composable
+private fun DateSectionHeader(
+    label: String,
+    count: Int,
+    checkState: ToggleableState,
+    onToggleAll: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text("$count 张", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        CircleTriCheckbox(
+            state = checkState,
+            onClick = onToggleAll,
+            contentDescription = "全选 $label 的照片"
+        )
     }
 }
 

@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
 
 /**
  * 设置页：收纳主界面原有的全部低频项（输出目录、两个开关、修复时间、移到相机、崩溃日志）。
@@ -72,12 +73,14 @@ fun SettingsScreen(
     dynamicColor: Boolean,
     onToggleDynamicColor: (Boolean) -> Unit,
     onOpenAbout: () -> Unit,
-    statusText: String = ""
+    statusText: String = "",
+    hazeState: HazeState = rememberGlassHazeState()
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
+            .glassHazeSource(hazeState)
     ) {
         // ── 顶栏 ──
         Row(

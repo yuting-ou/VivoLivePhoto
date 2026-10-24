@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,9 +22,9 @@ import org.robolectric.annotation.Config
 /**
  * 「输出目录」编辑框的可达性。
  *
- * 单独一个类、用**默认视口**：含文本框的 AlertDialog 在自定义视口下会让 Compose 测试
- * 60 秒进不了 idle（用裸 Activity 渲染同样内容的对话框也复现同样挂起，
- * 与本项目代码无关，属 Robolectric/Compose 测试框架限制）。放在这里是为了不假装它"测过了"。
+ * 单独一个类、用**默认视口**（历史原因：旧版含文本框的 AlertDialog 在自定义视口下
+ * 会让 Compose 测试 60 秒进不了 idle；现在弹窗已改成应用内玻璃浮层，仍保留默认视口
+ * 覆盖真实入口）。此外钉住「设置页 + 预测性返回处理器」叠加时，返回键只关弹窗。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -66,5 +67,13 @@ class OutputPathDialogTest {
         compose.waitForIdle()
 
         assertTrue("点「输出目录」必须弹出编辑框", flag("showOutputPathDialog"))
+        compose.onNodeWithText("相对主存储的路径，导出的单文件实况会保存到这里；留空恢复默认。")
+            .assertExists()
+
+        // 设置页叠着预测性返回处理器，弹窗自己的 BackHandler 必须在它前面消费
+        compose.activity.onBackPressedDispatcher.onBackPressed()
+        compose.waitForIdle()
+        assertFalse("返回键应只关弹窗、不退出设置页", flag("showOutputPathDialog"))
+        assertTrue("设置页本身应仍在", flag("showSettings"))
     }
 }
