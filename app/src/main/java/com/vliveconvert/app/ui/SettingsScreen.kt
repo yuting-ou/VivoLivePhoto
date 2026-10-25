@@ -44,8 +44,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -96,8 +99,9 @@ fun SettingsScreen(
                 onClick = onBack,
                 size = 38.dp
             )
-            Spacer(Modifier.width(10.dp))
-            Text("设置", style = glassTitleStyle())
+            Spacer(Modifier.width(12.dp))
+            Text("设置", style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp, color = MaterialTheme.colorScheme.onBackground))
         }
 
         // 设置页的动作反馈就地显示——v1.7.20 前反馈只写主页状态栏，
@@ -255,7 +259,7 @@ private fun SectionLabel(text: String) {
     Text(
         text,
         style = glassSectionLabelStyle(),
-        modifier = Modifier.padding(start = 0.dp, bottom = 7.dp)
+        modifier = Modifier.padding(start = 12.dp, bottom = 7.dp)
     )
 }
 

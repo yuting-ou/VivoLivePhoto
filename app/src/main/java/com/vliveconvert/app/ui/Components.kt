@@ -388,7 +388,7 @@ fun ThemedSnackbar(
     HazeGlassCard(
         hazeState = rememberGlassHazeState(),
         modifier = modifier.fillMaxWidth(),
-        radius = 16.dp,
+        radius = 20.dp,
         contentPadding = PaddingValues(start = 16.dp, end = 8.dp, top = 5.dp, bottom = 5.dp)
     ) {
         Row(

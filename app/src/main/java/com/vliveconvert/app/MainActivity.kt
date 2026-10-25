@@ -400,12 +400,15 @@ class MainActivity : ComponentActivity() {
             crashExportMessage != null -> crashExportMessage = null
             showRepairConfirm -> showRepairConfirm = false
             showOutputPathDialog -> showOutputPathDialog = false
+            showAlbumSheet -> showAlbumSheet = false
         }
     }
 
     // 自定义输出目录（MediaStore 相对路径，默认 Pictures/VLiveConvert）
     private var outputRelPath by mutableStateOf("Pictures/VLiveConvert")
     private var showOutputPathDialog by mutableStateOf(false)
+    // 选择器相册切换面板：与其它弹层一样纳入统一返回优先级
+    private var showAlbumSheet by mutableStateOf(false)
     // 崩溃日志导出结果的弹窗文案；null = 不弹。用弹窗而不是顶栏小字（用户反馈过看不见）
     // 返回链路诊断：最近一次手势的事件数/路径/动画结果，就地显示在设置页（真机取证用）
     private var lastBackTrace by mutableStateOf("")
@@ -745,7 +748,7 @@ class MainActivity : ComponentActivity() {
                 val anyDialogOpen = showPreflightDialog || showAllFilesDialog ||
                     showLocationDialog || showLocationSettingsDialog || showSettingsDialog ||
                     showStatusDetail || crashExportMessage != null || showRepairConfirm ||
-                    isRepairingLocation || showSpacePause || showOutputPathDialog
+                    isRepairingLocation || showSpacePause || showOutputPathDialog || showAlbumSheet
                 BackHandler(enabled = anyDialogOpen) { dismissTopDialog() }
                 PredictiveBackHandler(
                     enabled = hasReadPermission() && !ConvertCenter.isConverting &&
@@ -870,6 +873,8 @@ class MainActivity : ComponentActivity() {
                                     showPicker = false
                                     addPickedItems(picked)
                                 },
+                                showAlbumSheet = showAlbumSheet,
+                                onAlbumSheetChange = { showAlbumSheet = it },
                                 hazeState = appHazeState
                             )
                             Screen.FixTime -> FixTimeScreen(

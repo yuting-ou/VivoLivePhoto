@@ -355,7 +355,7 @@ fun FixTimeScreen(
             HazeGlassCard(
                 hazeState = hazeState,
                 modifier = Modifier.fillMaxWidth(),
-                radius = 30.dp,
+                radius = 28.dp,
                 contentPadding = PaddingValues(10.dp)
             ) {
                 if (isFixing) {
@@ -450,7 +450,7 @@ private fun FixCell(
     val transition = updateTransition(selected, label = "fixCell")
     val scale by transition.animateFloat(label = "scale") { if (it) 0.88f else 1f }
     val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
-    val cornerRadius = lerp(14.dp, 20.dp, cornerFraction)
+    val cornerRadius = lerp(12.dp, 16.dp, cornerFraction)
     val badgeBg by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary
                        else Color.Black.copy(alpha = 0.28f),
@@ -474,7 +474,7 @@ private fun FixCell(
     Box(
         modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onToggle)
     ) {
         Box(

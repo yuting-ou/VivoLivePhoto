@@ -35,6 +35,9 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -199,7 +202,7 @@ fun Modifier.glassBackdropSource(hazeState: HazeState): Modifier {
 fun HazeGlassCard(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    radius: Dp = 30.dp,
+    radius: Dp = 28.dp,
     contentPadding: PaddingValues = PaddingValues(10.dp),
     /** 弹窗等文字密集场景加一层膜，保证高亮照片透上来时仍可读 */
     dense: Boolean = false,
@@ -368,10 +371,15 @@ fun GlassDialog(
 ) {
     val dark = isDarkGlass()
     BackHandler(enabled = dismissOnBack) { onDismissRequest() }
+    // 入场动效：遮罩淡入 + 卡片弹簧轻微放大弹出（与相册面板同一弹簧手感）
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
+    }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = if (dark) 0.52f else 0.28f))
+            .background(Color.Black.copy(alpha = (if (dark) 0.52f else 0.28f) * appear.value))
             .imePadding()
             .then(if (dismissOnOutside) Modifier.pointerInput(Unit) {
                 detectTapGestures { onDismissRequest() }
@@ -384,9 +392,15 @@ fun GlassDialog(
                 .padding(horizontal = 24.dp)
                 .fillMaxWidth()
                 .heightIn(max = maxHeight * 0.82f)
+                .graphicsLayer {
+                    val p = appear.value
+                    scaleX = 0.92f + 0.08f * p
+                    scaleY = 0.92f + 0.08f * p
+                    alpha = p
+                }
                 // 吃掉落在卡片空白处的点击，避免穿透到遮罩触发关闭
                 .pointerInput(Unit) { detectTapGestures { } },
-            radius = 30.dp,
+            radius = 28.dp,
             contentPadding = PaddingValues(20.dp),
             dense = true
         ) {
@@ -477,7 +491,7 @@ private fun GlassDialogSecondaryButton(text: String, onClick: () -> Unit) {
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    radius: Dp = 26.dp,
+    radius: Dp = 24.dp,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -491,7 +505,7 @@ fun GlassCard(
 
 /** 只有玻璃底、内容自己排（例如整块可滚动列表） */
 @Composable
-fun GlassPanel(modifier: Modifier = Modifier, radius: Dp = 26.dp) {
+fun GlassPanel(modifier: Modifier = Modifier, radius: Dp = 24.dp) {
     Box(modifier.glassSurface(radius)) {
         Box(Modifier.matchParentSize().glassSheen())
         Box(Modifier.matchParentSize().glassBottomShade())
@@ -527,7 +541,10 @@ fun GlassIconTile(
     val dark = isDarkGlass()
     val interaction = remember { MutableInteractionSource() }
     val scale by rememberPressScale(interaction, pressedScale = 0.92f)
-    val shape = RoundedCornerShape(size * cornerFraction)
+    // 圆角并入全局体系：磁贴 = min(12dp, 34%)，与缩略图(12dp)同心于 24dp 卡片；
+    // cornerFraction >= 0.5 表示显式要圆（播放角标等圆形语义）
+    val shape = if (cornerFraction >= 0.5f) CircleShape
+                else RoundedCornerShape(minOf(12.dp, size * cornerFraction))
     val top = if (tint != null) tint.copy(alpha = if (dark) 0.34f else 0.26f)
               else Color.White.copy(alpha = if (dark) 0.16f else 0.72f)
     val bottom = if (tint != null) tint.copy(alpha = if (dark) 0.12f else 0.08f)

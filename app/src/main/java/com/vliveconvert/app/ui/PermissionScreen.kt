@@ -74,7 +74,7 @@ fun PermissionScreen(
 
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    radius = 26.dp,
+                    radius = 24.dp,
                     contentPadding = PaddingValues(18.dp)
                 ) {
                     Text(

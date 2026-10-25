@@ -1,5 +1,7 @@
 package com.vliveconvert.app.picker
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
@@ -12,12 +14,17 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +41,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -45,6 +54,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +87,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -91,6 +104,8 @@ import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.GlassDivider
 import com.vliveconvert.app.ui.HazeGlassCard
+import com.vliveconvert.app.ui.EaseOutStrong
+import com.vliveconvert.app.ui.GlassIconTile
 import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.glassSurface
 import com.vliveconvert.app.ui.glassWallpaper
@@ -116,10 +131,11 @@ fun PickerScreen(
     scannerScope: CoroutineScope,
     onBack: () -> Unit,
     onConfirm: (List<MediaItem>) -> Unit,
+    showAlbumSheet: Boolean = false,
+    onAlbumSheetChange: (Boolean) -> Unit = {},
     hazeState: HazeState = rememberGlassHazeState()
 ) {
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
-    var showAlbumMenu by remember { mutableStateOf(false) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
     // 选择查询表：每个格子/日期头若都线性扫 selected，八千张规模就是 O(n²)；
@@ -311,7 +327,7 @@ fun PickerScreen(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.clickableNoRipple(onClick = {
-                                if (albums.size > 1) showAlbumMenu = true
+                                if (albums.size > 1) onAlbumSheetChange(true)
                             })
                         ) {
                             Text("选择照片", style = TextStyle(fontSize = 17.sp,
@@ -328,18 +344,6 @@ fun PickerScreen(
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(14.dp))
                                 }
-                            }
-                        }
-                        DropdownMenu(expanded = showAlbumMenu,
-                            onDismissRequest = { showAlbumMenu = false }) {
-                            albums.forEach { album ->
-                                DropdownMenuItem(
-                                    text = { Text("${album.name} · ${album.count} 张") },
-                                    onClick = {
-                                        currentBucketId = album.bucketId
-                                        showAlbumMenu = false
-                                    }
-                                )
                             }
                         }
                     }
@@ -395,6 +399,149 @@ fun PickerScreen(
                     )
                 }
             }
+        }
+        // ── 相册切换：玻璃底部面板（封面 + 名称 + 张数 + 当前勾选）。
+        //    遮罩淡入淡出；面板弹簧上滑「弹出」，退场更快 ──
+        AnimatedVisibility(
+            visible = showAlbumSheet,
+            enter = fadeIn(tween(160, easing = EaseOutStrong)),
+            exit = fadeOut(tween(120))
+        ) {
+            AlbumSheet(
+                modifier = Modifier.animateEnterExit(
+                    // 「弹出来」：位移弹簧带一点回弹，缩放锚在底边中点
+                    enter = slideInVertically(
+                        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f)
+                    ) { it } + scaleIn(
+                        initialScale = 0.94f,
+                        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    ),
+                    exit = slideOutVertically(tween(160)) { it / 2 } + scaleOut(
+                        targetScale = 0.96f, animationSpec = tween(160)
+                    )
+                ),
+                albums = albums,
+                currentBucketId = bucketId,
+                hazeState = hazeState,
+                onDismiss = { onAlbumSheetChange(false) },
+                onSelect = { album ->
+                    currentBucketId = album.bucketId
+                    onAlbumSheetChange(false)
+                }
+            )
+        }
+    }
+}
+
+/** 相册切换面板：替代原先光秃秃的下拉菜单，与整体玻璃/圆角语言一致 */
+@Composable
+private fun AlbumSheet(
+    modifier: Modifier = Modifier,
+    albums: List<AlbumInfo>,
+    currentBucketId: Long?,
+    hazeState: HazeState,
+    onDismiss: () -> Unit,
+    onSelect: (AlbumInfo) -> Unit
+) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    BackHandler(enabled = true) { onDismiss() }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = if (dark) 0.52f else 0.28f))
+            .imePadding()
+            .pointerInput(Unit) { detectTapGestures { onDismiss() } }
+    ) {
+        HazeGlassCard(
+            hazeState = hazeState,
+            modifier = modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                .fillMaxWidth()
+                .heightIn(max = maxHeight * 0.72f)
+                .pointerInput(Unit) { detectTapGestures { } },
+            radius = 28.dp,
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "选择相册",
+                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface),
+                    modifier = Modifier.weight(1f)
+                )
+                GlassIconTile(size = 28.dp, onClick = onDismiss) {
+                    Icon(
+                        Icons.Filled.Close, contentDescription = "关闭",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Column(
+                Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                albums.forEachIndexed { index, album ->
+                    AlbumSheetRow(
+                        album = album,
+                        selected = album.bucketId == currentBucketId,
+                        onClick = { onSelect(album) }
+                    )
+                    if (index != albums.lastIndex) {
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumSheetRow(
+    album: AlbumInfo,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val resolver = LocalContext.current.contentResolver
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))) {
+            val coverUri = android.net.Uri.parse(
+                android.provider.MediaStore.Images.Media.getContentUri(
+                    android.provider.MediaStore.VOLUME_EXTERNAL).toString() + "/${album.coverId}"
+            )
+            MediaThumbnail(coverUri, resolver, Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                album.name,
+                style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface),
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Text("${album.count} 张", style = TextStyle(fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant))
+        }
+        if (selected) {
+            Icon(
+                Icons.Filled.Check, contentDescription = "当前相册",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }
@@ -527,7 +674,7 @@ private fun AlbumChip(
             Box(
                 Modifier
                     .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
             ) {
                 val coverUri = android.net.Uri.parse(
                     android.provider.MediaStore.Images.Media.getContentUri(
@@ -564,7 +711,7 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
     val scale by transition.animateFloat(label = "scale") { if (it) 0.86f else 1f }
     // 圆角：未选 6dp、选中 16dp；以 0..1 分数动画映射 Dp
     val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
-    val cornerRadius = lerp(10.dp, 16.dp, cornerFraction)
+    val cornerRadius = lerp(12.dp, 16.dp, cornerFraction)
 
     // 徽章背景色：透明→primary（颜色平滑过渡）
     val badgeBg by animateColorAsState(
@@ -584,7 +731,7 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
     Box(
         Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onToggle)
     ) {
         // 内层图片：中心缩放 + 圆角/边框动画

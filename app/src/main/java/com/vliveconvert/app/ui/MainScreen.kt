@@ -338,7 +338,7 @@ fun MainScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .wrapContentHeight()
-                                .glassSurface(radius = 26.dp)
+                                .glassSurface(radius = 24.dp)
                         ) {
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
@@ -390,7 +390,7 @@ fun MainScreen(
             HazeGlassCard(
                 hazeState = hazeState,
                 modifier = Modifier.fillMaxWidth(),
-                radius = 30.dp,
+                radius = 28.dp,
                 contentPadding = PaddingValues(10.dp)
             ) {
                 // 三态：2 转换中 / 1 完成节拍 / 0 空闲；尺寸由 SizeTransform 平滑过渡
@@ -710,22 +710,16 @@ private fun ConvertItemRow(
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
                     ) {
-                        // 完成瞬间「显影」：低饱和 → 全彩
-                        val develop by animateFloatAsState(
-                            targetValue = if (ci.done) 1f else 0.25f,
-                            animationSpec = tween(600, delayMillis = 80,
-                                easing = LinearOutSlowInEasing),
-                            label = "develop"
-                        )
+                        // 待转换也必须显示清晰预览：选中后要能认出是哪张
+                        // （旧「显影」隐喻让待转换一直糊着，用户反馈看不到预览图）。
+                        // 完成后源文件可能已被移走/删除（item.uri 失效），
+                        // 优先用导出产物的 URI（ConvertService 成功时写入 outUri）
+                        val thumbUri = ci.outUri?.let {
+                            runCatching { android.net.Uri.parse(it) }.getOrNull()
+                        } ?: ci.item.uri
                         MediaThumbnail(
-                            ci.item.uri, resolver,
-                            Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { alpha = 0.35f + 0.65f * develop }
-                                .then(
-                                    if (develop < 1f) Modifier.blur((8 * (1 - develop)).dp)
-                                    else Modifier
-                                )
+                            thumbUri, resolver,
+                            Modifier.fillMaxSize()
                         )
                     }
                     // 状态角标：玻璃圆钮 + 符号；弹入动画保留

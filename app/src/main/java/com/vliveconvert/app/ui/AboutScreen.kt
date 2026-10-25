@@ -98,7 +98,7 @@ fun AboutScreen(
             Spacer(Modifier.size(12.dp))
             Text(
                 "关于与开源许可",
-                style = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.5).sp,
                     color = MaterialTheme.colorScheme.onBackground)
             )
@@ -211,8 +211,8 @@ fun AboutScreen(
             Spacer(Modifier.height(8.dp))
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                radius = 20.dp,
-                contentPadding = PaddingValues(14.dp)
+                radius = 24.dp,
+                contentPadding = PaddingValues(16.dp)
             ) {
                 Text(
                     licenseText ?: "正在读取许可证文本…",
@@ -230,8 +230,8 @@ fun AboutScreen(
             Spacer(Modifier.height(8.dp))
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                radius = 20.dp,
-                contentPadding = PaddingValues(14.dp)
+                radius = 24.dp,
+                contentPadding = PaddingValues(16.dp)
             ) {
                 Text(
                     apacheText ?: "正在读取许可证文本…",
@@ -252,7 +252,7 @@ private fun LicenseLink(url: String, onClick: () -> Unit) {
         style = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.primary,
             textDecoration = TextDecoration.Underline),
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp)
     )
