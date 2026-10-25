@@ -86,7 +86,7 @@ internal object FooterUtil {
      * footer 结构：[ID 字段（长度可变）][FF FF FF FF][magic 11B]，紧随 marker 之后的
      * 4 字节 len2 理论上 = tail+4。但真机样本存在两种变体：
      * - 普通实况：ID 字段 28 字符，tail 43B，len2=47（标准语义）
-     * - vivo X200 Ultra 人像实况（version 2202+）：ID 字段前多 12 字节二进制
+     * - vivo X200 系列人像实况（version 2202+）：ID 字段前多 12 字节二进制
      *   （00*11 + '/'），tail 55B，但 len2 字段实写 2（与长度无关的新语义）
      * 故长度不做硬编码：先按 len2 试探，失败回退「tail 直至文件尾」；
      * 两种路径均以「末尾 FF 分隔 + magic」校验兜底。

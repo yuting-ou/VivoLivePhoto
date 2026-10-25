@@ -12,7 +12,7 @@
 > [`VivoLivePhoto-v2.2.0.apk`](./VivoLivePhoto-v2.2.0.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
-> Ultra 真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
+> 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
 > [v2.1.0](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.1.0)。
 >
 > **安装说明**：v1.7.8 起更换了应用包名（`com.yutingou.yingzhongying`），与原版及各改进版
@@ -92,7 +92,7 @@ VLiveConvert 把 vivo 双文件实况转成「单文件实况」——一个 .jp
 
 | 步骤               | 说明                                                                                                                                                                                      |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 视频 uuid box 处理 | 保留`vivoMediaEStream`（旧机型实况标识，X200 Ultra 起已无）；剥掉 `vivoMediaExtInfo`（内嵌的源 footer 包装，与尾部 convert footer 重复会破坏识别）                                    |
+| 视频 uuid box 处理 | 保留`vivoMediaEStream`（旧机型实况标识，X200 系列起已无）；剥掉 `vivoMediaExtInfo`（内嵌的源 footer 包装，与尾部 convert footer 重复会破坏识别）                                    |
 | streamdata 附加块  | 源 JPG 中紧跟图像数据的 vivo 私有流，原样透传：普通实况约 114B（DEGS 流信息）；人像实况约 4MB（IAC 深度/虚化数据，丢失则相册不显示人像徽标、无法后编辑光圈/虚化）                         |
 | lpex box           | 向`moov` 插入 LivePhotoExtension box（含封面帧时间戳等），并修复 stco/co64 偏移；缺 lpex 不被识别                                                                                       |
 | convert footer     | 尾部追加`cameralbum!` footer（`com.vivo.gallery.file.convert=10004` 等），透传 imageTime，并合并源 JPG/MP4 footer 的全部附加字段（人像: `moduleid=portrait`、`joint.refocus` 等） |
@@ -108,11 +108,11 @@ VLiveConvert 把 vivo 双文件实况转成「单文件实况」——一个 .jp
 3. XMP 无 `MotionPhoto`/`MicroVideo` 内嵌标记（排除 Google/OPPO/小米等单文件内嵌格式）
 4. JPG 尾部能解析出含 28 字符 livephoto ID 的 `cameralbum!` footer
 
-footer 尾部长度可变：普通实况 ID 字段 28 字符（tail 43B）；vivo X200 Ultra 人像实况
+footer 尾部长度可变：普通实况 ID 字段 28 字符（tail 43B）；vivo X200 系列人像实况
 ID 字段前多 12 字节二进制（tail 55B，len2 字段语义已变）。解析器按 len2 试探、
 失败回退「尾部直取到文件尾」，以末尾 FF 分隔 + magic 校验兜底。
 
-注：X200 Ultra 双文件 MP4 已不含 `vivoMediaEStream` uuid box（旧 iQOO 格式才有）；
+注：X200 系列双文件 MP4 已不含 `vivoMediaEStream` uuid box（旧款机型格式才有）；
 识别核心为 lpex box + convert footer + XMP。
 
 ## 代码结构
@@ -167,7 +167,7 @@ app/src/main/java/com/vliveconvert/app/
 
 ### v2.1.0（全选不再卡死 + 清空可撤销 + 大字号适配）
 
-**一轮真机实测驱动的性能与可达性修复**（测试机：vivo X200 Ultra，360dp 宽；
+**一轮真机实测驱动的性能与可达性修复**（测试机：vivo X200 系列机型，360dp 宽；
 相机相册 19287 张、其中双文件实况 8550 张）：
 
 - **全选卡死（ANR）**：选择器全选 8550 张时，旧实现对每个格子/日期头都线性扫
