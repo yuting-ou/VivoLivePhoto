@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 71
-        versionName = "2.2.0-test2"
+        versionCode = 72
+        versionName = "2.2.0-test3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -114,6 +114,9 @@ dependencies {
     // 真实背景采样模糊（液态玻璃）：GitHub chrisbanes/haze，Apache-2.0。
     // 1.6.10 用 Kotlin 2.1/Compose 1.8 构建，与本项目 Kotlin 2.2.10 兼容
     implementation("dev.chrisbanes.haze:haze:1.6.10")
+    // 液态玻璃折射/色散/高光：GitHub Kyant0/AndroidLiquidGlass，Apache-2.0。
+    // 1.0.2 面向 Kotlin 2.2/Compose 1.10，与本项目同代
+    implementation("io.github.kyant0:backdrop:1.0.2")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
     // JVM 单测替换 android.jar 的 org.json stub（stub 全部方法抛异常）为真实实现

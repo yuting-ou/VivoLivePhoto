@@ -42,7 +42,7 @@ fun PermissionScreen(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
-            .glassHazeSource(hazeState)
+            .glassBackdropSource(hazeState)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {

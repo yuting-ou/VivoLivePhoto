@@ -155,7 +155,7 @@ fun MainScreen(
             Modifier
                 .fillMaxSize()
                 .glassWallpaper()
-                .glassHazeSource(hazeState)
+                .glassBackdropSource(hazeState)
         ) {
         // ── 顶栏：大标题 + 添加入口 + 设置 ──
         Row(
@@ -208,14 +208,14 @@ fun MainScreen(
                 radius = 24.dp
             ) {
                 notices.forEachIndexed { index, notice ->
-                    if (index > 0) GlassDivider(startInset = 53.dp)
+                    if (index > 0) GlassDivider(startInset = 57.dp)
                     Row(
                         Modifier.fillMaxWidth().height(54.dp).padding(start = 12.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        GlassCircle(30.dp, notice.accent) {
+                        GlassIconTile(30.dp, notice.accent) {
                             Icon(notice.icon, null, tint = notice.accent,
-                                modifier = Modifier.size(15.dp))
+                                modifier = Modifier.size(16.dp))
                         }
                         Spacer(Modifier.width(11.dp))
                         Text(
@@ -812,12 +812,12 @@ private fun ConvertItemRow(
                     Spacer(Modifier.width(4.dp))
                 }
                 if (!busy) {
-                    GlassCircle(size = 30.dp, onClick = onRemove) {
+                    GlassIconTile(size = 28.dp, onClick = onRemove) {
                         Icon(
                             Icons.Filled.Close,
                             contentDescription = "移除",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }

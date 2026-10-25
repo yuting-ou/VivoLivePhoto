@@ -163,7 +163,7 @@ fun FixTimeScreen(
             Modifier
                 .fillMaxSize()
                 .glassWallpaper()
-                .glassHazeSource(hazeState)
+                .glassBackdropSource(hazeState)
         ) {
         // ── 顶栏：玻璃返回 + 大标题 ──
         Row(

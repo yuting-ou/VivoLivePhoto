@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,10 +53,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalView
 import android.os.Build
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
@@ -106,9 +118,9 @@ fun Modifier.glassSurface(radius: Dp = 26.dp): Modifier {
     val dark = isDarkGlass()
     val shape = RoundedCornerShape(radius)
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
-    val fillTop = base.copy(alpha = if (dark) 0.74f else 0.66f)
-    val fillBottom = base.copy(alpha = if (dark) 0.46f else 0.34f)
-    val edgeTop = Color.White.copy(alpha = if (dark) 0.22f else 0.95f)
+    val fillTop = base.copy(alpha = if (dark) 0.68f else 0.60f)
+    val fillBottom = base.copy(alpha = if (dark) 0.42f else 0.30f)
+    val edgeTop = Color.White.copy(alpha = if (dark) 0.26f else 0.95f)
     val edgeBottom = Color.White.copy(alpha = if (dark) 0.06f else 0.26f)
     return this
         .shadow(18.dp, shape, clip = false,
@@ -118,6 +130,14 @@ fun Modifier.glassSurface(radius: Dp = 26.dp): Modifier {
         .background(Brush.verticalGradient(listOf(fillTop, fillBottom)))
         .border(1.dp, Brush.verticalGradient(
             listOf(edgeTop, edgeBottom, Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shape)
+}
+
+/** 底部厚度阴影：玻璃下缘压暗一点，才有「一块玻璃」的体积感 */
+@Composable
+fun Modifier.glassBottomShade(): Modifier {
+    val dark = isDarkGlass()
+    return this.background(Brush.verticalGradient(
+        listOf(Color.Transparent, Color.Black.copy(alpha = if (dark) 0.12f else 0.05f))))
 }
 
 /** 顶部高光（画在内容下方，玻璃的「湿润感」） */
@@ -158,6 +178,20 @@ fun Modifier.glassHazeSource(state: HazeState): Modifier {
 }
 
 /**
+ * 全应用共享的折射采样层（Kyant0/Backdrop，Apache-2.0）：
+ * 页面内容录进一个 GraphicsLayer，玻璃卡按自己的位置取出背景并做 SDF 折射。
+ */
+val LocalGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+
+/** 页面内容的采样源：有折射层时用 LayerBackdrop，否则退回 Haze */
+@Composable
+fun Modifier.glassBackdropSource(hazeState: HazeState): Modifier {
+    val backdrop = LocalGlassBackdrop.current
+    return if (backdrop != null && hazeAvailable()) this.layerBackdrop(backdrop)
+           else this.glassHazeSource(hazeState)
+}
+
+/**
  * 带真实背景模糊的玻璃卡：Haze 负责采样/模糊，本组件负责白膜、高光与折射描边。
  * 背景层必须由调用方用 [glassHazeSource] 标记，且不能把本卡片包含进源里（避免反馈）。
  */
@@ -171,6 +205,11 @@ fun HazeGlassCard(
     dense: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val backdrop = LocalGlassBackdrop.current
+    if (backdrop != null && hazeAvailable()) {
+        LensGlassCard(backdrop, modifier, radius, contentPadding, dense, content)
+        return
+    }
     val hazeEnabled = hazeAvailable()
     val dark = isDarkGlass()
     val shape = RoundedCornerShape(radius)
@@ -222,6 +261,90 @@ fun HazeGlassCard(
         Box(Modifier.matchParentSize().border(1.dp, Brush.verticalGradient(
             listOf(edgeTop, edgeBottom,
                 Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shape))
+        Column(Modifier.padding(contentPadding), content = content)
+    }
+}
+
+/**
+ * 折射版玻璃卡：Kyant0/Backdrop 把背景采样进 GraphicsLayer，
+ * 再用 AGSL 按圆角矩形 SDF 做边缘压缩折射、色散与方向性高光。
+ * 这是「玻璃 vs 塑料」的关键：只有模糊和白边时，背景只是被磨砂，没有光学变形。
+ */
+@Composable
+private fun LensGlassCard(
+    backdrop: LayerBackdrop,
+    modifier: Modifier,
+    radius: Dp,
+    contentPadding: PaddingValues,
+    dense: Boolean,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val dark = isDarkGlass()
+    val shape = RoundedCornerShape(radius)
+    val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
+    // 玻璃中心要留出显示背景的余量；文字密集的弹窗膜更厚
+    val surfaceAlpha = when {
+        dense && dark -> 0.78f
+        dense -> 0.78f
+        dark -> 0.66f
+        else -> 0.52f
+    }
+    val blurRadius = if (dense) 18.dp else 18.dp
+    val refractionHeight = if (dense) 24.dp else 22.dp
+    val refractionAmount = if (dense) 44.dp else 40.dp
+    val highlight = if (dense) {
+        Highlight.Plain.copy(width = 0.8.dp,
+            alpha = if (dark) 0.28f else 0.36f)
+    } else {
+        Highlight.Default.copy(width = 1.2.dp,
+            alpha = if (dark) 0.52f else 0.60f)
+    }
+    val innerShadow = InnerShadow(
+        radius = if (dense) 18.dp else 12.dp,
+        offset = DpOffset(0.dp, 3.dp),
+        color = Color.Black.copy(alpha = if (dark) 0.22f else 0.10f)
+    )
+    val shadow = Shadow(
+        radius = if (dense) 28.dp else 20.dp,
+        offset = DpOffset(0.dp, if (dark) 10.dp else 8.dp),
+        color = Color.Black.copy(alpha = if (dark) 0.42f else 0.16f)
+    )
+    Box(
+        modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(blurRadius.toPx())
+                lens(
+                    refractionHeight = refractionHeight.toPx(),
+                    refractionAmount = refractionAmount.toPx(),
+                    depthEffect = true,
+                    chromaticAberration = !dense
+                )
+                if (dense && !dark) {
+                    colorControls(brightness = 0.06f, saturation = 1.15f)
+                }
+            },
+            highlight = { highlight },
+            shadow = { shadow },
+            innerShadow = { innerShadow },
+            onDrawSurface = {
+                drawRect(base.copy(alpha = surfaceAlpha))
+                // 顶部湿面高光 + 底部厚度阴影，补足玻璃的「体积感」
+                drawRect(Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = if (dark) 0.08f else 0.20f),
+                        Color.Transparent),
+                    startY = 0f, endY = size.height * 0.55f
+                ))
+                drawRect(Brush.verticalGradient(
+                    listOf(Color.Transparent,
+                        Color.Black.copy(alpha = if (dark) 0.10f else 0.05f)),
+                    startY = size.height * 0.55f, endY = size.height
+                ))
+            }
+        )
+    ) {
         Column(Modifier.padding(contentPadding), content = content)
     }
 }
@@ -361,6 +484,7 @@ fun GlassCard(
     val shape = RoundedCornerShape(radius)
     Box(modifier.glassSurface(radius)) {
         Box(Modifier.matchParentSize().glassSheen())
+        Box(Modifier.matchParentSize().glassBottomShade())
         Column(Modifier.padding(contentPadding), content = content)
     }
 }
@@ -370,6 +494,7 @@ fun GlassCard(
 fun GlassPanel(modifier: Modifier = Modifier, radius: Dp = 26.dp) {
     Box(modifier.glassSurface(radius)) {
         Box(Modifier.matchParentSize().glassSheen())
+        Box(Modifier.matchParentSize().glassBottomShade())
     }
 }
 
@@ -385,23 +510,30 @@ fun GlassDivider(startInset: Dp = 0.dp, endInset: Dp = 0.dp) {
     }
 }
 
-/** 玻璃圆钮：iOS 26 的 Ctrl Center 语言，彩色字形落在淡色玻璃上（不是实色方块） */
+/**
+ * 玻璃图标磁贴：二级页的图标底座。
+ * 方圆角（squircle 感）而不是整圆——整圆在列表里显得像贴纸，
+ * 磁贴才能和卡片的圆角语言对齐；彩色字形落在淡色玻璃上。
+ */
 @Composable
-fun GlassCircle(
-    size: Dp = 32.dp,
+fun GlassIconTile(
+    size: Dp = 34.dp,
     tint: Color? = null,
     modifier: Modifier = Modifier,
+    cornerFraction: Float = 0.34f,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val dark = isDarkGlass()
     val interaction = remember { MutableInteractionSource() }
     val scale by rememberPressScale(interaction, pressedScale = 0.92f)
-    val shape = CircleShape
+    val shape = RoundedCornerShape(size * cornerFraction)
     val top = if (tint != null) tint.copy(alpha = if (dark) 0.34f else 0.26f)
               else Color.White.copy(alpha = if (dark) 0.16f else 0.72f)
-    val bottom = if (tint != null) tint.copy(alpha = 0.10f)
+    val bottom = if (tint != null) tint.copy(alpha = if (dark) 0.12f else 0.08f)
                  else Color.White.copy(alpha = if (dark) 0.08f else 0.34f)
+    val edgeTop = Color.White.copy(alpha = if (dark) 0.28f else 0.95f)
+    val edgeBottom = Color.White.copy(alpha = if (dark) 0.06f else 0.30f)
     val base = modifier
         .size(size)
         .graphicsLayer {
@@ -413,9 +545,7 @@ fun GlassCircle(
             spotColor = Color.Black.copy(alpha = 0.08f))
         .clip(shape)
         .background(Brush.verticalGradient(listOf(top, bottom)))
-        .border(1.dp, Brush.verticalGradient(listOf(
-            Color.White.copy(alpha = if (dark) 0.24f else 0.95f),
-            Color.White.copy(alpha = if (dark) 0.06f else 0.30f))), shape)
+        .border(1.dp, Brush.verticalGradient(listOf(edgeTop, edgeBottom)), shape)
     Box(
         if (onClick != null) {
             base.clickable(
@@ -429,12 +559,31 @@ fun GlassCircle(
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(
             listOf(Color.White.copy(alpha = if (dark) 0.06f else 0.22f),
                 Color.Transparent), endY = 70f)))
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(
+            listOf(Color.Transparent,
+                Color.Black.copy(alpha = if (dark) 0.10f else 0.04f)),
+            startY = 40f)))
         content()
     }
 }
 
+/** 玻璃圆钮：播放角标等「圆形语义」的场景（视频标记、圆形开关底座） */
+@Composable
+fun GlassCircle(
+    size: Dp = 32.dp,
+    tint: Color? = null,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable BoxScope.() -> Unit
+) {
+    GlassIconTile(
+        size = size, tint = tint, modifier = modifier,
+        cornerFraction = 0.5f, onClick = onClick, content = content
+    )
+}
 
-/** 玻璃圆形图标按钮（齿轮、返回、添加） */
+
+/** 玻璃图标按钮（返回、齿轮、添加）：方圆角磁贴，与卡片圆角同语言 */
 @Composable
 fun GlassIconButton(
     icon: ImageVector,
@@ -444,7 +593,7 @@ fun GlassIconButton(
     size: Dp = 40.dp,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
-    GlassCircle(size = size, modifier = modifier, onClick = onClick) {
+    GlassIconTile(size = size, modifier = modifier, onClick = onClick) {
         Icon(icon, contentDescription = contentDescription, tint = tint,
             modifier = Modifier.size(size * 0.45f))
     }

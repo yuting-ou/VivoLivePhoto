@@ -91,7 +91,7 @@ import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.GlassDivider
 import com.vliveconvert.app.ui.HazeGlassCard
-import com.vliveconvert.app.ui.glassHazeSource
+import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.glassSurface
 import com.vliveconvert.app.ui.glassWallpaper
 import com.vliveconvert.app.ui.rememberGlassHazeState
@@ -201,7 +201,7 @@ fun PickerScreen(
             Modifier
                 .fillMaxSize()
                 .glassWallpaper()
-                .glassHazeSource(hazeState)
+                .glassBackdropSource(hazeState)
         ) {
             Box(
                 Modifier

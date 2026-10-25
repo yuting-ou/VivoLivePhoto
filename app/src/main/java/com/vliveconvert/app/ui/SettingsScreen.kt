@@ -80,7 +80,7 @@ fun SettingsScreen(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
-            .glassHazeSource(hazeState)
+            .glassBackdropSource(hazeState)
     ) {
         // ── 顶栏 ──
         Row(
@@ -149,7 +149,7 @@ fun SettingsScreen(
                     enabled = !isBusy,
                     onToggle = onToggleMoveToCamera
                 )
-                GlassDivider(startInset = 53.dp)
+                GlassDivider(startInset = 57.dp)
                 ToolSwitchCard(
                     icon = Icons.Filled.Delete,
                     title = "删除原图",
@@ -187,7 +187,7 @@ fun SettingsScreen(
                     subtitle = "按拍摄时间校正已导出文件的「修改时间」",
                     onClick = onOpenFixTime
                 )
-                GlassDivider(startInset = 53.dp)
+                GlassDivider(startInset = 57.dp)
                 ToolCard(
                     icon = Icons.Filled.Place,
                     iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
@@ -196,7 +196,7 @@ fun SettingsScreen(
                     onClick = onRepairLocationDisplay,
                     enabled = !isBusy
                 )
-                GlassDivider(startInset = 53.dp)
+                GlassDivider(startInset = 57.dp)
                 ToolCard(
                     icon = Icons.AutoMirrored.Filled.ArrowForward,
                     iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
@@ -205,7 +205,7 @@ fun SettingsScreen(
                     onClick = onMoveOutputsToCamera,
                     enabled = !isBusy
                 )
-                GlassDivider(startInset = 53.dp)
+                GlassDivider(startInset = 57.dp)
                 ToolCard(
                     icon = Icons.Filled.Share,
                     title = "导出崩溃日志（$crashLogCount）",
@@ -213,7 +213,7 @@ fun SettingsScreen(
                     onClick = onExportCrashLogs,
                     tint = MaterialTheme.colorScheme.error
                 )
-                GlassDivider(startInset = 53.dp)
+                GlassDivider(startInset = 57.dp)
                 ToolCard(
                     icon = Icons.Filled.Delete,
                     title = "清空崩溃日志",
@@ -295,13 +295,13 @@ private fun ToolCardShell(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 玻璃圆钮 + 彩色字形：不再是 iOS 16 的实色小方块
-        GlassCircle(size = 30.dp, tint = iconTint) {
+        // 玻璃磁贴 + 彩色字形：方圆角与卡片圆角同语言，不再是圆贴纸
+        GlassIconTile(size = 34.dp, tint = iconTint) {
             Icon(
                 icon, contentDescription = null, tint = iconTint,
                 modifier = Modifier
                     .offset(x = iconOffset.x, y = iconOffset.y)
-                    .size(16.dp)
+                    .size(18.dp)
             )
         }
         Spacer(Modifier.width(11.dp))

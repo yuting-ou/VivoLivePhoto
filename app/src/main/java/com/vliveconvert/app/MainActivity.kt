@@ -53,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -86,11 +87,13 @@ import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.GlassDialog
+import com.vliveconvert.app.ui.LocalGlassBackdrop
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ThemedSnackbarHost
 import com.vliveconvert.app.ui.rememberGlassHazeState
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -687,6 +690,9 @@ class MainActivity : ComponentActivity() {
                 // 全应用共享的采样状态：页面玻璃与弹窗玻璃都采同一份背景，
                 // 弹窗才能模糊它背后真实的内容，而不是另开窗口糊自己
                 val appHazeState = rememberGlassHazeState()
+                // 折射采样层：页面内容录进 GraphicsLayer，所有玻璃卡按自身位置取背景做 SDF 折射
+                val appGlassBackdrop = rememberLayerBackdrop()
+                CompositionLocalProvider(LocalGlassBackdrop provides appGlassBackdrop) {
                 // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
                 // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
                 //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
@@ -1400,6 +1406,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+                }
         }
     }
 

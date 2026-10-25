@@ -80,7 +80,7 @@ fun AboutScreen(
         Modifier
             .fillMaxSize()
             .glassWallpaper()
-            .glassHazeSource(hazeState)
+            .glassBackdropSource(hazeState)
     ) {
         Row(
             Modifier
@@ -190,6 +190,16 @@ fun AboutScreen(
                 LicenseLink("https://github.com/chrisbanes/haze") {
                     openUrl("https://github.com/chrisbanes/haze")
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "液态玻璃折射：Backdrop 1.0.2（Kyant0）· Apache License 2.0",
+                    style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(2.dp))
+                LicenseLink("https://github.com/Kyant0/AndroidLiquidGlass") {
+                    openUrl("https://github.com/Kyant0/AndroidLiquidGlass")
+                }
             }
 
             Spacer(Modifier.height(18.dp))
@@ -213,7 +223,7 @@ fun AboutScreen(
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                "Haze / Apache License 2.0（完整文本）",
+                "Haze / Backdrop · Apache License 2.0（完整文本）",
                 style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface)
             )
