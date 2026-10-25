@@ -54,7 +54,7 @@ fun PermissionScreen(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = viewportHeight)
-                    .padding(horizontal = 26.dp, vertical = 24.dp),
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
             ) {

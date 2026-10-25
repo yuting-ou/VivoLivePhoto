@@ -267,7 +267,7 @@ fun PickerScreen(
                         if (h != headerHeight) headerHeight = h
                     },
                 radius = 28.dp,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Box(
                     Modifier.fillMaxWidth().heightIn(min = 40.dp),
@@ -480,7 +480,7 @@ private fun DateSectionHeader(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {

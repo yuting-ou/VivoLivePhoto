@@ -520,7 +520,7 @@ fun GlassIconTile(
     size: Dp = 34.dp,
     tint: Color? = null,
     modifier: Modifier = Modifier,
-    cornerFraction: Float = 0.34f,
+    cornerFraction: Float = 0.26f,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {

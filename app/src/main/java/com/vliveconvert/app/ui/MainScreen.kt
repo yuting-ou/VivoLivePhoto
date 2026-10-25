@@ -162,7 +162,7 @@ fun MainScreen(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
@@ -208,16 +208,16 @@ fun MainScreen(
                 radius = 24.dp
             ) {
                 notices.forEachIndexed { index, notice ->
-                    if (index > 0) GlassDivider(startInset = 57.dp)
+                    if (index > 0) GlassDivider(startInset = 58.dp)
                     Row(
                         Modifier.fillMaxWidth().height(54.dp).padding(start = 12.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        GlassIconTile(30.dp, notice.accent) {
+                        GlassIconTile(34.dp, notice.accent) {
                             Icon(notice.icon, null, tint = notice.accent,
-                                modifier = Modifier.size(16.dp))
+                                modifier = Modifier.size(18.dp))
                         }
-                        Spacer(Modifier.width(11.dp))
+                        Spacer(Modifier.width(12.dp))
                         Text(
                             notice.text,
                             style = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface),

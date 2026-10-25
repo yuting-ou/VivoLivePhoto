@@ -87,7 +87,7 @@ fun SettingsScreen(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 14.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlassIconButton(
@@ -149,7 +149,7 @@ fun SettingsScreen(
                     enabled = !isBusy,
                     onToggle = onToggleMoveToCamera
                 )
-                GlassDivider(startInset = 57.dp)
+                GlassDivider(startInset = 58.dp)
                 ToolSwitchCard(
                     icon = Icons.Filled.Delete,
                     title = "删除原图",
@@ -187,7 +187,7 @@ fun SettingsScreen(
                     subtitle = "按拍摄时间校正已导出文件的「修改时间」",
                     onClick = onOpenFixTime
                 )
-                GlassDivider(startInset = 57.dp)
+                GlassDivider(startInset = 58.dp)
                 ToolCard(
                     icon = Icons.Filled.Place,
                     iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
@@ -196,7 +196,7 @@ fun SettingsScreen(
                     onClick = onRepairLocationDisplay,
                     enabled = !isBusy
                 )
-                GlassDivider(startInset = 57.dp)
+                GlassDivider(startInset = 58.dp)
                 ToolCard(
                     icon = Icons.AutoMirrored.Filled.ArrowForward,
                     iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
@@ -205,7 +205,7 @@ fun SettingsScreen(
                     onClick = onMoveOutputsToCamera,
                     enabled = !isBusy
                 )
-                GlassDivider(startInset = 57.dp)
+                GlassDivider(startInset = 58.dp)
                 ToolCard(
                     icon = Icons.Filled.Share,
                     title = "导出崩溃日志（$crashLogCount）",
@@ -213,7 +213,7 @@ fun SettingsScreen(
                     onClick = onExportCrashLogs,
                     tint = MaterialTheme.colorScheme.error
                 )
-                GlassDivider(startInset = 57.dp)
+                GlassDivider(startInset = 58.dp)
                 ToolCard(
                     icon = Icons.Filled.Delete,
                     title = "清空崩溃日志",
@@ -255,7 +255,7 @@ private fun SectionLabel(text: String) {
     Text(
         text,
         style = glassSectionLabelStyle(),
-        modifier = Modifier.padding(start = 4.dp, bottom = 7.dp)
+        modifier = Modifier.padding(start = 0.dp, bottom = 7.dp)
     )
 }
 
@@ -304,7 +304,7 @@ private fun ToolCardShell(
                     .size(18.dp)
             )
         }
-        Spacer(Modifier.width(11.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = glassRowTitleStyle(), color = titleColor)
             Spacer(Modifier.height(1.dp))
