@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 79
-        versionName = "2.2.0"
+        versionCode = 81
+        versionName = "2.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -117,6 +117,8 @@ dependencies {
     // 液态玻璃折射/色散/高光：GitHub Kyant0/AndroidLiquidGlass，Apache-2.0。
     // 1.0.2 面向 Kotlin 2.2/Compose 1.10，与本项目同代
     implementation("io.github.kyant0:backdrop:1.0.2")
+    // 启动动画接管：最短停留让品牌动画播完（Android 12+ 系统 splash）
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
     // JVM 单测替换 android.jar 的 org.json stub（stub 全部方法抛异常）为真实实现

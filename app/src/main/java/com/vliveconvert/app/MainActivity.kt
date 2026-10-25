@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.os.Environment
 import android.provider.MediaStore
@@ -15,17 +16,24 @@ import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
+import android.view.animation.DecelerateInterpolator
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -54,16 +62,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
@@ -409,6 +419,10 @@ class MainActivity : ComponentActivity() {
     private var showOutputPathDialog by mutableStateOf(false)
     // 选择器相册切换面板：与其它弹层一样纳入统一返回优先级
     private var showAlbumSheet by mutableStateOf(false)
+    /** 首帧已绘制：品牌启动动画播完即可放手 */
+    private var firstFrameReady = false
+    /** 闪屏退场已开始：内容层据此同步做起入场（与淡出重叠，无空档） */
+    private var contentRevealStarted = false
     // 崩溃日志导出结果的弹窗文案；null = 不弹。用弹窗而不是顶栏小字（用户反馈过看不见）
     // 返回链路诊断：最近一次手势的事件数/路径/动画结果，就地显示在设置页（真机取证用）
     private var lastBackTrace by mutableStateOf("")
@@ -644,6 +658,24 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 品牌启动动画（AVD 约 700ms）此前被首帧就绪立刻掐断，看起来像闪一下；
+        // 「首帧就绪 + 最短停留 720ms」双条件让它完整播完，再统一淡出交给内容
+        val launchAt = SystemClock.uptimeMillis()
+        val splash = installSplashScreen()
+        splash.setKeepOnScreenCondition {
+            !firstFrameReady || SystemClock.uptimeMillis() - launchAt < 720L
+        }
+        splash.setOnExitAnimationListener { provider ->
+            // 内容层同时做起入场：淡出与淡入重叠，交棒才是「丝滑」而不是先切后动
+            contentRevealStarted = true
+            provider.view.animate()
+                .alpha(0f)
+                .scaleX(1.06f).scaleY(1.06f)
+                .setDuration(380L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction { provider.remove() }
+                .start()
+        }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -692,6 +724,10 @@ class MainActivity : ComponentActivity() {
             VLiveConvertTheme(dynamicColor = dynamicColor) {
                 // 全应用共享的采样状态：页面玻璃与弹窗玻璃都采同一份背景，
                 // 弹窗才能模糊它背后真实的内容，而不是另开窗口糊自己
+                LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    firstFrameReady = true
+                }
                 val appHazeState = rememberGlassHazeState()
                 // 折射采样层：页面内容录进 GraphicsLayer，所有玻璃卡按自身位置取背景做 SDF 折射
                 val appGlassBackdrop = rememberLayerBackdrop()
@@ -836,9 +872,30 @@ class MainActivity : ComponentActivity() {
                     backAnim = null
                 }
 
+                // 冷启动交棒：闪屏淡出放大的同一时刻，内容从 0.985 缩放淡入到位。
+                // 兜底 1.4s 自动放行——退场回调万一被 ROM 吞掉，内容也不能一直隐形
+                val contentReveal = remember { Animatable(0f) }
+                LaunchedEffect(Unit) {
+                    snapshotFlow { contentRevealStarted }
+                        .filter { it }
+                        .first()
+                    contentReveal.animateTo(
+                        1f, tween(420, easing = com.vliveconvert.app.ui.EaseOutStrong))
+                }
+                LaunchedEffect(Unit) {
+                    delay(1400)
+                    contentReveal.animateTo(
+                        1f, tween(200, easing = com.vliveconvert.app.ui.EaseOutStrong))
+                    contentRevealStarted = true
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = contentReveal.value
+                            val sc = 0.985f + 0.015f * contentReveal.value
+                            scaleX = sc; scaleY = sc
+                        }
                         .background(MaterialTheme.colorScheme.background)
                 ) {
                     // 目标界面：授权后带权限状态一起参与重组，权限授予时也有过渡动画

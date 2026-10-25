@@ -15,9 +15,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -25,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
+import com.vliveconvert.app.ui.EaseOutStrong
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -47,6 +53,13 @@ fun PermissionScreen(
             .navigationBarsPadding()
     ) {
         val viewportHeight = maxHeight
+        // 首启入场：品牌名 → 标语 → 权限卡 → 按钮 逐个淡入上移（强 ease-out）
+        val appear = remember { Animatable(0f) }
+        LaunchedEffect(Unit) {
+            appear.animateTo(1f, tween(620, easing = EaseOutStrong))
+        }
+        fun reveal(i: Int): Float =
+            ((appear.value - i * 0.16f) / 0.34f).coerceIn(0f, 1f)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         ) {
@@ -62,18 +75,31 @@ fun PermissionScreen(
                     appName,
                     style = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold,
                         letterSpacing = (-0.7).sp,
-                        color = MaterialTheme.colorScheme.onBackground)
+                        color = MaterialTheme.colorScheme.onBackground),
+                    modifier = Modifier.graphicsLayer {
+                        val p = reveal(0)
+                        alpha = p; translationY = (1f - p) * 28f
+                    }
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     stringResource(R.string.app_tagline),
                     style = TextStyle(fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant),
+                    modifier = Modifier.graphicsLayer {
+                        val p = reveal(1)
+                        alpha = p; translationY = (1f - p) * 24f
+                    }
                 )
                 Spacer(Modifier.height(26.dp))
 
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            val p = reveal(2)
+                            alpha = p; translationY = (1f - p) * 32f
+                        },
                     radius = 24.dp,
                     contentPadding = PaddingValues(18.dp)
                 ) {
@@ -109,7 +135,10 @@ fun PermissionScreen(
                 }
 
                 Spacer(Modifier.height(26.dp))
-                GlossyButton("授予权限", onRequest)
+                GlossyButton("授予权限", onRequest, modifier = Modifier.graphicsLayer {
+                    val p = reveal(3)
+                    alpha = p; translationY = (1f - p) * 28f
+                })
 
                 if (statusText.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
