@@ -114,7 +114,7 @@ class ConverterPipelineTest {
     }
 
     /**
-     * 构造变长 ID 字段的 footer（镜像 vivo X200 Ultra 人像实况实测字节）：
+     * 构造变长 ID 字段的 footer（镜像 vivo X200 系列人像实况实测字节）：
      * ID 字段 = 11 个 0x00 + '/' + 28 字符 ID（共 40B），tail = 40+4+11 = 55B。
      */
     private fun buildPortraitFooter(jsonBytes: ByteArray, id: String, prefix: ByteArray): ByteArray {
@@ -144,7 +144,7 @@ class ConverterPipelineTest {
     private fun makePortraitPair(dir: File, stem: String = "IMG_5001"): Pair<File, File> {
         val PORTRAIT_ID = "1788155072103343df5100000000"
         val jpgJson = FooterUtil.buildFooterJson(linkedMapOf(
-            "com.android.camera.takenmodel" to "vivo X200 Ultra",
+            "com.android.camera.takenmodel" to "vivo X200 系列",
             "com.android.camera.camerafacing" to "0",
             "com.android.camera.joint.refocusAlgoSource" to 2,
             "com.android.camera.livephoto" to PORTRAIT_ID,
@@ -156,7 +156,7 @@ class ConverterPipelineTest {
                 buildPortraitFooter(jpgJson, PORTRAIT_ID, FooterUtil.vivoPrefix))
         }
         val mp4Json = FooterUtil.buildFooterJson(linkedMapOf(
-            "com.android.camera.takenmodel" to "vivo X200 Ultra",
+            "com.android.camera.takenmodel" to "vivo X200 系列",
             "com.android.camera.camerafacing" to "0",
             "com.android.camera.imageTime" to 31L,
             "com.android.camera.moduleid" to "portrait",
@@ -331,7 +331,7 @@ class ConverterPipelineTest {
 
     @Test
     fun portraitDualDetectedAndConverted() {
-        // vivo X200 Ultra 人像实况：footer tail 55B（ID 字段 40B，含二进制前缀）
+        // vivo X200 系列人像实况：footer tail 55B（ID 字段 40B，含二进制前缀）
         val dir = Files.createTempDirectory("vlc_portrait").toFile()
         val (jpg, _) = makePortraitPair(dir)
         assertTrue("人像实况应被识别为双文件", VivoDual.isVivoDualFile(jpg.absolutePath))
