@@ -16,7 +16,7 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * 真机样本回归测试（vivo X200 Ultra 传输样本）。
+ * 真机样本回归测试（vivo X200 系列传输样本）。
  * 样本缺失时自动跳过，不影响其他环境。
  * 样本目录：C:/Users/brova/Downloads/vivo办公套件/
  * - IMG_20260831_134354 普通实况（曾可识别）
@@ -78,7 +78,7 @@ class RealSampleRegressionTest {
                 footer.json?.get("com.android.camera.joint.refocus"))
         }
 
-        // X200 Ultra 双文件 MP4 不含 vivoMediaEStream box（旧 iQOO 格式才有），
+        // X200 系列双文件 MP4 不含 vivoMediaEStream box（旧款机型格式才有），
         // 识别核心为 lpex + convert footer + XMP（ZLivePhoto 验证过的 OPPO 输出同样无 EStream）
         // ExtInfo 包装剥离：输出中仅剩 convert footer 的 extPrefix 1 处
         assertEquals(1, countOf(data, "vivoMediaExtInfovivo".toByteArray(Charsets.US_ASCII)))
