@@ -50,6 +50,15 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 分享进：从文件管理器/相册分享一对同名 .jpg+.mp4 直接入列 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/jpeg" />
+                <data android:mimeType="video/mp4" />
+            </intent-filter>
         </activity>
 
         <!-- 批量转换前台服务：转换不随界面销毁/切后台而中断 -->

@@ -15,4 +15,6 @@ data class ConvertItem(
     val outUri: String? = null,
     /** 本项为「重新转换」（找回位置）：跳过删除原图收集，输出覆盖旧产物 */
     val reconvert: Boolean = false,
+    /** 外部分享进来的缓存副本：源不是用户相册里的文件，删除原图/移相机语义全部停用 */
+    val externalSource: Boolean = false,
 )

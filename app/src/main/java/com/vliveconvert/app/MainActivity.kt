@@ -114,6 +114,7 @@ import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.MotionPrefs
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
+import com.vliveconvert.app.ui.ShareIntents
 import com.vliveconvert.app.ui.ThemedSnackbarHost
 import com.vliveconvert.app.ui.dateLabel
 import com.vliveconvert.app.ui.rememberGlassHazeState
@@ -713,6 +714,11 @@ class MainActivity : ComponentActivity() {
         // 实例字段里，不恢复的话结果回调落在新实例上 lastTrashUris 为空 →
         // 恢复记录不入库（「恢复原图」入口失效）。结果回调发生在 START，
         // onCreate 里恢复来得及
+        // 分享进：从文件管理器/相册分享一对同名 .jpg+.mp4 直接入列。
+        // 旋转重建会带着同一个 intent 再走一遍 onCreate——用 savedInstanceState 挡住重复入列
+        if (savedInstanceState == null) {
+            handleSharedPair(intent)
+        }
         if (savedInstanceState != null) {
             deleteBaseStatus = savedInstanceState.getString(KEY_TRASH_BASE, "")
             pendingDeleteCount = savedInstanceState.getInt(KEY_TRASH_COUNT, 0)
@@ -1110,6 +1116,19 @@ class MainActivity : ComponentActivity() {
                                 onRetryFailed = {
                                     if (ConvertCenter.resetFailed() > 0) {
                                         ConvertCenter.start(this@MainActivity)
+                                    }
+                                },
+                                onShareItem = { ci ->
+                                    val uriStr = ci.outUri
+                                    if (uriStr == null) {
+                                        ConvertCenter.statusText = "该条目没有可分享的产物"
+                                    } else try {
+                                        startActivity(
+                                            Intent.createChooser(
+                                                ShareIntents.forLivePhoto(Uri.parse(uriStr)),
+                                                "分享实况照片"))
+                                    } catch (_: Exception) {
+                                        ConvertCenter.statusText = "无法分享（找不到可处理的应用）"
                                     }
                                 },
                                 onRemove = { ci -> removeItemWithUndo(ci) },
@@ -1668,6 +1687,74 @@ class MainActivity : ComponentActivity() {
                 requestDeleteOriginals(ConvertCenter.statusText)
             }
         }
+    }
+
+    // ---------- 分享进 ----------
+
+    /**
+     * 处理 ACTION_SEND / ACTION_SEND_MULTIPLE：恰好一对同名 .jpg+.mp4 才入列，
+     * 先落地 cacheDir/shared/（转换管线按路径读取），再按缓存路径构造条目。
+     * externalSource=true：源不是相册文件，「删除原图/删后移相机」语义全部停用。
+     */
+    private fun handleSharedPair(intent: Intent?) {
+        val uris: List<Uri> = when (intent?.action) {
+            Intent.ACTION_SEND_MULTIPLE ->
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty().toList()
+            Intent.ACTION_SEND ->
+                @Suppress("DEPRECATION")
+                listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+            else -> return
+        }
+        if (uris.isEmpty()) return
+        val entries = uris.map { u ->
+            var name: String? = null
+            var mime: String? = null
+            try {
+                contentResolver.query(
+                    u,
+                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE),
+                    null, null, null
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        name = c.getString(0)
+                        mime = c.getString(1)
+                    }
+                }
+            } catch (_: Exception) {}
+            if (mime == null) mime = try { contentResolver.getType(u) } catch (_: Exception) { null }
+            Triple(u, name, mime)
+        }
+        val pair = ShareIntents.classify(entries)
+        if (pair == null) {
+            ConvertCenter.statusText = "请分享一对同名 .jpg + .mp4（一次一对）"
+            return
+        }
+        val stem = (entries.first { it.first == pair.first }.second ?: "shared")
+            .substringBeforeLast('.')
+        val files = ShareIntents.copyPair(this, pair.first, pair.second, stem)
+        if (files == null) {
+            ConvertCenter.statusText = "接收分享的照片失败（无法读取文件内容）"
+            return
+        }
+        val img = files.first
+        ConvertCenter.items.add(
+            ConvertItem(
+                item = MediaItem(
+                    id = -System.nanoTime(),
+                    path = img.absolutePath,
+                    name = img.name,
+                    bucketId = -1L,
+                    dateTaken = 0L,
+                    dateModified = img.lastModified() / 1000,
+                    size = img.length()
+                ),
+                externalSource = true
+            )
+        )
+        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+        ConvertCenter.statusText =
+            "已加入分享的 1 对照片（来源不在相册，转换后不会删除任何原文件）"
     }
 
     // ---------- 权限 ----------

@@ -263,7 +263,9 @@ class ConvertService : Service() {
         // 「移到相机相册 + 转换后删除原图」同时开启：
         // 产物先导出到输出目录（中转），原图删除确认完成后以原名 move 进 DCIM/Camera——
         // 先删原图腾出文件名，转换结果保持原名、无 "(1)" 序号
-        val deferToCamera = !isReconvert && moveToCamera && deleteOriginal
+        // 外部分享的缓存副本不是用户相册文件：删原图/「删后移相机」语义全部停用
+        val deferToCamera = !isReconvert && moveToCamera && deleteOriginal &&
+            !ci.externalSource
         withContext(Dispatchers.Main) {
             ConvertCenter.replaceItem(ci, ci.copy(
                 status = if (isReconvert) "重新转换中…" else "转换中…"))
@@ -309,8 +311,11 @@ class ConvertService : Service() {
                 ConvertCenter.pendingFinalize.add(
                     ConvertCenter.FinalizeEntry(exportUri, ci.item.name, ci.item.key))
             }
-            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除（重转不收集）
-            if (!isReconvert && deleteOriginal) collectOriginalUris(ci)
+            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除
+            // （重转不收集；外部分享的缓存副本更不收集——那不是相册里的原文件）
+            if (!isReconvert && deleteOriginal && !ci.externalSource) {
+                collectOriginalUris(ci)
+            }
             val statusText = when {
                 isReconvert && result.sourceHasGps ->
                     "完成：已重新转换，位置信息已保留"

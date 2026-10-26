@@ -27,6 +27,7 @@ internal object QueueJson {
                 .put("done", ci.done).put("failed", ci.failed)
                 .put("lostGps", ci.lostGps)
                 .put("reconvert", ci.reconvert)
+                .put("ext", ci.externalSource)
             ci.outUri?.let { o.put("outUri", it) }
             arr.put(o)
         }
@@ -73,7 +74,8 @@ internal object QueueJson {
                     item = item, status = status, failed = failed, done = done,
                     lostGps = lostGps,
                     outUri = if (o.has("outUri")) o.optString("outUri") else null,
-                    reconvert = o.optBoolean("reconvert")
+                    reconvert = o.optBoolean("reconvert"),
+                    externalSource = o.optBoolean("ext")
                 ))
             }
             list

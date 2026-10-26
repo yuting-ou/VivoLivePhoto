@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -147,6 +148,8 @@ fun MainScreen(
     /** 失败条目数：>0 且空闲时显示「重试失败 N」 */
     failedCount: Int = 0,
     onRetryFailed: () -> Unit = {},
+    /** 完成条目的分享（含产物 URI 的行才显示入口） */
+    onShareItem: (ConvertItem) -> Unit = {},
     onRemove: (ConvertItem) -> Unit,
     hazeState: HazeState = rememberGlassHazeState()
 ) {
@@ -378,7 +381,8 @@ fun MainScreen(
                                         ),
                                         ci = ci,
                                         onRemove = { onRemove(ci) },
-                                        onReconvert = { onReconvertItem(ci) }
+                                        onReconvert = { onReconvertItem(ci) },
+                                        onShare = { onShareItem(ci) }
                                     )
                                 }
                             }
@@ -625,7 +629,8 @@ private fun ConvertItemRow(
     modifier: Modifier = Modifier,
     ci: ConvertItem,
     onRemove: () -> Unit,
-    onReconvert: () -> Unit
+    onReconvert: () -> Unit,
+    onShare: () -> Unit = {}
 ) {
     val resolver = LocalContext.current.contentResolver
     val busy = isBusyStatus(ci.status)
@@ -847,6 +852,18 @@ private fun ConvertItemRow(
                         Text("重转", style = TextStyle(fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.tertiary))
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+                // 分享产物（已完成且有导出 URI 的行才出现）
+                if (ci.done && !ci.failed && ci.outUri != null) {
+                    GlassIconTile(size = 28.dp, onClick = onShare) {
+                        Icon(
+                            Icons.Filled.Share,
+                            contentDescription = "分享实况照片",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
                     }
                     Spacer(Modifier.width(4.dp))
                 }
