@@ -94,6 +94,7 @@ import com.vliveconvert.app.picker.ConvertedIndex
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
 import com.vliveconvert.app.picker.PickerScanner
+import com.vliveconvert.app.picker.ScanCache
 import com.vliveconvert.app.picker.PickerScreen
 import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.BatchLog
@@ -743,7 +744,7 @@ class MainActivity : ComponentActivity() {
         }
 
         mediaRepo = MediaRepo(contentResolver)
-        scanner = PickerScanner(mediaRepo)
+        scanner = PickerScanner(mediaRepo, ScanCache(applicationContext))
         singleLiveScanner = SingleLiveScanner(mediaRepo)
 
         // 恢复删除原图开关 + 刷新可恢复记录数

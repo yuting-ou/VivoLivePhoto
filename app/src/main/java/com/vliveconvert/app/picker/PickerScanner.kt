@@ -45,7 +45,7 @@ internal fun isDualLivePhotoPath(path: String): Boolean =
  *
  * 无磁盘持久化：扫描结果仅存内存，不产生任何本地存储。
  */
-class PickerScanner(private val repo: MediaRepo) {
+class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? = null) {
 
     class ScanState {
         /** 已识别为双文件实况的列表（Compose 状态，UI 直接观察） */
@@ -131,6 +131,11 @@ class PickerScanner(private val repo: MediaRepo) {
             if (st.job === self) {
                 st.completed = true
                 st.running = false
+                // 落盘本次判定（Main 取快照 → IO 写；失败静默）
+                cache?.let { c ->
+                    val snapshot = withContext(Dispatchers.Main) { st.results.toList() }
+                    withContext(Dispatchers.IO) { c.save(bucketId, snapshot) }
+                }
             }
         }
     }
@@ -164,11 +169,19 @@ class PickerScanner(private val repo: MediaRepo) {
      * 查询相册最新文件列表，填充待扫队列。
      * 返回是否有待扫项。
      */
-    private fun diffRefresh(st: ScanState, bucketId: Long): Boolean {
+    private suspend fun diffRefresh(st: ScanState, bucketId: Long): Boolean {
         val current = repo.queryAlbumImages(bucketId)
-        for (item in current) {
-            st.known[item.key] = item
-            st.pending.add(item)
+        val cached = cache?.load(bucketId).orEmpty()
+        val (hits, pending) = partitionCached(current, cached)
+        for (item in current) st.known[item.key] = item
+        for (item in pending) st.pending.add(item)
+        // 命中缓存：直接进结果并计入已扫描（进度读数不倒退）；results 只能在 Main 线程写
+        if (hits.isNotEmpty()) {
+            withContext(Dispatchers.Main) {
+                hits.forEach { if (st.results.none { r -> r.id == it.id }) st.results.add(it) }
+            }
+            for (item in hits) st.scanned.add(item.key)
+            st.doneCount.set(st.scanned.size)
         }
         st.total = current.size
         return st.pending.isNotEmpty()
