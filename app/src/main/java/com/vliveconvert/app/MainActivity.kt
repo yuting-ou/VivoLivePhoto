@@ -1046,6 +1046,12 @@ class MainActivity : ComponentActivity() {
                                 onAddMore = { openBuiltInPicker() },
                                 onStartConvert = { startConvert() },
                                 onClearAll = { clearAllWithUndo() },
+                                failedCount = ConvertCenter.items.count { it.failed },
+                                onRetryFailed = {
+                                    if (ConvertCenter.resetFailed() > 0) {
+                                        ConvertCenter.start(this@MainActivity)
+                                    }
+                                },
                                 onRemove = { ci -> removeItemWithUndo(ci) },
                                 hazeState = appHazeState
                             )

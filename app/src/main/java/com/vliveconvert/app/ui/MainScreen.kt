@@ -144,6 +144,9 @@ fun MainScreen(
     onAddMore: () -> Unit,
     onStartConvert: () -> Unit,
     onClearAll: () -> Unit,
+    /** 失败条目数：>0 且空闲时显示「重试失败 N」 */
+    failedCount: Int = 0,
+    onRetryFailed: () -> Unit = {},
     onRemove: (ConvertItem) -> Unit,
     hazeState: HazeState = rememberGlassHazeState()
 ) {
@@ -311,6 +314,15 @@ fun MainScreen(
                         color = MaterialTheme.colorScheme.onSurface)
                 )
                 Spacer(Modifier.weight(1f))
+                if (!isConverting && failedCount > 0) {
+                    InlineTextButton(
+                        text = "重试失败 $failedCount",
+                        contentColor = MaterialTheme.colorScheme.tertiary,
+                        onClick = onRetryFailed,
+                        style = TextStyle(fontSize = 14.sp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
                 if (!isConverting) {
                     InlineTextButton(
                         text = "清空",

@@ -220,6 +220,22 @@ object ConvertCenter {
     fun reconvertCandidates(): List<ConvertItem> =
         items.filter { it.done && it.lostGps && !it.failed }
 
+    /**
+     * 把失败条目复位为待转换（主线程调用），返回复位条数。
+     * UI「重试失败 N」据此决定是否再调 [start]——0 表示没有失败项，不要发起空批次。
+     */
+    fun resetFailed(): Int {
+        var n = 0
+        for (i in items.indices) {
+            val ci = items[i]
+            if (ci.failed) {
+                items[i] = ci.copy(failed = false, status = "待转换")
+                n++
+            }
+        }
+        return n
+    }
+
     /** 按源文件 key 替换列表项（主线程调用） */
     fun replaceItem(old: ConvertItem, new: ConvertItem) {
         val idx = items.indexOfFirst { it.item.key == old.item.key }
