@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -801,10 +802,13 @@ private fun DateSectionHeader(
     checkState: ToggleableState,
     onToggleAll: () -> Unit
 ) {
+    // 与照片网格同缘：网格左右各 2dp，日期文字与全选圆圈都从这里起排。
+    // 圆圈再右移 4dp：抵消 48dp 触摸目标内 26dp 视觉圆的 11dp 居中留白，
+    // 使其视觉右边缘与每行第三格的勾选徽标对齐（长列表滚动时边缘不再一进一出）
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
+            .padding(start = 0.dp, end = 2.dp, top = 16.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -821,6 +825,7 @@ private fun DateSectionHeader(
         }
         CircleTriCheckbox(
             state = checkState,
+            modifier = Modifier.offset(x = 4.dp),
             onClick = onToggleAll,
             contentDescription = "全选 $label 的照片"
         )
