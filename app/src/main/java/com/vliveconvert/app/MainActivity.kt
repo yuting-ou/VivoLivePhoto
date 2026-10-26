@@ -448,6 +448,7 @@ class MainActivity : ComponentActivity() {
     // 返回链路诊断：最近一次手势的事件数/路径/动画结果，就地显示在设置页（真机取证用）
     private var lastBackTrace by mutableStateOf("")
     private var crashExportMessage by mutableStateOf<String?>(null)
+    private var inPlaceMerge by mutableStateOf(false)
     private var outputPathInput by mutableStateOf("")
     // 路径校验失败要在弹窗里就地显示；底栏状态被弹窗遮住，用户看不到
     private var outputPathError by mutableStateOf<String?>(null)
@@ -1049,12 +1050,24 @@ class MainActivity : ComponentActivity() {
                                     deleteOriginal = on
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("delete_original", on).apply()
+                                    // 关闭删原图时原地合并随之失效（其语义完全依赖删原图）
+                                    if (!on) {
+                                        inPlaceMerge = false
+                                        getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                            .edit().putBoolean("in_place_merge", false).apply()
+                                    }
                                 },
                                 dynamicColor = dynamicColor,
                                 onToggleDynamicColor = { on ->
                                     dynamicColor = on
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("dynamic_color", on).apply()
+                                },
+                                inPlaceMerge = inPlaceMerge,
+                                onToggleInPlaceMerge = { on ->
+                                    inPlaceMerge = on
+                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                        .edit().putBoolean("in_place_merge", on).apply()
                                 },
                                 reduceMotion = MotionPrefs.effective,
                                 onToggleReduceMotion = { on ->

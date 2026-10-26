@@ -81,6 +81,9 @@ fun SettingsScreen(
     /** 减少动效（含系统「移除动画」联动后的最终值） */
     reduceMotion: Boolean = false,
     onToggleReduceMotion: (Boolean) -> Unit = {},
+    /** 原地合并（实验）：仅删原图开时生效/显示 */
+    inPlaceMerge: Boolean = false,
+    onToggleInPlaceMerge: (Boolean) -> Unit = {},
     onOpenAbout: () -> Unit,
     statusText: String = "",
     hazeState: HazeState = rememberGlassHazeState()
@@ -168,6 +171,18 @@ fun SettingsScreen(
                     enabled = !isBusy,
                     onToggle = onToggleDeleteOriginal
                 )
+                if (deleteOriginal) {
+                    GlassDivider(startInset = 58.dp)
+                    ToolSwitchCard(
+                        icon = Icons.Filled.DateRange,
+                        title = "原地合并（实验）",
+                        subtitle = "转换结果直接替换原 .jpg（保住相册加入时间与位置）；" +
+                            "替换不进回收站、不可恢复，需「所有文件访问权限」",
+                        checked = inPlaceMerge,
+                        enabled = !isBusy,
+                        onToggle = onToggleInPlaceMerge
+                    )
+                }
             }
 
             Spacer(Modifier.height(20.dp))
