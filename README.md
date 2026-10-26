@@ -8,8 +8,8 @@
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
-> 点开 `VivoLivePhoto-v2.5.0.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.5.0.apk`](./VivoLivePhoto-v2.5.0.apk) 下载，内容一致。
+> 点开 `VivoLivePhoto-v2.5.1.apk` 即可直接安装（推荐）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.5.1.apk`](./VivoLivePhoto-v2.5.1.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -143,6 +143,13 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.5.1（选择器视觉对齐）
+
+- 选择器照片网格改为 16dp 栅格；日期行落在 24dp 视觉竖线，与缩略图左缘对齐，
+  修掉此前日期行贴边、与照片网格两套边距的错位
+- 全选圆圈右移，视觉右缘对齐每行第三格的勾选徽标
+- 其余与 v2.5.0 一致
 
 ### v2.5.0（规模化体验 + 可靠性验收）
 
