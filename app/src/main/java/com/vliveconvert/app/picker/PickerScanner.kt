@@ -177,8 +177,13 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
         for (item in pending) st.pending.add(item)
         // 命中缓存：直接进结果并计入已扫描（进度读数不倒退）；results 只能在 Main 线程写
         if (hits.isNotEmpty()) {
+            // 批量写入 + HashSet 去重：8555 条缓存命中若逐条 add/逐条全表查重，
+            // 主线程 O(n²) 会直接把选择器卡死（真机实测报障）
             withContext(Dispatchers.Main) {
-                hits.forEach { if (st.results.none { r -> r.id == it.id }) st.results.add(it) }
+                val knownIds = HashSet<Long>(st.results.size * 2)
+                st.results.forEach { knownIds.add(it.id) }
+                val toAdd = hits.filter { knownIds.add(it.id) }
+                if (toAdd.isNotEmpty()) st.results.addAll(toAdd)
             }
             for (item in hits) st.scanned.add(item.key)
             st.doneCount.set(st.scanned.size)
