@@ -98,6 +98,8 @@ class ConvertService : Service() {
 
     override fun onDestroy() {
         serviceScope.cancel()
+        // 批次被取消/服务被回收：runBatch 走不到末尾的释放点，这里兜底放锁
+        BatchWakeLock.release(this)
         // 兜底：批次未正常收尾时（例如服务被系统回收、协程在收尾的 withContext 处被取消），
         // ConvertCenter.isConverting 可能仍停在 true —— 那样返回应用会一直显示「转换中」且
         // 无法再发起批次。仅在「确实还在跑批次」时复位，避免误伤正常结束/新建批次。
@@ -112,6 +114,10 @@ class ConvertService : Service() {
     // ---------- 批次执行 ----------
 
     private suspend fun runBatch() {
+        // 前台服务不阻止 CPU 休眠：熄屏长批次会被 Doze 限速到近乎停滞（真机实测），
+        // 批次执行期间持有 partial wakelock；释放点覆盖正常结束/取消/销毁三条路径，
+        // 2h 超时是最终兜底（onTimeout 的系统配额上限远小于它）
+        BatchWakeLock.acquire(this)
         val app = applicationContext
         val prefs = app.getSharedPreferences("vliveconvert", MODE_PRIVATE)
         val deleteOriginal = prefs.getBoolean("delete_original", false)
@@ -203,6 +209,7 @@ class ConvertService : Service() {
         // 清理暂存目录
         try { tempDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
         running = false
+        BatchWakeLock.release(this)
         if (pendingStart) {
             pendingStart = false
             running = true

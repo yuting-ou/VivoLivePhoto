@@ -20,6 +20,8 @@
          startForeground() 会抛 SecurityException 直接闪退（点「开始转换」即崩）。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 批次期间持有 partial wakelock：前台服务不阻止 CPU 休眠，熄屏长批次会被 Doze 限速 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 转换进度通知（Android 13+ 运行时申请）；未授予时服务仍可运行，仅通知不可见 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

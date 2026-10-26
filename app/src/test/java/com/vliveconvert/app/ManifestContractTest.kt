@@ -53,6 +53,12 @@ class ManifestContractTest {
                 "foregroundServiceType=\"dataSync\"，Android 14+ 缺该权限会闪退",
             "android.permission.FOREGROUND_SERVICE_DATA_SYNC" in perms
         )
+        // 批次 wakelock（BatchWakeLock）需要 WAKE_LOCK；实现里为不阻塞转换吞掉了
+        // SecurityException——漏声明只会静默失效（熄屏照样被 Doze 限速），在此大声报警
+        assertTrue(
+            "清单缺少 WAKE_LOCK 权限：批次保活会静默失效（SecurityException 被吞）",
+            "android.permission.WAKE_LOCK" in perms
+        )
     }
 
     /**
