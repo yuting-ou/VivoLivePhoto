@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
@@ -69,6 +70,8 @@ fun SettingsScreen(
     onToggleMoveToCamera: (Boolean) -> Unit,
     onToggleDeleteOriginal: (Boolean) -> Unit,
     onOpenFixTime: () -> Unit,
+    batchLogCount: Int = 0,
+    onOpenBatchLog: () -> Unit = {},
     onRepairLocationDisplay: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
@@ -190,6 +193,13 @@ fun SettingsScreen(
                     title = "修复文件时间",
                     subtitle = "按拍摄时间校正已导出文件的「修改时间」",
                     onClick = onOpenFixTime
+                )
+                GlassDivider(startInset = 58.dp)
+                ToolCard(
+                    icon = Icons.Filled.List,
+                    title = "转换记录（$batchLogCount）",
+                    subtitle = "最近 50 批的时间、成败与输出位置",
+                    onClick = onOpenBatchLog
                 )
                 GlassDivider(startInset = 58.dp)
                 ToolCard(

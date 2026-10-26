@@ -213,9 +213,24 @@ class ConvertService : Service() {
         notifyDone(ok.get(), fail.get(), deleteOriginal)
 
         // 删除原图（已授权所有文件访问 → 服务内直接删；否则交由 Activity 弹系统确认）
-        if (deleteOriginal) {
-            handleDeleteOriginals(finalStatus)
-        }
+        val deleteOutcome = if (deleteOriginal) handleDeleteOriginals(finalStatus)
+        else DeleteOutcome(0, 0, false)
+
+        // 批次日志：清空列表的 10 秒撤销窗过后，这是唯一能回答「那批在哪、成没成功」的凭据。
+        // 未确认路径 deleted=0 如实记录（等用户确认后原图才真正删）
+        BatchLog.append(
+            applicationContext,
+            BatchLogEntry(
+                timeMs = System.currentTimeMillis(),
+                ok = ok.get(),
+                fail = fail.get(),
+                noGps = noGpsCount,
+                reconvert = reconvertBatch,
+                deletedOriginals = deleteOutcome.deleted,
+                movedToCamera = deleteOutcome.moved,
+                dest = finalDest
+            )
+        )
 
         // 清理暂存目录
         try { tempDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
@@ -370,13 +385,14 @@ class ConvertService : Service() {
      * 已授权所有文件访问 → 直接删除，随后把中转的转换产物以原名移入 DCIM/Camera；
      * 未授权 → 把有效 URI 留在 ConvertCenter.pendingTrashUris，等 Activity 在前台时
      * 拉起系统回收站确认弹窗（确认删除后再落地原名）。
+     * @return 实际结果（批次日志据此如实记录；未确认路径 deleted=0 不是失败）
      */
-    private suspend fun handleDeleteOriginals(baseStatus: String) {
+    private suspend fun handleDeleteOriginals(baseStatus: String): DeleteOutcome {
         val all = synchronized(ConvertCenter.pendingTrashUris) {
             ConvertCenter.pendingTrashUris.distinct().toList()
         }
         ConvertCenter.pendingTrashUris.clear()
-        if (all.isEmpty()) return
+        if (all.isEmpty()) return DeleteOutcome(0, 0, false)
         // 过滤已失效条目
         val valid = all.filter { uri ->
             try {
@@ -390,7 +406,7 @@ class ConvertService : Service() {
             withContext(Dispatchers.Main) {
                 ConvertCenter.statusText = "$baseStatus；原图删除失败（无法访问原文件）"
             }
-            return
+            return DeleteOutcome(0, 0, false)
         }
         if (Environment.isExternalStorageManager()) {
             var deleted = 0
@@ -405,7 +421,7 @@ class ConvertService : Service() {
                 "（vivo 相册「第三方删除拦截」中可查看/恢复）" +
                 (if (moved > 0) "；$moved 个转换结果已以原名移入相机相册" else "")
             withContext(Dispatchers.Main) { ConvertCenter.statusText = msg }
-            return
+            return DeleteOutcome(deleted = deleted, moved = moved, direct = true)
         }
         // 未授权：交由 Activity 发起系统回收站确认（回到应用时触发）
         synchronized(ConvertCenter.pendingTrashUris) {
@@ -416,6 +432,7 @@ class ConvertService : Service() {
             ConvertCenter.pendingTrashCount = valid.size
             ConvertCenter.statusText = "$baseStatus；回到本应用确认删除原图（共 ${valid.size} 项）"
         }
+        return DeleteOutcome(0, 0, false)
     }
 
     /**
@@ -562,6 +579,9 @@ class ConvertService : Service() {
 
 /** 服务收到 intent 时怎么办：只有 START 且空闲才立即起批次；收尾中的 START 排队。 */
 internal enum class StartDecision { RUN_NOW, QUEUE, IGNORE }
+
+/** 原图删除的实际结果（批次日志与状态文案共用；未确认路径 deleted=0 不是失败） */
+internal data class DeleteOutcome(val deleted: Int, val moved: Int, val direct: Boolean)
 
 internal fun onStartIntent(action: String?, running: Boolean): StartDecision = when {
     action != ConvertService.ACTION_START -> StartDecision.IGNORE

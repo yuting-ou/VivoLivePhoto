@@ -56,8 +56,12 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -90,6 +94,8 @@ import com.vliveconvert.app.picker.MediaRepo
 import com.vliveconvert.app.picker.PickerScanner
 import com.vliveconvert.app.picker.PickerScreen
 import com.vliveconvert.app.picker.SingleLiveScanner
+import com.vliveconvert.app.service.BatchLog
+import com.vliveconvert.app.service.BatchLogEntry
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.ConvertService
 import com.vliveconvert.app.service.Preflight
@@ -105,6 +111,7 @@ import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ThemedSnackbarHost
+import com.vliveconvert.app.ui.dateLabel
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
@@ -115,6 +122,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** 主界面栈：权限页 → 主页 → 选择器 / 修复时间 / 设置 / 关于（用于转场方向判定） */
 internal enum class Screen { Permission, Main, Picker, FixTime, Settings, About }
@@ -436,6 +446,10 @@ class MainActivity : ComponentActivity() {
     private var outputPathInput by mutableStateOf("")
     // 路径校验失败要在弹窗里就地显示；底栏状态被弹窗遮住，用户看不到
     private var outputPathError by mutableStateOf<String?>(null)
+    // 批次日志（设置 → 转换记录）：计数随设置页刷新；条目在点开时加载
+    private var batchLogCount by mutableIntStateOf(0)
+    private var showBatchLog by mutableStateOf(false)
+    private var batchLogEntries by mutableStateOf(listOf<BatchLogEntry>())
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
     // 重建历史产物的媒体库记录（让相册显示位置）
@@ -975,6 +989,16 @@ class MainActivity : ComponentActivity() {
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,
                                 crashLogCount = crashLogCount,
+                                batchLogCount = batchLogCount,
+                                onOpenBatchLog = {
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        val entries = BatchLog.load(applicationContext)
+                                        withContext(Dispatchers.Main) {
+                                            batchLogEntries = entries
+                                            showBatchLog = true
+                                        }
+                                    }
+                                },
                                 isBusy = ConvertCenter.isConverting || isMovingOutputs ||
                                     isFixing || isRepairingLocation,
                                 onBack = { animateBackPop() },
@@ -1516,6 +1540,36 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 批次日志：设置 → 转换记录（内容走弹窗自带的滚动，最多 50 条）
+                if (showBatchLog) {
+                    GlassDialog(
+                        hazeState = appHazeState,
+                        onDismissRequest = { showBatchLog = false },
+                        title = "转换记录",
+                        confirmLabel = "知道了",
+                        onConfirm = { showBatchLog = false }
+                    ) {
+                        if (batchLogEntries.isEmpty()) {
+                            Text(
+                                "还没有转换记录",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column {
+                                batchLogEntries.forEach { e ->
+                                    BatchLogRow(e)
+                                    HorizontalDivider(
+                                        Modifier.padding(vertical = 8.dp),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                            .copy(alpha = 0.08f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 跳转设置对话框（用户选了「不再询问」）
                 if (showSettingsDialog) {
                     GlassDialog(
@@ -1564,6 +1618,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         crashLogCount = CrashLog.count(this)
+        batchLogCount = BatchLog.load(applicationContext).size
         // 前台服务完成批次后若攒下了待确认删除的原图（未授权所有文件访问路径），
         // 在回到应用时统一拉起系统回收站确认弹窗
         val pending = synchronized(ConvertCenter.pendingTrashUris) {
@@ -2417,6 +2472,49 @@ private fun PreflightLine(
             style = MaterialTheme.typography.bodySmall,
             color = tint ?: MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** 「转换记录」弹窗中的一行批次摘要 */
+@Composable
+private fun BatchLogRow(e: BatchLogEntry) {
+    val timeText = dateLabel(e.timeMs) + " " +
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(e.timeMs))
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                timeText,
+                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (e.reconvert) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "重转",
+                    style = TextStyle(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            Spacer(Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(2.dp))
+        val parts = buildList {
+            add("成功 ${e.ok}")
+            if (e.fail > 0) add("失败 ${e.fail}")
+            if (e.noGps > 0) add("无位置 ${e.noGps}")
+            if (e.deletedOriginals > 0) add("删原图 ${e.deletedOriginals}")
+            if (e.movedToCamera > 0) add("移入相机 ${e.movedToCamera}")
+        }
+        Text(
+            parts.joinToString(" · "),
+            style = TextStyle(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "输出：${e.dest}",
+            style = TextStyle(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
