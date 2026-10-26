@@ -90,7 +90,7 @@ class PreflightTest {
         assertEquals(0, info.companionVideoCount)
     }
 
-    /** 体积文案：<1MB 用 KB（无小数），>=1MB 用 MB（保留一位小数） */
+    /** 体积文案：<1MB 用 KB（无小数），>=1MB 用 MB（一位小数），>=1GB 进位 GB（一位小数） */
     @Test
     fun formatSizeBoundaries() {
         assertEquals("0 KB", Preflight.formatSize(0L))
@@ -98,6 +98,8 @@ class PreflightTest {
         assertEquals("1 KB", Preflight.formatSize(1024L))
         assertEquals("1.0 MB", Preflight.formatSize(1024L * 1024))
         assertEquals("1.5 MB", Preflight.formatSize(1024L * 1536))
+        assertEquals("1.0 GB", Preflight.formatSize(1024L * 1024 * 1024))
+        assertEquals("1.5 GB", Preflight.formatSize(1024L * 1024 * 1536))
     }
 
     @Test

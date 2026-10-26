@@ -41,7 +41,9 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,15 +51,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -118,6 +125,7 @@ import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ShareIntents
 import com.vliveconvert.app.ui.ThemedSnackbarHost
+import com.vliveconvert.app.ui.GlassDivider
 import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateLabel
 import com.vliveconvert.app.ui.rememberGlassHazeState
@@ -1255,7 +1263,7 @@ class MainActivity : ComponentActivity() {
                         GlassDialog(
                             hazeState = appHazeState,
                             onDismissRequest = { showPreflightDialog = false },
-                            title = "开始转换",
+                            title = "转换前确认",
                             confirmLabel = "开始转换",
                             onConfirm = {
                                 if (spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
@@ -1273,96 +1281,19 @@ class MainActivity : ComponentActivity() {
                             dismissLabel = "取消",
                             onDismissAction = { showPreflightDialog = false }
                         ) {
-                            val hasLoc = hasMediaLocationPermission()
-                            Column {
-                                PreflightLine("待转换", "${info.pendingCount} 张")
-                                if (info.missingSources > 0) {
-                                    PreflightLine(
-                                        "源文件已丢失",
-                                        "${info.missingSources} 张（将转换失败）",
-                                        MaterialTheme.colorScheme.error
-                                    )
-                                }
-                                PreflightLine(
-                                    "源文件体积",
-                                    Preflight.formatSize(info.totalSourceBytes) +
-                                        "（输出体积与之相当）"
-                                )
-                                val spaceColor = if (spaceGuard == Preflight.SpaceGuard.INSUFFICIENT)
-                                    MaterialTheme.colorScheme.error else null
-                                PreflightLine(
-                                    "可用空间",
-                                    (if (usableBytes <= 0L) "无法读取" else Preflight.formatSize(usableBytes)) +
-                                        "（预计需要 ${Preflight.formatSize(info.totalSourceBytes)}）",
-                                    spaceColor
-                                )
-                                PreflightLine(
-                                    "输出位置",
-                                    if (moveToCamera) "DCIM/Camera" else outputRelPath
-                                )
-                                if (deleteOriginal) {
-                                    // 只有转换成功的条目才会进入删除流程：源文件已丢失的必然失败，
-                                    // 不计入可删除数（宁可少报，也不能让「将删除」多于实际）
-                                    PreflightLine(
-                                        "将删除原图",
-                                        "${info.pendingCount - info.missingSources} 个 .jpg" +
-                                            (if (info.companionVideoCount > 0)
-                                                " + ${info.companionVideoCount} 个 .mp4"
-                                             else "") +
-                                            "（${Preflight.deleteCopy(
-                                                runCatching { Environment.isExternalStorageManager() }
-                                                    .getOrDefault(false))}）",
-                                        MaterialTheme.colorScheme.error
-                                    )
-                                } else {
-                                    PreflightLine("原图", "保留")
-                                }
-                                PreflightLine(
-                                    "位置信息",
-                                    if (hasLoc) "将保留"
-                                    else "未授予位置权限，输出将不含位置信息",
-                                    if (hasLoc) null else MaterialTheme.colorScheme.error
-                                )
-                                // 时间线副作用披露（与「重建位置显示」同源，但用户最常走的
-                                // 转换路径此前从未被告知）：产物是新媒体行，date_added 由
-                                // 系统硬编码为行创建时刻——微信/抖音按该列分组，会把转换
-                                // 产物全部归到「今天」。列本身不可写，只能如实说清
-                                PreflightLine(
-                                    "加入相册时间",
-                                    "转换当天（微信等按「加入时间」分组的应用会归入当天）"
-                                )
-                                if (preflightSpaceError &&
-                                    spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        "空间不足，无法安全完成本批转换：请清理存储空间或减少所选照片后重试。",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                if (deleteOriginal) {
-                                    // 不给「不再提示」这个选项：勾了它也不会生效，
-                                    // 摆出来等于承诺一件做不到的事
-                                    Text(
-                                        "本批会删除原图（不可逆），因此每次都需要确认。",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                } else {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Checkbox(
-                                            checked = skipPreflightNext,
-                                            onCheckedChange = { skipPreflightNext = it }
-                                        )
-                                        Text(
-                                            "以后不再提示",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
+                            PreflightContent(
+                                info = info,
+                                usableBytes = usableBytes,
+                                spaceGuard = spaceGuard,
+                                moveToCamera = moveToCamera,
+                                outputRelPath = outputRelPath,
+                                deleteOriginal = deleteOriginal,
+                                hasLocationPermission = hasMediaLocationPermission(),
+                                spaceError = preflightSpaceError &&
+                                    spaceGuard == Preflight.SpaceGuard.INSUFFICIENT,
+                                skipPreflight = skipPreflightNext,
+                                onSkipPreflightChange = { skipPreflightNext = it }
+                            )
                         }
                     }
                 }
@@ -2599,48 +2530,235 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 影响面预估弹窗中的一行：左侧标签，右侧值（可着色）。internal 供截图夹具复用 */
+/**
+ * 影响面预估弹窗的内容：三段事实（本批 / 输出 / 副作用）+ 条件警示面板。
+ * 说明性括号一律降级为值的次行小字，不再与事实同字号同权挤在一行。
+ * internal 供截图夹具复用，保证夹具与真实弹窗永远是同一份布局。
+ */
 @Composable
-internal fun PreflightLine(
+internal fun PreflightContent(
+    info: Preflight.Info,
+    usableBytes: Long,
+    spaceGuard: Preflight.SpaceGuard,
+    moveToCamera: Boolean,
+    outputRelPath: String,
+    deleteOriginal: Boolean,
+    hasLocationPermission: Boolean,
+    spaceError: Boolean = false,
+    skipPreflight: Boolean = false,
+    onSkipPreflightChange: (Boolean) -> Unit = {}
+) {
+    Column {
+        PreflightRow("待转换", "${info.pendingCount} 张")
+        if (info.missingSources > 0) {
+            PreflightRow(
+                "源文件已丢失", "${info.missingSources} 张", "将转换失败",
+                MaterialTheme.colorScheme.error
+            )
+        }
+        PreflightRow(
+            "源文件体积", Preflight.formatSize(info.totalSourceBytes), "输出体积与之相当"
+        )
+        PreflightDivider()
+        PreflightRow(
+            "可用空间",
+            if (usableBytes <= 0L) "无法读取" else Preflight.formatSize(usableBytes),
+            "预计需要 ${Preflight.formatSize(info.totalSourceBytes)}",
+            if (spaceGuard == Preflight.SpaceGuard.INSUFFICIENT)
+                MaterialTheme.colorScheme.error else null
+        )
+        PreflightRow("输出位置", if (moveToCamera) "DCIM/Camera" else outputRelPath)
+        PreflightDivider()
+        if (deleteOriginal) {
+            // 只有转换成功的条目才会进入删除流程：源文件已丢失的必然失败，
+            // 不计入可删除数（宁可少报，也不能让「将删除」多于实际）
+            PreflightRow(
+                "将删除原图",
+                "${info.pendingCount - info.missingSources} 个 .jpg" +
+                    (if (info.companionVideoCount > 0)
+                        " + ${info.companionVideoCount} 个 .mp4"
+                     else ""),
+                Preflight.deleteCopy(
+                    runCatching { Environment.isExternalStorageManager() }
+                        .getOrDefault(false)),
+                MaterialTheme.colorScheme.error
+            )
+        } else {
+            PreflightRow("原图", "保留")
+        }
+        PreflightRow(
+            "位置信息",
+            if (hasLocationPermission) "将保留" else "不含位置信息",
+            if (hasLocationPermission) null else "未授予「位置」权限",
+            if (hasLocationPermission) null else MaterialTheme.colorScheme.error
+        )
+        // 时间线副作用披露（与「重建位置显示」同源，但用户最常走的
+        // 转换路径此前从未被告知）：产物是新媒体行，date_added 由
+        // 系统硬编码为行创建时刻——微信/抖音按该列分组，会把转换
+        // 产物全部归到「今天」。列本身不可写，只能如实说清
+        PreflightRow("加入相册时间", "转换当天", "微信等按「加入时间」分组的应用会归入当天")
+        if (spaceError && spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
+            Spacer(Modifier.height(12.dp))
+            PreflightWarnPanel(
+                "空间不足，无法安全完成本批转换：请清理存储空间或减少所选照片后重试。"
+            )
+        }
+        if (deleteOriginal) {
+            // 不给「不再提示」这个选项：勾了它也不会生效，
+            // 摆出来等于承诺一件做不到的事
+            Spacer(Modifier.height(12.dp))
+            PreflightWarnPanel("本批会删除原图（不可逆），因此每次都需要确认。")
+        } else {
+            Spacer(Modifier.height(4.dp))
+            PreflightCheckRow(checked = skipPreflight) {
+                onSkipPreflightChange(!skipPreflight)
+            }
+        }
+    }
+}
+
+/** 预检弹窗分段线：玻璃发丝线，上下各 10dp 呼吸 */
+@Composable
+private fun PreflightDivider() {
+    Box(Modifier.padding(vertical = 10.dp)) { GlassDivider() }
+}
+
+/**
+ * 预检行：固定 84dp 标签列 + 值列；说明文字降级为值的次行 12sp 灰字。
+ * 标签行高与值行同为 20sp，基线自然对齐；说明跟值的色相一致但降透明度。
+ * 固定标签列在 ≥1.5× 字号下会把「源文件体积」挤成两行，改上下两行铺排。
+ */
+@Composable
+internal fun PreflightRow(
     label: String,
     value: String,
-    tint: androidx.compose.ui.graphics.Color? = null
+    note: String? = null,
+    tint: Color? = null
 ) {
-    // 固定 84dp 标签列在 2× 字号下会把「源文件体积」挤成两行；
-    // 大字号改成上下两行，正常字号仍保持紧凑的左右对齐
+    val labelColor = tint?.copy(alpha = 0.85f) ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val valueColor = tint ?: MaterialTheme.colorScheme.onSurface
+    val noteColor = tint?.copy(alpha = 0.75f) ?: MaterialTheme.colorScheme.onSurfaceVariant
     if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.bodySmall,
-                color = tint ?: MaterialTheme.colorScheme.onSurface
-            )
+        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = labelColor)
+            Text(value, style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp), color = valueColor)
+            if (note != null) {
+                Text(
+                    note, style = TextStyle(fontSize = 12.sp, lineHeight = 16.sp), color = noteColor
+                )
+            }
         }
         return
     }
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.Top
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = TextStyle(fontSize = 12.sp, lineHeight = 20.sp),
+            color = labelColor,
             modifier = Modifier.width(84.dp)
         )
+        Column(Modifier.weight(1f)) {
+            Text(value, style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp), color = valueColor)
+            if (note != null) {
+                Text(
+                    note,
+                    style = TextStyle(fontSize = 12.sp, lineHeight = 16.sp),
+                    color = noteColor,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 预检警示面板：错误色浅底圆角容器，替代裸 bodySmall 文本（更醒目也更有秩序） */
+@Composable
+internal fun PreflightWarnPanel(text: String) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
         Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            color = tint ?: MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
+            text,
+            style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+            color = MaterialTheme.colorScheme.error
         )
+    }
+}
+
+/**
+ * 预检「以后不再提示」行：20dp 玻璃圆点 + 文案，整行可点。
+ * 替代 M3 Checkbox——它 48dp 触摸目标把文案顶到 48dp 起排，
+ * 与上方 0dp 起排的内容不在同一条竖线上。
+ */
+@Composable
+internal fun PreflightCheckRow(checked: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickableNoRipple(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        PreflightCheckDot(checked)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "以后不再提示",
+            style = TextStyle(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** 勾选圆点：与 CircleTriCheckbox 同一套玻璃语言（描边圆 + 主色底 + 白勾），20dp 缩尺 */
+@Composable
+private fun PreflightCheckDot(checked: Boolean) {
+    val primary = MaterialTheme.colorScheme.primary
+    val onPrimary = MaterialTheme.colorScheme.onPrimary
+    Box(
+        Modifier
+            .size(20.dp)
+            .background(
+                if (checked) Color.Transparent else Color.White.copy(alpha = 0.18f),
+                CircleShape
+            )
+            .border(
+                1.5.dp,
+                if (checked) Color.White.copy(alpha = 0.55f)
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
+                CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (checked) {
+            Canvas(Modifier.size(20.dp)) {
+                val s = size.minDimension
+                val stroke = 2.dp.toPx()
+                drawCircle(primary, radius = s / 2 - stroke / 2 - 1.dp.toPx())
+                drawLine(
+                    color = onPrimary,
+                    start = Offset(s * 0.30f, s * 0.53f),
+                    end = Offset(s * 0.45f, s * 0.68f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = onPrimary,
+                    start = Offset(s * 0.45f, s * 0.68f),
+                    end = Offset(s * 0.72f, s * 0.34f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
     }
 }
 

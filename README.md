@@ -8,8 +8,9 @@
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
-> 点开 `VivoLivePhoto-v2.5.1.apk` 即可直接安装（推荐）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.5.1.apk`](./VivoLivePhoto-v2.5.1.apk) 下载，内容一致。
+> 点开 `VivoLivePhoto-v2.5.2-test1.apk` 即可直接安装（推荐，**测试版**：预检弹窗重排版，
+> 待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.5.2-test1.apk`](./VivoLivePhoto-v2.5.2-test1.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -143,6 +144,18 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.5.2-test1（预检弹窗重排版 · 测试版）
+
+**纯界面重排，转换逻辑零改动。** 待真机验收后转正式版。
+
+- 「转换前确认」弹窗重排：9 行同字号小字墙拆为三段（本批 / 输出 / 副作用），
+  玻璃发丝线分隔；说明性括号降级为值的次行灰字；标签列与值基线对齐
+- 「以后不再提示」的 M3 Checkbox（48dp 触摸目标把文案顶出内容栅格）换成
+  20dp 玻璃圆点行，与上方内容同一竖线；警示文字改错误色浅底面板
+- 标题去重：「开始转换」弹窗标题与确认按钮重复，改「转换前确认」
+- 修 `formatSize` 从不进位 GB 的老问题（120GB 显示成 "122880.0 MB" → "120.0 GB"）
+- 验证：246 条 JVM 用例全绿（4 条平台跳过）；Robolectric 截图夹具同步新布局
 
 ### v2.5.1（选择器视觉对齐）
 

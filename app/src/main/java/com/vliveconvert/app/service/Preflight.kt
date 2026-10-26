@@ -81,10 +81,10 @@ internal object Preflight {
     fun formatSize(bytes: Long): String {
         if (bytes <= 0L) return "0 KB"
         val mb = bytes / 1024.0 / 1024.0
-        return if (mb < 1.0) {
-            "%.0f KB".format(bytes / 1024.0)
-        } else {
-            "%.1f MB".format(mb)
+        return when {
+            mb < 1.0 -> "%.0f KB".format(bytes / 1024.0)
+            mb < 1024.0 -> "%.1f MB".format(mb)
+            else -> "%.1f GB".format(mb / 1024.0)
         }
     }
 }

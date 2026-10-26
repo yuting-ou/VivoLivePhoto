@@ -3,7 +3,6 @@ package com.vliveconvert.app
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
-import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -17,9 +16,7 @@ import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.vliveconvert.app.ui.theme.VLiveConvertTheme
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -42,7 +39,8 @@ import java.io.File
  * 1. 主界面「重试失败 N」按钮 + 完成行的分享磁贴 + 失败行
  * 2. 设置页新开关：减少动效 / 转换记录入口
  * 3. 「转换记录」弹窗（含批次摘要行）
- * 4. 预检弹窗：可用空间守卫（拦截态）+ 加入相册时间披露
+ * 4. 预检弹窗（v2.5.2 重排版）：拦截态（删原图警示 + 空间不足面板）与
+ *    常态（保留原图 + 以后不再提示勾选行）
  * 深浅色/字号等全局参数显式钉死，保证截图确定性。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -208,51 +206,54 @@ class V24PolishScreenshotTest {
     }
 
     @Test
-    fun shotV24Preflight() {
+    fun shotV25PreflightGuard() {
         render {
             GlassDialog(
                 hazeState = rememberGlassHazeState(),
                 onDismissRequest = {},
-                title = "开始转换",
+                title = "转换前确认",
                 confirmLabel = "开始转换",
-                onConfirm = {}
+                onConfirm = {},
+                dismissLabel = "取消",
+                onDismissAction = {}
             ) {
-                val info = Preflight.Info(
-                    pendingCount = 12, missingSources = 0,
-                    totalSourceBytes = 48L * 1024 * 1024, companionVideoCount = 12)
-                val usable = 500L * 1024 * 1024 // 500MB < 48MB + 1GB 预留 → 拦截态
-                val guard = Preflight.spaceGuard(info.totalSourceBytes, usable)
-                Column {
-                    PreflightLine("待转换", "${info.pendingCount} 张")
-                    PreflightLine(
-                        "源文件体积",
-                        Preflight.formatSize(info.totalSourceBytes) + "（输出体积与之相当）")
-                    PreflightLine(
-                        "可用空间",
-                        Preflight.formatSize(usable) +
-                            "（预计需要 ${Preflight.formatSize(info.totalSourceBytes)}）",
-                        if (guard == Preflight.SpaceGuard.INSUFFICIENT)
-                            MaterialTheme.colorScheme.error else null)
-                    PreflightLine("输出位置", "DCIM/Camera")
-                    PreflightLine("将删除原图", "12 个 .jpg + 12 个 .mp4（可在提示的入口恢复）",
-                        MaterialTheme.colorScheme.error)
-                    PreflightLine("加入相册时间",
-                        "转换当天（微信等按「加入时间」分组的应用会归入当天）")
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "空间不足，无法安全完成本批转换：请清理存储空间或减少所选照片后重试。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "本批会删除原图（不可逆），因此每次都需要确认。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
+                PreflightContent(
+                    info = Preflight.Info(
+                        pendingCount = 12, missingSources = 0,
+                        totalSourceBytes = 48L * 1024 * 1024, companionVideoCount = 12),
+                    usableBytes = 500L * 1024 * 1024, // 500MB < 48MB + 1GB 预留 → 拦截态
+                    spaceGuard = Preflight.SpaceGuard.INSUFFICIENT,
+                    moveToCamera = true, outputRelPath = "", deleteOriginal = true,
+                    hasLocationPermission = true, spaceError = true
+                )
             }
         }
-        shot("v24_preflight_guard")
+        shot("v25_preflight_guard")
+    }
+
+    @Test
+    fun shotV25PreflightNormal() {
+        render {
+            GlassDialog(
+                hazeState = rememberGlassHazeState(),
+                onDismissRequest = {},
+                title = "转换前确认",
+                confirmLabel = "开始转换",
+                onConfirm = {},
+                dismissLabel = "取消",
+                onDismissAction = {}
+            ) {
+                PreflightContent(
+                    info = Preflight.Info(
+                        pendingCount = 8, missingSources = 1,
+                        totalSourceBytes = 96L * 1024 * 1024, companionVideoCount = 7),
+                    usableBytes = 120L * 1024 * 1024 * 1024,
+                    spaceGuard = Preflight.SpaceGuard.OK,
+                    moveToCamera = false, outputRelPath = "Pictures/VLiveConvert",
+                    deleteOriginal = false, hasLocationPermission = false
+                )
+            }
+        }
+        shot("v25_preflight_normal")
     }
 }
