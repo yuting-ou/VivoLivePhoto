@@ -4,6 +4,7 @@ import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.service.Preflight
 import com.vliveconvert.app.ui.ConvertItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
@@ -97,5 +98,16 @@ class PreflightTest {
         assertEquals("1 KB", Preflight.formatSize(1024L))
         assertEquals("1.0 MB", Preflight.formatSize(1024L * 1024))
         assertEquals("1.5 MB", Preflight.formatSize(1024L * 1536))
+    }
+
+    @Test
+    fun deleteCopyMatchesActualPath() {
+        val direct = com.vliveconvert.app.service.Preflight.deleteCopy(directDelete = true)
+        assertTrue("直删路径必须指向第三方删除拦截", direct.contains("第三方删除拦截"))
+        assertTrue("直删路径不得宣称 30 天", !direct.contains("30 天"))
+
+        val trash = com.vliveconvert.app.service.Preflight.deleteCopy(directDelete = false)
+        assertTrue("回收站路径必须写明 30 天", trash.contains("30 天"))
+        assertTrue("回收站路径不应提第三方删除拦截", !trash.contains("第三方删除拦截"))
     }
 }

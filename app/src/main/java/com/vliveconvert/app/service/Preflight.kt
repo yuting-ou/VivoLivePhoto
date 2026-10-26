@@ -31,6 +31,14 @@ internal object Preflight {
         else -> SpaceGuard.OK
     }
 
+    /**
+     * 删除路径文案：授权「所有文件访问」时是直接删除，走 vivo 相册「第三方删除拦截」；
+     * 未授权时是系统回收站（30 天）。预检必须如实说明用户能从哪找回。
+     */
+    fun deleteCopy(directDelete: Boolean): String =
+        if (directDelete) "删除后可在 vivo 相册「第三方删除拦截」中查看/恢复"
+        else "移入系统回收站，30 天内可恢复"
+
     /** 主存储可用字节（=0 表示无法判断） */
     fun usableBytes(): Long =
         try { File("/storage/emulated/0").usableSpace.takeIf { it > 0 } ?: 0L } catch (_: Exception) { 0L }

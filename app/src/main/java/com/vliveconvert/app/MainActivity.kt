@@ -1309,7 +1309,9 @@ class MainActivity : ComponentActivity() {
                                             (if (info.companionVideoCount > 0)
                                                 " + ${info.companionVideoCount} 个 .mp4"
                                              else "") +
-                                            "（可在提示的入口恢复）",
+                                            "（${Preflight.deleteCopy(
+                                                runCatching { Environment.isExternalStorageManager() }
+                                                    .getOrDefault(false))}）",
                                         MaterialTheme.colorScheme.error
                                     )
                                 } else {
