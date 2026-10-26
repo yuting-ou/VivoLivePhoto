@@ -99,6 +99,7 @@ import com.vliveconvert.app.picker.SingleLiveScanner
 import com.vliveconvert.app.service.BatchLog
 import com.vliveconvert.app.service.BatchLogEntry
 import com.vliveconvert.app.service.ConvertCenter
+import com.vliveconvert.app.service.ConvertedStore
 import com.vliveconvert.app.service.ConvertService
 import com.vliveconvert.app.service.Preflight
 import com.vliveconvert.app.service.mergeClearedUndo
@@ -983,11 +984,22 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+                                // 精确索引（转换成功时落盘）：与名称启发式并集使用
+                                val convertedPaths by produceState(
+                                    emptyMap<String, String>(), showPicker
+                                ) {
+                                    if (showPicker) {
+                                        value = withContext(Dispatchers.IO) {
+                                            ConvertedStore.load(applicationContext)
+                                        }
+                                    }
+                                }
                                 PickerScreen(
                                     albums = pickerAlbums,
                                     scanner = scanner,
                                     scannerScope = lifecycleScope,
                                     convertedIndex = convertedIndex,
+                                    convertedPaths = convertedPaths,
                                     onBack = { animateBackPop() },
                                     onConfirm = { picked ->
                                         showPicker = false

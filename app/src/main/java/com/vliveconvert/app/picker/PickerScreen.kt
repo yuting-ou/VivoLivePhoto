@@ -144,6 +144,8 @@ fun PickerScreen(
     scannerScope: CoroutineScope,
     /** 目标输出目录的 名称→id 索引：驱动「已转」角标与「只看未转换」筛选 */
     convertedIndex: Map<String, Long> = emptyMap(),
+    /** 精确索引：源路径（小写）→ 产物 URI（转换成功时落盘，优先于名称启发式） */
+    convertedPaths: Map<String, String> = emptyMap(),
     onBack: () -> Unit,
     onConfirm: (List<MediaItem>) -> Unit,
     showAlbumSheet: Boolean = false,
@@ -198,20 +200,18 @@ fun PickerScreen(
     val filtered = remember(displayOrder, searchQuery) {
         filterByQuery(displayOrder, searchQuery)
     }
-    // 「只看未转换」：ConvertedIndex 的提示性判定（导出层的指纹校验才是权威）
+    // 「只看未转换」：精确索引（源路径→产物 URI）优先，名称启发式兜底
     var onlyUnconverted by remember(bucketId) { mutableStateOf(false) }
-    val visible = remember(filtered, onlyUnconverted, convertedIndex) {
-        if (!onlyUnconverted) filtered
-        else filtered.filter {
-            !ConvertedIndex.isConverted(
-                it.name.substringBeforeLast('.'), it.id, convertedIndex)
+    val convertedChecker = remember(convertedIndex, convertedPaths) {
+        { item: MediaItem ->
+            convertedPaths[item.path.lowercase()] != null ||
+                ConvertedIndex.isConverted(
+                    item.name.substringBeforeLast('.'), item.id, convertedIndex)
         }
     }
-    val convertedChecker = remember(convertedIndex) {
-        { item: MediaItem ->
-            ConvertedIndex.isConverted(
-                item.name.substringBeforeLast('.'), item.id, convertedIndex)
-        }
+    val visible = remember(filtered, onlyUnconverted, convertedChecker) {
+        if (!onlyUnconverted) filtered
+        else filtered.filter { !convertedChecker(it) }
     }
 
     // 单项选择切换（追加到末尾，序号递增）
