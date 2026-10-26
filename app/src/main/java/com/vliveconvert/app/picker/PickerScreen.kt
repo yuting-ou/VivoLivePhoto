@@ -54,6 +54,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -102,6 +103,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.GlassDivider
+import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.HazeGlassCard
 import com.vliveconvert.app.ui.EaseOutStrong
 import com.vliveconvert.app.ui.GlassIconTile
@@ -124,6 +126,17 @@ import kotlinx.coroutines.delay
  * 数据源为 MediaStore 直查 + PickerScanner 会话化多线程扫描，
  * 仅显示「.jpg + 同目录同名 .mp4」的 vivo 双文件实况照片。
  */
+
+/**
+ * 文件名搜索（纯 contains、大小写不敏感）。**不解释任何通配符**——
+ * vivo 文件名 IMG_20260831_134354 本身就带 `_`，把 `_`/`%` 当通配符解释必然误伤。
+ */
+internal fun filterByQuery(items: List<MediaItem>, query: String): List<MediaItem> {
+    val q = query.trim()
+    if (q.isEmpty()) return items
+    return items.filter { it.name.contains(q, ignoreCase = true) }
+}
+
 @Composable
 fun PickerScreen(
     albums: List<AlbumInfo>,
@@ -177,6 +190,12 @@ fun PickerScreen(
     val displayOrder = remember(results, n) {
         results.orEmpty().sortedByDescending { it.sortTime }
     }
+    // 文件名搜索：过滤在 displayOrder 之后、日期分组之前；全选与计数都随可见集合收窄。
+    // 切换相册即清空（搜索是「在本相册里找」的心智模型）
+    var searchQuery by remember(bucketId) { mutableStateOf("") }
+    val filtered = remember(displayOrder, searchQuery) {
+        filterByQuery(displayOrder, searchQuery)
+    }
 
     // 单项选择切换（追加到末尾，序号递增）
     val toggleItem: (MediaItem) -> Unit = { item ->
@@ -205,8 +224,8 @@ fun PickerScreen(
     val gridState = remember(bucketId) { LazyGridState() }
     // 日期分段：照片必须按天断开，只靠一个浮动日期标签会全部堆在一起。
     // groupBy 保留插入顺序，displayOrder 已按时间倒序，所以分段顺序也正确。
-    val sections = remember(displayOrder) {
-        displayOrder.groupBy { dateKey(it.sortTime) }
+    val sections = remember(filtered) {
+        filtered.groupBy { dateKey(it.sortTime) }
             .map { (key, items) -> PickerSection(key, items) }
     }
 
@@ -249,6 +268,26 @@ fun PickerScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(4.dp))
                         Text("拍摄时请保持相机的「实况」开关开启",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    filtered.isEmpty() && !running -> Column(
+                        Modifier.fillMaxSize()
+                            .padding(top = headerHeight + 14.dp, bottom = 48.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("没有匹配的照片", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text("换个文件名关键词试试",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -351,14 +390,25 @@ fun PickerScreen(
                 Spacer(Modifier.height(6.dp))
                 GlassDivider()
                 Spacer(Modifier.height(4.dp))
+                // ── 搜索行：文件名过滤（切相册自动清空） ──
+                GlassTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = "搜索文件名",
+                    singleLine = true
+                )
+                Spacer(Modifier.height(4.dp))
                 // ── 工具行：张数（左） + 已选 + 全选（右） ──
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 40.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        if (running) "扫描中 ${progress.first}/$total"
-                        else "${results?.size ?: 0} 张双文件实况",
+                        when {
+                            running -> "扫描中 ${progress.first}/$total"
+                            searchQuery.isNotBlank() -> "匹配 ${filtered.size} 张"
+                            else -> "${results?.size ?: 0} 张双文件实况"
+                        },
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -371,13 +421,14 @@ fun PickerScreen(
                             color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.size(12.dp))
                     }
-                    val allSel = n > 0 && displayOrder.all { it.id in selectedIds }
-                    val someSel = displayOrder.any { it.id in selectedIds }
+                    // 全选只作用于当前可见（搜索过滤后）的集合
+                    val allSel = filtered.isNotEmpty() && filtered.all { it.id in selectedIds }
+                    val someSel = filtered.any { it.id in selectedIds }
                     // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
+                            .clickableNoRipple(onClick = { if (filtered.isNotEmpty()) toggleGroup(filtered) }),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("全选", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
@@ -388,7 +439,7 @@ fun PickerScreen(
                                 someSel -> ToggleableState.Indeterminate
                                 else -> ToggleableState.Off
                             },
-                            onClick = { if (n > 0) toggleGroup(displayOrder) }
+                            onClick = { if (filtered.isNotEmpty()) toggleGroup(filtered) }
                         )
                     }
                 }
