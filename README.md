@@ -11,8 +11,8 @@
 > 点开 `VivoLivePhoto-v2.3.0.apk` 即可直接安装（推荐）。亦可从仓库根目录
 > [`VivoLivePhoto-v2.3.0.apk`](./VivoLivePhoto-v2.3.0.apk) 下载，内容一致。
 >
-> **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
-> 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
+> **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200 系列
+> 真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
 > [v2.1.0](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.1.0)。
 >
 > **v2.3.0 打磨弹窗退场动效，进度条与输入框统一为玻璃件，并修掉大字号提示裁切、浅色主题
