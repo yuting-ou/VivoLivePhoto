@@ -56,10 +56,20 @@ class ConvertService : Service() {
     private var running = false
     // 批次收尾期间收到的新 START：排队等本批收尾后补跑（见 onStartIntent 的 QUEUE 分支）
     @Volatile private var pendingStart = false
+    // 通知副文案：当前正在转换的文件名（convertOne 起止维护，volatile 供通知线程读）
+    @Volatile private var currentFileName: String? = null
+    // 本批开始时刻：通知里的「预计剩余」按实际吞吐估算
+    @Volatile private var batchStartMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 通知栏「取消」：必须在 startForeground 之前处理——空闲时收到 CANCEL
+        // 不该把服务挂成前台（没有批次可取消，挂前台只会留下一条假通知）
+        if (intent?.action == ACTION_CANCEL) {
+            if (running) cancelBatch() else stopSelf()
+            return START_NOT_STICKY
+        }
         // startForeground 受限时抛 ForegroundServiceStartNotAllowedException：
         // 不接住会直接崩；接住后回滚转换状态并自杀，让界面回到可重试的干净状态
         try {
@@ -132,6 +142,7 @@ class ConvertService : Service() {
             ConvertCenter.itemsSnapshot().filter { !it.done && !it.failed }
         }
         val total = targets.size
+        batchStartMs = System.currentTimeMillis()
         val done = AtomicInteger(0)
         val ok = AtomicInteger(0)
         val fail = AtomicInteger(0)
@@ -243,6 +254,7 @@ class ConvertService : Service() {
                 status = if (isReconvert) "重新转换中…" else "转换中…"))
         }
         var staged: String? = null
+        currentFileName = ci.item.name
         try {
             val result = Converter.convertToVivoSingle(
                 path = ci.item.path,
@@ -319,6 +331,7 @@ class ConvertService : Service() {
                 ConvertCenter.replaceItem(ci, ci.copy(status = "失败：$reason", failed = true))
             }
         } finally {
+            currentFileName = null
             // 清理本地暂存产物（已导出 / 失败均清理）
             staged?.let { p -> try { File(p).delete() } catch (_: Exception) {} }
         }
@@ -450,7 +463,12 @@ class ConvertService : Service() {
             NotificationChannel(CHANNEL_ID, "转换进度", NotificationManager.IMPORTANCE_LOW))
     }
 
-    private fun buildProgressNotification(done: Int, total: Int, indeterminate: Boolean): Notification {
+    private fun buildProgressNotification(
+        done: Int,
+        total: Int,
+        indeterminate: Boolean,
+        subText: String? = null
+    ): Notification {
         ensureChannel()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_convert)
@@ -461,14 +479,50 @@ class ConvertService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(mainIntent())
+            .apply { subText?.takeIf { it.isNotBlank() }?.let { setSubText(it) } }
+            // 通知栏直达「取消」：与界面内按钮同一语义（进行中的条目复位为待转换）
+            .addAction(
+                0, "取消",
+                PendingIntent.getService(
+                    this, 1,
+                    Intent(this, ConvertService::class.java).setAction(ACTION_CANCEL),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
             .build()
     }
 
     private fun notifyProgress(done: Int, total: Int) {
         try {
+            val eta = ProgressEta.text(
+                System.currentTimeMillis() - batchStartMs, done, total)
+            val sub = listOfNotNull(currentFileName, eta).joinToString(" · ")
             val nm = getSystemService(NotificationManager::class.java)
-            nm.notify(NOTIF_ID, buildProgressNotification(done, total, false))
+            nm.notify(NOTIF_ID, buildProgressNotification(done, total, false, sub))
         } catch (_: Exception) {}
+    }
+
+    /**
+     * 通知栏「取消」入口：与主界面取消按钮同一语义（进行中的条目复位为待转换，
+     * 已完成的保留结果）。服务侧就地复位后停服务；批内协程由 onDestroy 的
+     * scope.cancel 收割，正在跑的单张会在下一个 ensureActive 检查点自然终止。
+     */
+    private fun cancelBatch() {
+        running = false
+        pendingStart = false
+        ConvertCenter.items.forEachIndexed { i, ci ->
+            if (ci.status.startsWith("转换中") || ci.status.startsWith("重新转换中")) {
+                ConvertCenter.items[i] = ci.copy(status = "待转换")
+            }
+        }
+        ConvertCenter.isConverting = false
+        ConvertCenter.progress = 0f
+        ConvertCenter.progressDetail = ""
+        ConvertCenter.statusText = "已取消转换（已完成的条目保留结果）"
+        ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
+        currentFileName = null
+        try { getSystemService(NotificationManager::class.java).cancel(NOTIF_ID) } catch (_: Exception) {}
+        stopSelf()
     }
 
     private fun notifyDone(ok: Int, fail: Int, needTrashConfirm: Boolean) {
@@ -498,6 +552,7 @@ class ConvertService : Service() {
 
     companion object {
         const val ACTION_START = "com.vliveconvert.app.action.START_CONVERT"
+        const val ACTION_CANCEL = "com.vliveconvert.app.action.CANCEL_CONVERT"
         private const val CHANNEL_ID = "convert"
         private const val NOTIF_ID = 100
         private const val NOTIF_DONE_ID = 101
