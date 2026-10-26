@@ -142,6 +142,8 @@ fun PickerScreen(
     albums: List<AlbumInfo>,
     scanner: PickerScanner,
     scannerScope: CoroutineScope,
+    /** 目标输出目录的 名称→id 索引：驱动「已转」角标与「只看未转换」筛选 */
+    convertedIndex: Map<String, Long> = emptyMap(),
     onBack: () -> Unit,
     onConfirm: (List<MediaItem>) -> Unit,
     showAlbumSheet: Boolean = false,
@@ -196,6 +198,21 @@ fun PickerScreen(
     val filtered = remember(displayOrder, searchQuery) {
         filterByQuery(displayOrder, searchQuery)
     }
+    // 「只看未转换」：ConvertedIndex 的提示性判定（导出层的指纹校验才是权威）
+    var onlyUnconverted by remember(bucketId) { mutableStateOf(false) }
+    val visible = remember(filtered, onlyUnconverted, convertedIndex) {
+        if (!onlyUnconverted) filtered
+        else filtered.filter {
+            !ConvertedIndex.isConverted(
+                it.name.substringBeforeLast('.'), it.id, convertedIndex)
+        }
+    }
+    val convertedChecker = remember(convertedIndex) {
+        { item: MediaItem ->
+            ConvertedIndex.isConverted(
+                item.name.substringBeforeLast('.'), item.id, convertedIndex)
+        }
+    }
 
     // 单项选择切换（追加到末尾，序号递增）
     val toggleItem: (MediaItem) -> Unit = { item ->
@@ -224,8 +241,8 @@ fun PickerScreen(
     val gridState = remember(bucketId) { LazyGridState() }
     // 日期分段：照片必须按天断开，只靠一个浮动日期标签会全部堆在一起。
     // groupBy 保留插入顺序，displayOrder 已按时间倒序，所以分段顺序也正确。
-    val sections = remember(filtered) {
-        filtered.groupBy { dateKey(it.sortTime) }
+    val sections = remember(visible) {
+        visible.groupBy { dateKey(it.sortTime) }
             .map { (key, items) -> PickerSection(key, items) }
     }
 
@@ -271,7 +288,7 @@ fun PickerScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    filtered.isEmpty() && !running -> Column(
+                    visible.isEmpty() && !running -> Column(
                         Modifier.fillMaxSize()
                             .padding(top = headerHeight + 14.dp, bottom = 48.dp),
                         verticalArrangement = Arrangement.Center,
@@ -390,13 +407,32 @@ fun PickerScreen(
                 Spacer(Modifier.height(6.dp))
                 GlassDivider()
                 Spacer(Modifier.height(4.dp))
-                // ── 搜索行：文件名过滤（切相册自动清空） ──
-                GlassTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = "搜索文件名",
-                    singleLine = true
-                )
+                // ── 搜索行：文件名过滤（切相册自动清空）+ 只看未转换 ──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GlassTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = "搜索文件名",
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickableNoRipple(onClick = { onlyUnconverted = !onlyUnconverted })
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "只看未转换",
+                            fontSize = 13.sp,
+                            fontWeight = if (onlyUnconverted) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (onlyUnconverted) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 // ── 工具行：张数（左） + 已选 + 全选（右） ──
                 Row(
@@ -406,7 +442,8 @@ fun PickerScreen(
                     Text(
                         when {
                             running -> "扫描中 ${progress.first}/$total"
-                            searchQuery.isNotBlank() -> "匹配 ${filtered.size} 张"
+                            searchQuery.isNotBlank() -> "匹配 ${visible.size} 张"
+                            onlyUnconverted -> "未转换 ${visible.size} 张"
                             else -> "${results?.size ?: 0} 张双文件实况"
                         },
                         fontSize = 12.sp,
@@ -421,14 +458,14 @@ fun PickerScreen(
                             color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.size(12.dp))
                     }
-                    // 全选只作用于当前可见（搜索过滤后）的集合
-                    val allSel = filtered.isNotEmpty() && filtered.all { it.id in selectedIds }
-                    val someSel = filtered.any { it.id in selectedIds }
+                    // 全选只作用于当前可见（搜索/筛选后）的集合
+                    val allSel = visible.isNotEmpty() && visible.all { it.id in selectedIds }
+                    val someSel = visible.any { it.id in selectedIds }
                     // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickableNoRipple(onClick = { if (filtered.isNotEmpty()) toggleGroup(filtered) }),
+                            .clickableNoRipple(onClick = { if (visible.isNotEmpty()) toggleGroup(visible) }),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("全选", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
@@ -439,7 +476,7 @@ fun PickerScreen(
                                 someSel -> ToggleableState.Indeterminate
                                 else -> ToggleableState.Off
                             },
-                            onClick = { if (filtered.isNotEmpty()) toggleGroup(filtered) }
+                            onClick = { if (visible.isNotEmpty()) toggleGroup(visible) }
                         )
                     }
                 }
@@ -612,6 +649,7 @@ private fun AlbumGridPage(
     selectedIndex: Map<Long, Int>,
     onToggle: (MediaItem) -> Unit,
     onToggleGroup: (List<MediaItem>) -> Unit,
+    isConverted: (MediaItem) -> Boolean = { false },
     running: Boolean,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -649,6 +687,7 @@ private fun AlbumGridPage(
                     item = item,
                     selected = item.id in selectedIds,
                     selectionIndex = selectedIndex[item.id] ?: -1,
+                    converted = isConverted(item),
                     onToggle = { onToggle(item) }
                 )
             }
@@ -754,7 +793,13 @@ private fun AlbumChip(
  * 网格单元：勾选徽章在右上角；选中以几何中心缩放 + 圆角增大过渡。
  */
 @Composable
-private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, onToggle: () -> Unit) {
+private fun GridCell(
+    item: MediaItem,
+    selected: Boolean,
+    selectionIndex: Int,
+    converted: Boolean = false,
+    onToggle: () -> Unit
+) {
     val resolver = LocalContext.current.contentResolver
     val transition = updateTransition(selected, label = "cell")
 
@@ -813,6 +858,20 @@ private fun GridCell(item: MediaItem, selected: Boolean, selectionIndex: Int, on
                 .size(8.dp)
                 .background(Color.White.copy(alpha = 0.9f), CircleShape)
         )
+
+        // 已转换角标（右下角）：提示性标记，导出层指纹校验才是覆盖决策的权威
+        if (converted && !selected) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
+            ) {
+                Text("已转", fontSize = 10.sp, lineHeight = 12.sp, color = Color.White)
+            }
+        }
 
         // 勾选徽章（右上角）：选中时 primary 圆底 + 白色序号，未选中空心圈
         val digits = if (selected) (selectionIndex + 1).toString().length else 1

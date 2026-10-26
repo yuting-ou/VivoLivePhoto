@@ -73,6 +73,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -89,6 +90,7 @@ import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.XmpTemplate
 import com.vliveconvert.app.picker.AlbumInfo
+import com.vliveconvert.app.picker.ConvertedIndex
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
 import com.vliveconvert.app.picker.PickerScanner
@@ -956,19 +958,36 @@ class MainActivity : ComponentActivity() {
                                 appName = getString(R.string.app_display_name),
                                 hazeState = appHazeState
                             )
-                            Screen.Picker -> PickerScreen(
-                                albums = pickerAlbums,
-                                scanner = scanner,
-                                scannerScope = lifecycleScope,
-                                onBack = { animateBackPop() },
-                                onConfirm = { picked ->
-                                    showPicker = false
-                                    addPickedItems(picked)
-                                },
-                                showAlbumSheet = showAlbumSheet,
-                                onAlbumSheetChange = { showAlbumSheet = it },
-                                hazeState = appHazeState
-                            )
+                            Screen.Picker -> {
+                                // 「已转换」索引：进选择器时装载一次（IO 查媒体库）；
+                                // 输出位置 = 移到相机相册 ? DCIM/Camera : 自定义输出目录
+                                val convertedIndex by produceState(
+                                    emptyMap<String, Long>(), showPicker
+                                ) {
+                                    if (showPicker) {
+                                        value = withContext(Dispatchers.IO) {
+                                            ConvertedIndex.load(
+                                                contentResolver,
+                                                if (moveToCamera) "DCIM/Camera" else outputRelPath
+                                            )
+                                        }
+                                    }
+                                }
+                                PickerScreen(
+                                    albums = pickerAlbums,
+                                    scanner = scanner,
+                                    scannerScope = lifecycleScope,
+                                    convertedIndex = convertedIndex,
+                                    onBack = { animateBackPop() },
+                                    onConfirm = { picked ->
+                                        showPicker = false
+                                        addPickedItems(picked)
+                                    },
+                                    showAlbumSheet = showAlbumSheet,
+                                    onAlbumSheetChange = { showAlbumSheet = it },
+                                    hazeState = appHazeState
+                                )
+                            }
                             Screen.FixTime -> FixTimeScreen(
                                 albums = fixAlbums,
                                 scanner = singleLiveScanner,
