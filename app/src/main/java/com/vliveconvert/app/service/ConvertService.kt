@@ -7,7 +7,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -19,7 +18,6 @@ import androidx.core.app.NotificationCompat
 import com.vliveconvert.app.MainActivity
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.Converter
-import com.vliveconvert.app.convert.InPlaceMerge
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.VivoDual
@@ -136,8 +134,6 @@ class ConvertService : Service() {
         val moveToCamera = prefs.getBoolean("move_to_camera", true)
         val outputRelPath =
             prefs.getString("output_rel_path", "Pictures/VLiveConvert") ?: "Pictures/VLiveConvert"
-        // 原地合并（实验）：需删原图开 + 所有文件访问权限，产物直接替换源 .jpg
-        val inPlaceMerge = prefs.getBoolean("in_place_merge", false)
         val tempDir = File(app.cacheDir, "output").apply { mkdirs() }
 
         // 快照纪律：遍历队列必须在主线程取不可变快照（IO 直接迭代 Compose 列表
@@ -163,8 +159,7 @@ class ConvertService : Service() {
             // 必须显式 IO：serviceScope 默认 Main 调度器，不指定会把转换跑在主线程（ANR）
             serviceScope.launch(Dispatchers.IO) {
                 sem.withPermit {
-                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
-                        inPlaceMerge, ok, fail, noGps)
+                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal, ok, fail, noGps)
                     val d = done.incrementAndGet()
                     withContext(Dispatchers.Main) {
                         ConvertCenter.progress = d.toFloat() / total
@@ -257,7 +252,6 @@ class ConvertService : Service() {
         moveToCamera: Boolean,
         outputRelPath: String,
         deleteOriginal: Boolean,
-        inPlaceMerge: Boolean,
         ok: AtomicInteger,
         fail: AtomicInteger,
         noGps: AtomicInteger
@@ -301,34 +295,6 @@ class ConvertService : Service() {
                 else -> PhotoTime.parseFromName(ci.item.name)
                     ?: (if (ci.item.dateModified > 0) ci.item.dateModified * 1000L
                         else System.currentTimeMillis())
-            }
-            // 原地合并（实验）：产物原子替换源 .jpg，保留原 MediaStore 行——
-            // date_added（加入相册时间）/datetaken/坐标列/相册归属全部天然保留。
-            // 任何失败都回退标准导出；伴生 mp4 仍走回收站。需所有文件访问权限才能写源文件
-            if (inPlaceMerge && !ci.externalSource &&
-                Environment.isExternalStorageManager() &&
-                InPlaceMerge.replaceSource(result, ci.item.path, ts)
-            ) {
-                ok.incrementAndGet()
-                if (!result.sourceHasGps) noGps.incrementAndGet()
-                // 源 jpg 已被产物替换（不进回收站，语义在开关描述中披露）；mp4 仍送回收站
-                collectOriginalUris(ci, includeJpg = false)
-                // 行保持不动，仅 SIZE 尽力同步（部分 ROM 拒绝改他人行的列，失败不致命）
-                try {
-                    contentResolver.update(
-                        ci.item.uri,
-                        ContentValues().apply {
-                            put(MediaStore.MediaColumns.SIZE, File(ci.item.path).length())
-                        },
-                        null, null
-                    )
-                } catch (_: Exception) {}
-                withContext(NonCancellable + Dispatchers.Main) {
-                    ConvertCenter.replaceItem(ci, ci.copy(
-                        status = "完成：已原地替换原图（相册加入时间与位置保留）", done = true,
-                        lostGps = false, outUri = ci.item.uri.toString(), reconvert = false))
-                }
-                return
             }
             // 导出 + 写后自检（自检不过会抛异常 → 该项失败，原图不会被删）。
             // 命名策略在 MediaExport 内统一处理：显式指定旧产物（重转路径）或自动识别
@@ -393,12 +359,9 @@ class ConvertService : Service() {
 
     // ---------- 删除原图 ----------
 
-    /** 收集待删除原图 URI：jpg 用媒体 URI；伴生 mp4 按 DATA 路径回查视频集合。
-     *  原地合并时 includeJpg=false（源 jpg 已被产物替换，不再进回收站） */
-    private fun collectOriginalUris(ci: ConvertItem, includeJpg: Boolean = true) {
-        if (includeJpg) {
-            try { ConvertCenter.pendingTrashUris.add(ci.item.uri) } catch (_: Exception) {}
-        }
+    /** 收集待删除原图 URI：jpg 用媒体 URI；伴生 mp4 按 DATA 路径回查视频集合 */
+    private fun collectOriginalUris(ci: ConvertItem) {
+        try { ConvertCenter.pendingTrashUris.add(ci.item.uri) } catch (_: Exception) {}
         // 复用 VivoDual 的伴生视频解析（含大小写兼容），避免两处逻辑分叉：
         // 原先这里独立硬拼 ".mp4"，与识别链路的规则不一致
         val mp4Path = VivoDual.siblingMp4(ci.item.path) ?: return

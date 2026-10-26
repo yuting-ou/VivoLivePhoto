@@ -40,7 +40,7 @@ import java.io.File
 /**
  * v2.4.0 新 UI 的验收截图（Robolectric 真实渲染，管线同 [UiScreenshotTest]）：
  * 1. 主界面「重试失败 N」按钮 + 完成行的分享磁贴 + 失败行
- * 2. 设置页新开关：原地合并（实验）/ 减少动效 / 转换记录入口
+ * 2. 设置页新开关：减少动效 / 转换记录入口
  * 3. 「转换记录」弹窗（含批次摘要行）
  * 4. 预检弹窗：可用空间守卫（拦截态）+ 加入相册时间披露
  * 深浅色/字号等全局参数显式钉死，保证截图确定性。
@@ -159,8 +159,6 @@ class V24PolishScreenshotTest {
                 onMoveOutputsToCamera = {},
                 onExportCrashLogs = {},
                 onClearCrashLogs = {},
-                inPlaceMerge = true,
-                onToggleInPlaceMerge = {},
                 dynamicColor = false,
                 onToggleDynamicColor = {},
                 reduceMotion = true,
