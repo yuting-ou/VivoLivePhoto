@@ -725,17 +725,28 @@ private fun ConvertItemRow(
                 Box(Modifier.size(46.dp)) {
                     // 转换中：缩略图外圈一道不确定弧
                     if (busy) {
-                        val ringAngle by rememberInfiniteTransition(label = "ring").animateFloat(
-                            initialValue = 0f, targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                tween(900, easing = LinearEasing)), label = "ringAngle"
-                        )
-                        Canvas(Modifier.size(54.dp).align(Alignment.Center)) {
-                            drawArc(
-                                color = status.info,
-                                startAngle = -90f + ringAngle, sweepAngle = 110f, useCenter = false,
-                                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                        if (LocalReduceMotion.current) {
+                            // 静态弧：固定角度，不建 infinite transition
+                            Canvas(Modifier.size(54.dp).align(Alignment.Center)) {
+                                drawArc(
+                                    color = status.info,
+                                    startAngle = 70f, sweepAngle = 110f, useCenter = false,
+                                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
+                        } else {
+                            val ringAngle by rememberInfiniteTransition(label = "ring").animateFloat(
+                                initialValue = 0f, targetValue = 360f,
+                                animationSpec = infiniteRepeatable(
+                                    tween(900, easing = LinearEasing)), label = "ringAngle"
                             )
+                            Canvas(Modifier.size(54.dp).align(Alignment.Center)) {
+                                drawArc(
+                                    color = status.info,
+                                    startAngle = -90f + ringAngle, sweepAngle = 110f, useCenter = false,
+                                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
                         }
                     }
                     Box(
@@ -859,9 +870,11 @@ private fun ConvertItemRow(
 @Composable
 private fun CompletionBadge() {
     val pop = remember { Animatable(0f) }
+    val reduceMotion = LocalReduceMotion.current
     LaunchedEffect(Unit) {
         // 完成节拍只有 450ms：对勾必须在节拍内弹到位，不能刚冒头就被收回
-        pop.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = 650f))
+        if (reduceMotion) pop.snapTo(1f)
+        else pop.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = 650f))
     }
     GlassCircle(
         size = 30.dp,

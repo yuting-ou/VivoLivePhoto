@@ -109,7 +109,9 @@ import com.vliveconvert.app.ui.GlassDialog
 import com.vliveconvert.app.ui.GlassIndeterminateBar
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.LocalGlassBackdrop
+import com.vliveconvert.app.ui.LocalReduceMotion
 import com.vliveconvert.app.ui.MainScreen
+import com.vliveconvert.app.ui.MotionPrefs
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ThemedSnackbarHost
@@ -749,6 +751,8 @@ class MainActivity : ComponentActivity() {
             .getString("output_rel_path", "Pictures/VLiveConvert") ?: "Pictures/VLiveConvert"
 
         setContent {
+            MotionPrefs.load(this)
+            CompositionLocalProvider(LocalReduceMotion provides MotionPrefs.effective) {
             VLiveConvertTheme(dynamicColor = dynamicColor) {
                 // 系统栏图标明暗必须跟主题走：enableEdgeToEdge 只在 onCreate 判定一次，
                 // 切换莫奈/品牌配色后可能残留白图标，浅色顶栏上几乎不可见。
@@ -1045,6 +1049,10 @@ class MainActivity : ComponentActivity() {
                                     dynamicColor = on
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("dynamic_color", on).apply()
+                                },
+                                reduceMotion = MotionPrefs.effective,
+                                onToggleReduceMotion = { on ->
+                                    MotionPrefs.set(this@MainActivity, on)
                                 },
                                 onOpenFixTime = { openFixTime() },
                                 onRepairLocationDisplay = { showRepairConfirm = true },
@@ -1612,6 +1620,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
                 }
+            }
         }
     }
 
@@ -1638,6 +1647,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         crashLogCount = CrashLog.count(this)
         batchLogCount = BatchLog.load(applicationContext).size
+        MotionPrefs.refreshSystem(this)
         // 前台服务完成批次后若攒下了待确认删除的原图（未授权所有文件访问路径），
         // 在回到应用时统一拉起系统回收站确认弹窗
         val pending = synchronized(ConvertCenter.pendingTrashUris) {

@@ -392,6 +392,7 @@ fun GlassDialog(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val dark = isDarkGlass()
+    val reduceMotion = LocalReduceMotion.current
     val scope = rememberCoroutineScope()
     val latestOnDismiss = rememberUpdatedState(onDismissRequest)
     val latestOnConfirm = rememberUpdatedState(onConfirm)
@@ -400,7 +401,8 @@ fun GlassDialog(
     // 入场动效：遮罩淡入 + 卡片弹簧轻微放大弹出（与相册面板同一弹簧手感）
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
+        if (reduceMotion) appear.snapTo(1f)
+        else appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
     }
     // 退场与入场对称：先把卡片收回再真正关闭，父层状态在动画结束后才翻转，
     // 弹窗不会「啪」地闪没。所有关闭路径（按钮 / 遮罩 / 返回键）都走这里。
@@ -408,12 +410,14 @@ fun GlassDialog(
         if (!dismissing) {
             dismissing = true
             scope.launch {
-                appear.animateTo(0f, tween(140, easing = FastOutLinearInEasing))
+                if (reduceMotion) appear.snapTo(0f)
+                else appear.animateTo(0f, tween(140, easing = FastOutLinearInEasing))
                 action()
                 // 动作可能拒绝关闭（例如校验失败要留在原地）：等一帧确认自己是否已被
                 // 移出组合，还在就淡回来——否则会留下看不见却吞掉所有点击的遮罩
                 withFrameNanos { }
-                appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
+                if (reduceMotion) appear.snapTo(1f)
+                else appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
                 dismissing = false
             }
         }
@@ -579,7 +583,8 @@ fun GlassProgressBar(
     val success = statusColors.success
     val fillEnd = if (finished) success else tertiary
     // 只把相位记成 State，在 draw 阶段读取：高光每帧只重画，不重组整条底栏
-    val phase = if (active) {
+    // 减少动效：不做流动高光，静态渐变即可
+    val phase = if (active && !LocalReduceMotion.current) {
         rememberInfiniteTransition(label = "progressSheen").animateFloat(
             initialValue = 0f, targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(1150, easing = LinearEasing)),
@@ -658,6 +663,35 @@ fun GlassIndeterminateBar(modifier: Modifier = Modifier, height: Dp = 3.dp) {
     val dark = isDarkGlass()
     val primary = MaterialTheme.colorScheme.primary
     val tertiary = MaterialTheme.colorScheme.tertiary
+    val track: @Composable androidx.compose.foundation.layout.BoxScope.(Float) -> Unit = { phaseValue ->
+        Canvas(Modifier.fillMaxSize()) {
+            val seg = size.width * 0.34f
+            val x = (size.width + seg) * phaseValue - seg
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, primary.copy(alpha = 0.9f),
+                        tertiary.copy(alpha = 0.9f), Color.Transparent),
+                    startX = x, endX = x + seg
+                ),
+                topLeft = Offset(x, 0f),
+                size = Size(seg, size.height)
+            )
+        }
+    }
+    if (LocalReduceMotion.current) {
+        // 静态分支：固定位置的一段光带（不建 infinite transition，零帧消耗）
+        Box(
+            modifier
+                .fillMaxWidth()
+                .height(height)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.18f else 0.08f))
+                .semantics { progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate }
+        ) {
+            track(0.22f)
+        }
+        return
+    }
     val phase = rememberInfiniteTransition(label = "indeterminate").animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1250, easing = LinearEasing)),
@@ -671,19 +705,7 @@ fun GlassIndeterminateBar(modifier: Modifier = Modifier, height: Dp = 3.dp) {
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.18f else 0.08f))
             .semantics { progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate }
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val seg = size.width * 0.34f
-            val x = (size.width + seg) * phase.value - seg
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(Color.Transparent, primary.copy(alpha = 0.9f),
-                        tertiary.copy(alpha = 0.9f), Color.Transparent),
-                    startX = x, endX = x + seg
-                ),
-                topLeft = Offset(x, 0f),
-                size = Size(seg, size.height)
-            )
-        }
+        track(phase.value)
     }
 }
 

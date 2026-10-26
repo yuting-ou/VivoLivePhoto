@@ -153,12 +153,13 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
         // 加载占位：呼吸底色 + 淡淡的「照片」字形。
         // 只给一块灰板会让人以为「这里本来就空」，画上轮廓才读得出是在等缩略图
         if (bitmap == null) {
-            val pulse by rememberInfiniteTransition(label = "thumbPulse").animateFloat(
+            val pulse = if (LocalReduceMotion.current) 0.65f
+            else rememberInfiniteTransition(label = "thumbPulse").animateFloat(
                 initialValue = 0.45f,
                 targetValue = 0.9f,
                 animationSpec = infiniteRepeatable(tween(750), RepeatMode.Reverse),
                 label = "pulseAlpha"
-            )
+            ).value
             Box(
                 Modifier
                     .fillMaxSize()

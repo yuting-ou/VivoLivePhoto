@@ -78,6 +78,9 @@ fun SettingsScreen(
     onClearCrashLogs: () -> Unit,
     dynamicColor: Boolean,
     onToggleDynamicColor: (Boolean) -> Unit,
+    /** 减少动效（含系统「移除动画」联动后的最终值） */
+    reduceMotion: Boolean = false,
+    onToggleReduceMotion: (Boolean) -> Unit = {},
     onOpenAbout: () -> Unit,
     statusText: String = "",
     hazeState: HazeState = rememberGlassHazeState()
@@ -180,6 +183,16 @@ fun SettingsScreen(
                     checked = dynamicColor,
                     enabled = true,
                     onToggle = onToggleDynamicColor
+                )
+                GlassDivider(startInset = 58.dp)
+                ToolSwitchCard(
+                    icon = Icons.Filled.Star,
+                    iconOffset = androidx.compose.ui.unit.DpOffset(0.dp, 0.5.dp),
+                    title = "减少动效",
+                    subtitle = "关闭玻璃高光流动与弹窗进出场动画（省电 / 低性能设备）",
+                    checked = reduceMotion,
+                    enabled = true,
+                    onToggle = onToggleReduceMotion
                 )
             }
 
