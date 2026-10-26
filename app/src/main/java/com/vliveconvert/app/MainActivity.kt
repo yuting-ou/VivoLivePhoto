@@ -1066,6 +1066,15 @@ class MainActivity : ComponentActivity() {
                                 appName = getString(R.string.app_display_name),
                                 versionName = appVersionName(),
                                 onBack = { animateBackPop() },
+                                onCheckUpdates = {
+                                    try {
+                                        startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(
+                                                "https://github.com/yuting-ou/VivoLivePhoto/releases/latest")))
+                                    } catch (_: Exception) {
+                                        ConvertCenter.statusText = "无法打开浏览器"
+                                    }
+                                },
                                 hazeState = appHazeState
                             )
                             Screen.Main -> MainScreen(

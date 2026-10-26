@@ -52,6 +52,7 @@ fun AboutScreen(
     appName: String,
     versionName: String,
     onBack: () -> Unit,
+    onCheckUpdates: () -> Unit = {},
     hazeState: HazeState = rememberGlassHazeState()
 ) {
     // 许可证全文约 35KB：读取放到 IO 线程，避免在组合（主线程）阶段做资源 I/O；
@@ -173,6 +174,13 @@ fun AboutScreen(
                 Spacer(Modifier.height(4.dp))
                 LicenseLink("https://github.com/yuting-ou/VivoLivePhoto") {
                     openUrl("https://github.com/yuting-ou/VivoLivePhoto")
+                }
+                Spacer(Modifier.height(10.dp))
+                GlassDivider()
+                Spacer(Modifier.height(10.dp))
+                // 检查更新：跳转 Releases 页（应用本体不联网，由浏览器完成）
+                LicenseLink("检查更新（打开 Releases 页面）") {
+                    onCheckUpdates()
                 }
                 Spacer(Modifier.height(10.dp))
                 GlassDivider()
