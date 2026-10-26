@@ -56,12 +56,13 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.graphics.luminance
+import androidx.core.view.WindowCompat
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -97,6 +98,8 @@ import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.GlassDialog
+import com.vliveconvert.app.ui.GlassIndeterminateBar
+import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.LocalGlassBackdrop
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.PermissionScreen
@@ -428,6 +431,8 @@ class MainActivity : ComponentActivity() {
     private var lastBackTrace by mutableStateOf("")
     private var crashExportMessage by mutableStateOf<String?>(null)
     private var outputPathInput by mutableStateOf("")
+    // 路径校验失败要在弹窗里就地显示；底栏状态被弹窗遮住，用户看不到
+    private var outputPathError by mutableStateOf<String?>(null)
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
     // 重建历史产物的媒体库记录（让相册显示位置）
@@ -673,7 +678,11 @@ class MainActivity : ComponentActivity() {
                 .scaleX(1.06f).scaleY(1.06f)
                 .setDuration(380L)
                 .setInterpolator(DecelerateInterpolator())
-                .withEndAction { provider.remove() }
+                .withEndAction {
+                    provider.remove()
+                    // 闪屏退场会把窗口图标明暗重置回白色；交棒完成后按主题补一次
+                    applySystemBarAppearance()
+                }
                 .start()
         }
         super.onCreate(savedInstanceState)
@@ -722,6 +731,15 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VLiveConvertTheme(dynamicColor = dynamicColor) {
+                // 系统栏图标明暗必须跟主题走：enableEdgeToEdge 只在 onCreate 判定一次，
+                // 切换莫奈/品牌配色后可能残留白图标，浅色顶栏上几乎不可见。
+                val darkTheme = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                SideEffect {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !darkTheme
+                        isAppearanceLightNavigationBars = !darkTheme
+                    }
+                }
                 // 全应用共享的采样状态：页面玻璃与弹窗玻璃都采同一份背景，
                 // 弹窗才能模糊它背后真实的内容，而不是另开窗口糊自己
                 LaunchedEffect(Unit) {
@@ -959,6 +977,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { animateBackPop() },
                                 onEditOutputPath = {
                                     outputPathInput = outputRelPath
+                                    outputPathError = null
                                     showOutputPathDialog = true
                                 },
                                 onToggleMoveToCamera = { on ->
@@ -1374,10 +1393,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text(repairProgressText)
                         Spacer(Modifier.height(14.dp))
-                        LinearProgressIndicator(
-                            Modifier.fillMaxWidth().height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                        )
+                        GlassIndeterminateBar(height = 4.dp)
                     }
                 }
                 if (showSpacePause) {
@@ -1409,6 +1425,7 @@ class MainActivity : ComponentActivity() {
                         onConfirm = {
                             val raw = outputPathInput.trim()
                             if (raw.isEmpty()) {
+                                outputPathError = null
                                 outputRelPath = "Pictures/VLiveConvert"
                                 getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                     .edit().putString("output_rel_path", outputRelPath).apply()
@@ -1417,9 +1434,10 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 val s = sanitizeRelPath(raw)
                                 if (s == null) {
-                                    ConvertCenter.statusText =
-                                        "路径无效：不能包含 \\ : * ? \" < > | 或 ..（可留空恢复默认）"
+                                    outputPathError =
+                                        "路径无效：不能包含 \\ : * ? \" < > | 或 .."
                                 } else {
+                                    outputPathError = null
                                     outputRelPath = s
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putString("output_rel_path", s).apply()
@@ -1437,12 +1455,22 @@ class MainActivity : ComponentActivity() {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
+                        GlassTextField(
                             value = outputPathInput,
-                            onValueChange = { outputPathInput = it },
-                            singleLine = true,
-                            label = { Text("例如 Pictures/VLiveConvert") }
+                            onValueChange = {
+                                outputPathInput = it
+                                outputPathError = null
+                            },
+                            placeholder = "Pictures/VLiveConvert"
                         )
+                        outputPathError?.let { error ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
 
@@ -1476,6 +1504,19 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 从系统设置授予/收回位置权限后返回时刷新警示条状态
         locationDenied = !hasMediaLocationPermission()
+        // 回到前台补一次系统栏图标明暗（闪屏退场/系统栏重建可能覆盖）
+        applySystemBarAppearance()
+    }
+
+    /** 系统栏图标明暗必须跟主题走：浅色主题用深色图标，深色主题用浅色图标 */
+    private fun applySystemBarAppearance() {
+        val nightMask = android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val dark = (resources.configuration.uiMode and nightMask) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
     }
 
     override fun onStart() {

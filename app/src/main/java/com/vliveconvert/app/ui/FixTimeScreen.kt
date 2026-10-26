@@ -42,7 +42,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -207,9 +206,8 @@ fun FixTimeScreen(
             }
         }
         AnimatedVisibility(visible = scanning) {
-            LinearProgressIndicator(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)
-                    .height(3.dp).clip(CircleShape)
+            GlassIndeterminateBar(
+                Modifier.padding(horizontal = 20.dp, vertical = 6.dp).height(3.dp)
             )
         }
 
@@ -359,9 +357,11 @@ fun FixTimeScreen(
                 contentPadding = PaddingValues(10.dp)
             ) {
                 if (isFixing) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape)
+                    GlassProgressBar(
+                        progress = progress,
+                        height = 5.dp,
+                        active = progress < 1f,
+                        finished = progress >= 1f
                     )
                     Spacer(Modifier.height(10.dp))
                 }

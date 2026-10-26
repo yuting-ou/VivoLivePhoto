@@ -40,10 +40,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
@@ -54,7 +56,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -64,6 +65,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -146,9 +148,14 @@ fun MainScreen(
     hazeState: HazeState = rememberGlassHazeState()
 ) {
     val pendingCount = items.count { !it.done && !it.failed }
-    // 列表滚动到 Dock 下方时，最后一行仍能滚出来；短列表不垫，避免玻璃面板拖出一截空白
+    // 列表滚动到 Dock 下方时，最后一行仍能滚出来；只有确实滚得动时才垫，
+    // 否则 5 条照片也会在玻璃面板尾部拖出一截约 110dp 的空白
     val dockInset = if (isConverting || finishedBeat) 176.dp else 132.dp
-    val listBottomInset = if (items.size >= 5) dockInset else 0.dp
+    val listState = rememberLazyListState()
+    val canScroll by remember {
+        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
+    }
+    val listBottomInset = if (canScroll) dockInset else 0.dp
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -210,7 +217,9 @@ fun MainScreen(
                 notices.forEachIndexed { index, notice ->
                     if (index > 0) GlassDivider(startInset = 58.dp)
                     Row(
-                        Modifier.fillMaxWidth().height(54.dp).padding(start = 12.dp, end = 4.dp),
+                        // 固定 54dp 在 1.5× 字号下会把两行提示裁成一行，改为最小高度随字号长
+                        Modifier.fillMaxWidth().heightIn(min = 54.dp)
+                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         GlassIconTile(34.dp, notice.accent) {
@@ -341,6 +350,7 @@ fun MainScreen(
                                 .glassSurface(radius = 24.dp)
                         ) {
                             LazyColumn(
+                                state = listState,
                                 modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
                                 contentPadding = PaddingValues(
                                     top = 4.dp, bottom = 4.dp + listBottomInset),
@@ -394,9 +404,11 @@ fun MainScreen(
                 contentPadding = PaddingValues(10.dp)
             ) {
                 // 三态：2 转换中 / 1 完成节拍 / 0 空闲；尺寸由 SizeTransform 平滑过渡
+                // 进度按张跳变：填色只做 160ms 追平，避免弹簧在快批次里落后两格；
+                // 百分比数字直接用真实 progress，别让读数跟着动画一起滞后
                 val shownProgress by animateFloatAsState(
                     targetValue = progress,
-                    animationSpec = spring(stiffness = 360f, dampingRatio = 1f),
+                    animationSpec = tween(160, easing = LinearOutSlowInEasing),
                     label = "shownProgress"
                 )
                 AnimatedContent(
@@ -418,15 +430,23 @@ fun MainScreen(
                                     style = glassRowSubStyle(),
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text(
-                                    "${(shownProgress * 100).toInt()}%",
-                                    style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary)
-                                )
+                                if (barState == 2) {
+                                    Text(
+                                        "${(progress * 100).toInt()}%",
+                                        style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                                            fontFeatureSettings = "tnum",
+                                            color = MaterialTheme.colorScheme.primary)
+                                    )
+                                } else {
+                                    // 完成节拍：对勾弹入，替代冷冰冰的「100%」
+                                    CompletionBadge()
+                                }
                             }
-                            LinearProgressIndicator(
-                                progress = { shownProgress },
-                                modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape)
+                            GlassProgressBar(
+                                progress = shownProgress,
+                                height = 5.dp,
+                                active = barState == 2,
+                                finished = barState == 1
                             )
                             Spacer(Modifier.height(10.dp))
                             if (barState == 2) {
@@ -613,13 +633,15 @@ private fun ConvertItemRow(
     }
     val bg by animateColorAsState(bgTarget, tween(300), label = "rowBg")
     val main = MaterialTheme.colorScheme.onSurface
-    val statusColor = when {
+    val statusColorTarget = when {
         ci.failed -> MaterialTheme.colorScheme.error
         lostGps -> MaterialTheme.colorScheme.tertiary
         ci.done -> status.success
         busy -> status.info
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    // 转换中 → 完成 / 失败的状态切换用颜色缓动，避免文字颜色硬跳
+    val statusColor by animateColorAsState(statusColorTarget, tween(240), label = "statusColor")
 
     // 失败抖动 + 同帧触觉（逻辑与 v2.0.9 一致）
     val hapticView = LocalView.current
@@ -785,7 +807,7 @@ private fun ConvertItemRow(
                     )
                     if (busy) {
                         Spacer(Modifier.height(5.dp))
-                        IndeterminateBar()
+                        GlassIndeterminateBar(height = 3.dp)
                     }
                 }
 
@@ -821,15 +843,30 @@ private fun ConvertItemRow(
     }
 }
 
-/** 不定长进度条（字节级转换无粒度回调，用系统不定长动画，不伪造百分比） */
+/** 完成节拍：对勾弹入（底栏从「转换中」切到完成态时触发一次） */
 @Composable
-private fun IndeterminateBar() {
-    LinearProgressIndicator(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(3.dp)
-            .clip(RoundedCornerShape(2.dp))
-    )
+private fun CompletionBadge() {
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        // 完成节拍只有 450ms：对勾必须在节拍内弹到位，不能刚冒头就被收回
+        pop.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = 650f))
+    }
+    GlassCircle(
+        size = 30.dp,
+        tint = statusColors.success,
+        modifier = Modifier.graphicsLayer {
+            scaleX = pop.value
+            scaleY = pop.value
+            alpha = pop.value.coerceIn(0f, 1f)
+        }
+    ) {
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = "转换完成",
+            tint = statusColors.onSuccess,
+            modifier = Modifier.size(16.dp)
+        )
+    }
 }
 
 /** 转换中的项目不显示移除按钮 */

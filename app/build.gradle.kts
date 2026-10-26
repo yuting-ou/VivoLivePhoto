@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 81
-        versionName = "2.2.1"
+        versionCode = 82
+        versionName = "2.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）

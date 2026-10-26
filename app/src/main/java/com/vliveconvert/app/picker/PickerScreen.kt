@@ -63,7 +63,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
@@ -106,6 +105,7 @@ import com.vliveconvert.app.ui.GlassDivider
 import com.vliveconvert.app.ui.HazeGlassCard
 import com.vliveconvert.app.ui.EaseOutStrong
 import com.vliveconvert.app.ui.GlassIconTile
+import com.vliveconvert.app.ui.GlassIndeterminateBar
 import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.glassSurface
 import com.vliveconvert.app.ui.glassWallpaper
@@ -394,8 +394,8 @@ fun PickerScreen(
                 }
                 if (running) {
                     Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        Modifier.fillMaxWidth().height(3.dp).clip(CircleShape)
+                    GlassIndeterminateBar(
+                        Modifier.padding(top = 2.dp, bottom = 2.dp).height(3.dp)
                     )
                 }
             }

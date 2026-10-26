@@ -36,10 +36,28 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipRect
+import com.vliveconvert.app.ui.theme.statusColors
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,9 +66,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -370,19 +392,41 @@ fun GlassDialog(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val dark = isDarkGlass()
-    BackHandler(enabled = dismissOnBack) { onDismissRequest() }
+    val scope = rememberCoroutineScope()
+    val latestOnDismiss = rememberUpdatedState(onDismissRequest)
+    val latestOnConfirm = rememberUpdatedState(onConfirm)
+    val latestOnDismissAction = rememberUpdatedState(onDismissAction)
+    var dismissing by remember { mutableStateOf(false) }
     // 入场动效：遮罩淡入 + 卡片弹簧轻微放大弹出（与相册面板同一弹簧手感）
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
     }
+    // 退场与入场对称：先把卡片收回再真正关闭，父层状态在动画结束后才翻转，
+    // 弹窗不会「啪」地闪没。所有关闭路径（按钮 / 遮罩 / 返回键）都走这里。
+    val dismissThen: (() -> Unit) -> Unit = { action ->
+        if (!dismissing) {
+            dismissing = true
+            scope.launch {
+                appear.animateTo(0f, tween(140, easing = FastOutLinearInEasing))
+                action()
+                // 动作可能拒绝关闭（例如校验失败要留在原地）：等一帧确认自己是否已被
+                // 移出组合，还在就淡回来——否则会留下看不见却吞掉所有点击的遮罩
+                withFrameNanos { }
+                appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
+                dismissing = false
+            }
+        }
+    }
+    val requestDismiss: () -> Unit = { dismissThen { latestOnDismiss.value() } }
+    BackHandler(enabled = dismissOnBack) { requestDismiss() }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = (if (dark) 0.52f else 0.28f) * appear.value))
             .imePadding()
             .then(if (dismissOnOutside) Modifier.pointerInput(Unit) {
-                detectTapGestures { onDismissRequest() }
+                detectTapGestures { requestDismiss() }
             } else Modifier),
         contentAlignment = Alignment.Center
     ) {
@@ -429,13 +473,18 @@ fun GlassDialog(
                 ) {
                     if (dismissLabel != null) {
                         GlassDialogSecondaryButton(dismissLabel) {
-                            onDismissAction?.invoke() ?: onDismissRequest()
+                            dismissThen {
+                                latestOnDismissAction.value?.invoke()
+                                    ?: latestOnDismiss.value()
+                            }
                         }
                         Spacer(Modifier.width(6.dp))
                     }
                     if (confirmLabel != null) {
                         GlassDialogPrimaryButton(confirmLabel) {
-                            onConfirm?.invoke()
+                            latestOnConfirm.value?.let { action ->
+                                dismissThen { action() }
+                            }
                         }
                     }
                 }
@@ -510,6 +559,172 @@ fun GlassPanel(modifier: Modifier = Modifier, radius: Dp = 24.dp) {
         Box(Modifier.matchParentSize().glassSheen())
         Box(Modifier.matchParentSize().glassBottomShade())
     }
+}
+
+/**
+ * 玻璃进度条：内凹玻璃槽 + 主题渐变填充 + 转换中持续流动的高光。
+ * M3 默认进度条是平涂色块，压在玻璃底上像贴纸；这条与液态语言同源。
+ */
+@Composable
+fun GlassProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    height: Dp = 6.dp,
+    active: Boolean = false,
+    finished: Boolean = false
+) {
+    val dark = isDarkGlass()
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val success = statusColors.success
+    val fillEnd = if (finished) success else tertiary
+    // 只把相位记成 State，在 draw 阶段读取：高光每帧只重画，不重组整条底栏
+    val phase = if (active) {
+        rememberInfiniteTransition(label = "progressSheen").animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1150, easing = LinearEasing)),
+            label = "progressSheenPhase"
+        )
+    } else null
+    // 完成时一次白色闪光：数字停在 100% 之前先「亮一下」
+    val flash = remember { Animatable(0f) }
+    LaunchedEffect(finished) {
+        if (finished) {
+            flash.snapTo(0.55f)
+            flash.animateTo(0f, tween(380, easing = FastOutLinearInEasing))
+        }
+    }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.20f else 0.10f))
+            .border(1.dp, Color.White.copy(alpha = if (dark) 0.10f else 0.50f), CircleShape)
+            .semantics {
+                progressBarRangeInfo =
+                    ProgressBarRangeInfo(progress.coerceIn(0f, 1f), 0f..1f)
+            }
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val corner = size.height / 2f
+            val filled = size.width * progress.coerceIn(0f, 1f)
+            if (filled <= 0f) return@Canvas
+            drawRoundRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(primary, fillEnd),
+                    startX = 0f,
+                    endX = size.width.coerceAtLeast(1f)
+                ),
+                size = Size(filled, size.height),
+                cornerRadius = CornerRadius(corner)
+            )
+            // 流动高光只裁在填充段内，进度条不会「自己长出一条尾巴」
+            if (phase != null) {
+                val band = size.width * 0.38f
+                val x = (size.width + band) * phase.value - band
+                clipRect(0f, 0f, filled, size.height) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(Color.Transparent,
+                                Color.White.copy(alpha = 0.45f), Color.Transparent),
+                            startX = x, endX = x + band
+                        ),
+                        topLeft = Offset(x, 0f),
+                        size = Size(band, size.height)
+                    )
+                }
+                // 推进端一颗高光点，像液体在前面走
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.85f),
+                    radius = corner * 0.55f,
+                    center = Offset(filled - corner, corner)
+                )
+            }
+            if (flash.value > 0f) {
+                drawRoundRect(
+                    color = Color.White.copy(alpha = flash.value),
+                    size = Size(filled, size.height),
+                    cornerRadius = CornerRadius(corner)
+                )
+            }
+        }
+    }
+}
+
+/** 转换中的不确定进度：玻璃轨道里一段主题渐变光带循环掠过 */
+@Composable
+fun GlassIndeterminateBar(modifier: Modifier = Modifier, height: Dp = 3.dp) {
+    val dark = isDarkGlass()
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val phase = rememberInfiniteTransition(label = "indeterminate").animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1250, easing = LinearEasing)),
+        label = "indeterminatePhase"
+    )
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.18f else 0.08f))
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate }
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val seg = size.width * 0.34f
+            val x = (size.width + seg) * phase.value - seg
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, primary.copy(alpha = 0.9f),
+                        tertiary.copy(alpha = 0.9f), Color.Transparent),
+                    startX = x, endX = x + seg
+                ),
+                topLeft = Offset(x, 0f),
+                size = Size(seg, size.height)
+            )
+        }
+    }
+}
+
+/**
+ * 玻璃输入框：12dp 圆角的内嵌玻璃槽。
+ * 替代 M3 浮标签输入框——后者的直角、浮动标签压边线与整体圆角语言不相容。
+ */
+@Composable
+fun GlassTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "",
+    singleLine: Boolean = true
+) {
+    val dark = isDarkGlass()
+    val shape = RoundedCornerShape(12.dp)
+    val hintColor = MaterialTheme.colorScheme.onSurfaceVariant
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = singleLine,
+        textStyle = TextStyle(fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.onSurface.copy(
+                alpha = if (dark) 0.08f else 0.05f))
+            .border(1.dp, Color.White.copy(alpha = if (dark) 0.14f else 0.60f), shape)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        decorationBox = { inner ->
+            Box {
+                if (value.isEmpty()) {
+                    Text(placeholder, style = TextStyle(fontSize = 15.sp, color = hintColor))
+                }
+                inner()
+            }
+        }
+    )
 }
 
 /** 发丝分隔线（玻璃上不能用实色线，会显脏） */
