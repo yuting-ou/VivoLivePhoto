@@ -2569,9 +2569,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 影响面预估弹窗中的一行：左侧标签，右侧值（可着色） */
+/** 影响面预估弹窗中的一行：左侧标签，右侧值（可着色）。internal 供截图夹具复用 */
 @Composable
-private fun PreflightLine(
+internal fun PreflightLine(
     label: String,
     value: String,
     tint: androidx.compose.ui.graphics.Color? = null
@@ -2614,9 +2614,9 @@ private fun PreflightLine(
     }
 }
 
-/** 「转换记录」弹窗中的一行批次摘要 */
+/** 「转换记录」弹窗中的一行批次摘要。internal 供截图夹具复用 */
 @Composable
-private fun BatchLogRow(e: BatchLogEntry) {
+internal fun BatchLogRow(e: BatchLogEntry) {
     val timeText = dateLabel(e.timeMs) + " " +
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(e.timeMs))
     Column(Modifier.fillMaxWidth()) {
