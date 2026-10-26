@@ -1219,6 +1219,14 @@ class MainActivity : ComponentActivity() {
                                     else "未授予位置权限，输出将不含位置信息",
                                     if (hasLoc) null else MaterialTheme.colorScheme.error
                                 )
+                                // 时间线副作用披露（与「重建位置显示」同源，但用户最常走的
+                                // 转换路径此前从未被告知）：产物是新媒体行，date_added 由
+                                // 系统硬编码为行创建时刻——微信/抖音按该列分组，会把转换
+                                // 产物全部归到「今天」。列本身不可写，只能如实说清
+                                PreflightLine(
+                                    "加入相册时间",
+                                    "转换当天（微信等按「加入时间」分组的应用会归入当天）"
+                                )
                                 if (preflightSpaceError &&
                                     spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
                                     Spacer(Modifier.height(8.dp))

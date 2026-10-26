@@ -129,6 +129,9 @@ class ConvertFlowUiTest {
         assertTrue("预检信息应已计算", info != null)
         // 玻璃弹窗是应用内浮层，不再是独立系统 window：内容必须同窗可读
         compose.onNodeWithText("源文件体积").assertExists()
+        // 时间线副作用披露：产物是新媒体行，date_added=转换当天，
+        // 微信等按加入时间分组的应用会把它们归到「今天」——必须在操作点说清
+        compose.onNodeWithText("加入相册时间").assertExists()
         compose.onNodeWithText("以后不再提示").assertExists()
     }
 
