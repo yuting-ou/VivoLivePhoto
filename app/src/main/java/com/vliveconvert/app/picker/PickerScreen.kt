@@ -75,6 +75,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -118,7 +119,9 @@ import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateKey
 import com.vliveconvert.app.ui.dateLabel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * 内置双文件实况照片选择器。
@@ -137,11 +140,20 @@ internal fun filterByQuery(items: List<MediaItem>, query: String): List<MediaIte
     return items.filter { it.name.contains(q, ignoreCase = true) }
 }
 
+/** 日期范围筛选：days<=0 表示不限制；按拍摄时间（缺失回退修改时间）比较，边界含在内 */
+internal fun filterByDateRange(items: List<MediaItem>, days: Int, nowMs: Long): List<MediaItem> {
+    if (days <= 0) return items
+    val cutoff = nowMs - days.toLong() * 24 * 3600 * 1000
+    return items.filter { it.sortTime >= cutoff }
+}
+
 @Composable
 fun PickerScreen(
     albums: List<AlbumInfo>,
     scanner: PickerScanner,
     scannerScope: CoroutineScope,
+    /** 全库搜索数据源；为空时从当前 Context 构造（测试夹具可不传） */
+    mediaRepo: MediaRepo? = null,
     /** 目标输出目录的 名称→id 索引：驱动「已转」角标与「只看未转换」筛选 */
     convertedIndex: Map<String, Long> = emptyMap(),
     /** 精确索引：源路径（小写）→ 产物 URI（转换成功时落盘，优先于名称启发式） */
@@ -197,8 +209,43 @@ fun PickerScreen(
     // 文件名搜索：过滤在 displayOrder 之后、日期分组之前；全选与计数都随可见集合收窄。
     // 切换相册即清空（搜索是「在本相册里找」的心智模型）
     var searchQuery by remember(bucketId) { mutableStateOf("") }
-    val filtered = remember(displayOrder, searchQuery) {
-        filterByQuery(displayOrder, searchQuery)
+    // 搜索范围：默认当前相册；「全部相册」走全库查询（去抖 400ms，候选逐一校验伴生 mp4）
+    var searchScopeAll by remember(bucketId) { mutableStateOf(false) }
+    // 日期范围：0=不限、7、30
+    var dateDays by remember(bucketId) { mutableIntStateOf(0) }
+    var globalResults by remember(bucketId) { mutableStateOf<List<MediaItem>?>(null) }
+    var globalSearching by remember(bucketId) { mutableStateOf(false) }
+    val localContext = LocalContext.current
+    val searchRepo = mediaRepo ?: remember(localContext) {
+        MediaRepo(localContext.contentResolver)
+    }
+
+    LaunchedEffect(searchQuery, searchScopeAll, dateDays, bucketId) {
+        val q = searchQuery.trim()
+        if (!searchScopeAll || q.isEmpty()) {
+            globalResults = null
+            globalSearching = false
+            return@LaunchedEffect
+        }
+        delay(400) // 去抖：8.5k 全库投影 + 配对校验不在每次按键都跑
+        globalSearching = true
+        val found = withContext(Dispatchers.IO) {
+            searchRepo.searchImages(q, dateDays)
+                .filter { isDualLivePhotoPath(it.path) }
+        }
+        globalResults = found
+        globalSearching = false
+    }
+
+    val globalMode = searchScopeAll && searchQuery.isNotBlank()
+    val baseOrder = if (globalMode) {
+        globalResults.orEmpty().sortedByDescending { it.sortTime }
+    } else displayOrder
+    val ranged = remember(baseOrder, dateDays) {
+        filterByDateRange(baseOrder, dateDays, System.currentTimeMillis())
+    }
+    val filtered = remember(ranged, searchQuery) {
+        filterByQuery(ranged, searchQuery)
     }
     // 「只看未转换」：精确索引（源路径→产物 URI）优先，名称启发式兜底
     var onlyUnconverted by remember(bucketId) { mutableStateOf(false) }
@@ -213,6 +260,8 @@ fun PickerScreen(
         if (!onlyUnconverted) filtered
         else filtered.filter { !convertedChecker(it) }
     }
+    // 空态判据：全库模式看搜索状态，当前相册模式看扫描状态
+    val busy = if (globalMode) globalSearching else running
 
     // 单项选择切换（追加到末尾，序号递增）
     val toggleItem: (MediaItem) -> Unit = { item ->
@@ -288,7 +337,7 @@ fun PickerScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    visible.isEmpty() && !running -> Column(
+                    visible.isEmpty() && !busy -> Column(
                         Modifier.fillMaxSize()
                             .padding(top = headerHeight + 14.dp, bottom = 48.dp),
                         verticalArrangement = Arrangement.Center,
@@ -315,7 +364,7 @@ fun PickerScreen(
                         selectedIndex = selectedIndex,
                         onToggle = toggleItem,
                         onToggleGroup = toggleGroup,
-                        running = running,
+                        running = running && !globalMode,
                         contentPadding = PaddingValues(
                             top = headerHeight + 12.dp, bottom = 10.dp)
                     )
@@ -434,6 +483,19 @@ fun PickerScreen(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
+                // ── 范围行：搜索范围（当前相册/全部）+ 日期范围 ──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PickerChip("当前相册", active = !searchScopeAll) { searchScopeAll = false }
+                    Spacer(Modifier.width(6.dp))
+                    PickerChip("全部相册", active = searchScopeAll) { searchScopeAll = true }
+                    Spacer(Modifier.weight(1f))
+                    PickerChip("不限日期", active = dateDays == 0) { dateDays = 0 }
+                    Spacer(Modifier.width(6.dp))
+                    PickerChip("7 天", active = dateDays == 7) { dateDays = 7 }
+                    Spacer(Modifier.width(6.dp))
+                    PickerChip("30 天", active = dateDays == 30) { dateDays = 30 }
+                }
+                Spacer(Modifier.height(4.dp))
                 // ── 工具行：张数（左） + 已选 + 全选（右） ──
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 40.dp),
@@ -441,6 +503,8 @@ fun PickerScreen(
                 ) {
                     Text(
                         when {
+                            globalMode && globalSearching -> "全库搜索中…"
+                            globalMode -> "全局匹配 ${visible.size} 张"
                             running -> "扫描中 ${progress.first}/$total"
                             searchQuery.isNotBlank() -> "匹配 ${visible.size} 张"
                             onlyUnconverted -> "未转换 ${visible.size} 张"
@@ -703,6 +767,29 @@ private fun AlbumGridPage(
                 }
             }
         }
+    }
+}
+
+/** 选择器小 chip：范围/日期筛选（选中态用主题色浅底） */
+@Composable
+private fun PickerChip(text: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else Color.Transparent
+            )
+            .clickableNoRipple(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text,
+            fontSize = 12.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (active) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

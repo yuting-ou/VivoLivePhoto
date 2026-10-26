@@ -998,6 +998,7 @@ class MainActivity : ComponentActivity() {
                                     albums = pickerAlbums,
                                     scanner = scanner,
                                     scannerScope = lifecycleScope,
+                                    mediaRepo = mediaRepo,
                                     convertedIndex = convertedIndex,
                                     convertedPaths = convertedPaths,
                                     onBack = { animateBackPop() },

@@ -1,6 +1,7 @@
 package com.vliveconvert.app
 
 import com.vliveconvert.app.picker.MediaItem
+import com.vliveconvert.app.picker.filterByDateRange
 import com.vliveconvert.app.picker.filterByQuery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,5 +46,24 @@ class PickerSearchTest {
     fun orderPreserved() {
         val out = filterByQuery(items, "IMG")
         assertEquals(listOf(1L, 2L), out.map { it.id })
+    }
+
+    @Test
+    fun dateRangeFiltersBySortTime() {
+        val now = 1_800_000_000_000L
+        val day = 24L * 3600 * 1000
+        val within7 = item(4, "IMG_x.jpg").copy(dateTaken = now - 3 * day)
+        val within30 = item(5, "IMG_y.jpg").copy(dateTaken = now - 20 * day)
+        val older = item(6, "IMG_z.jpg").copy(dateTaken = now - 40 * day)
+
+        assertEquals("days<=0 表示不过滤", 3,
+            filterByDateRange(listOf(within7, within30, older), 0, now).size)
+        assertEquals(listOf(4L, 5L),
+            filterByDateRange(listOf(within7, within30, older), 30, now).map { it.id })
+        assertEquals(listOf(4L),
+            filterByDateRange(listOf(within7, within30, older), 7, now).map { it.id })
+        assertEquals("恰好 30 天边界应含在内", listOf(7L),
+            filterByDateRange(listOf(item(7, "IMG_w.jpg").copy(dateTaken = now - 30 * day)),
+                30, now).map { it.id })
     }
 }

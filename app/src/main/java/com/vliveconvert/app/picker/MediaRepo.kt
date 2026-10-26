@@ -144,6 +144,64 @@ class MediaRepo(private val resolver: ContentResolver) {
         return result
     }
 
+    /**
+     * 全库按文件名搜索：大小写不敏感的纯 contains（不解释通配符）+ 日期范围。
+     * 过滤放在 Kotlin 侧而非 SQL LIKE：全库投影只发生一次（去抖后），且
+     * Robolectric 的 MediaStore 不支持 LIKE——单一代码路径在测试与真机语义一致。
+     */
+    fun searchImages(
+        query: String,
+        days: Int,
+        nowMs: Long = System.currentTimeMillis(),
+        limit: Int = 300
+    ): List<MediaItem> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val cutoff = if (days > 0) nowMs - days.toLong() * 24 * 3600 * 1000 else Long.MIN_VALUE
+        val out = mutableListOf<MediaItem>()
+        try {
+            resolver.query(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+                arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DATA,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.BUCKET_ID,
+                    MediaStore.Images.Media.DATE_TAKEN,
+                    MediaStore.Images.Media.DATE_MODIFIED,
+                    MediaStore.Images.Media.SIZE
+                ),
+                null, null, null
+            )?.use { c ->
+                val iId = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val iPath = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+                val iName = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val iBucket = c.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
+                val iTaken = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+                val iModified = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+                val iSize = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                while (c.moveToNext()) {
+                    val path = c.getString(iPath) ?: continue
+                    val name = c.getString(iName) ?: path.substringAfterLast('/')
+                    if (!name.contains(q, ignoreCase = true)) continue
+                    val item = MediaItem(
+                        id = c.getLong(iId),
+                        path = path,
+                        name = name,
+                        bucketId = c.getLong(iBucket),
+                        dateTaken = c.getLong(iTaken),
+                        dateModified = c.getLong(iModified),
+                        size = c.getLong(iSize)
+                    )
+                    if (item.sortTime < cutoff) continue
+                    out.add(item)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return out.sortedByDescending { it.sortTime }.take(limit)
+    }
+
     private class AlbumBuilder(
         val bucketId: Long,
         val name: String,
