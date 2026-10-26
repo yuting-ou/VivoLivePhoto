@@ -70,6 +70,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -124,6 +125,13 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
         val key = uri.toString()
         // 命中缓存（滚动回来）：直接显示，不重复加载
         thumbCache.get(key)?.let { value = it; return@produceState }
+        // 快滚驻留门槛：行先「站稳」120ms 才真正向 MediaProvider 请求缩略图。
+        // 没有这道门槛时，8550 行的列表一次 fling 会掠过上千行，每行立即入队
+        // loadThumbnail——请求洪水打满 Provider 与 IO 线程，主线程抢不到 CPU，
+        // 整个列表冻结（8550 项帧耗时 2.3s；2154 项也已把 fling 动量吃光，
+        // 表现即用户报告的「照片多了滑不动」）。行在延迟内被划走 → produceState
+        // 取消 → 请求根本不发生；慢速浏览的行不受影响。缓存命中不经过此延迟。
+        delay(120)
         value = withContext(thumbDispatcher) {
             val b = try {
                 resolver.loadThumbnail(uri, Size(160, 160), null)

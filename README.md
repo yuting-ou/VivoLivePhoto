@@ -8,9 +8,9 @@
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
 > **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
-> 点开 `VivoLivePhoto-v2.5.2-test1.apk` 即可直接安装（推荐，**测试版**：预检弹窗重排版，
+> 点开 `VivoLivePhoto-v2.5.2-test2.apk` 即可直接安装（推荐，**测试版**：大相册列表滚动修复，
 > 待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.5.2-test1.apk`](./VivoLivePhoto-v2.5.2-test1.apk) 下载，内容一致。
+> [`VivoLivePhoto-v2.5.2-test2.apk`](./VivoLivePhoto-v2.5.2-test2.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,17 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.5.2-test2（大相册列表滚动修复 · 测试版）
+
+- **修「照片多了列表滑不动」**：根因是行内缩略图加载——照片多到几千张时，
+  快速滚动的每一帧都有新行立即发起 `loadThumbnail`，请求洪水打满
+  MediaProvider 与 IO 线程，主线程抢不到 CPU（模拟器 8550 项实测单帧 2.3s，
+  fling 完全冻结；2154 项时已表现为 fling 无力）。修复：缩略图加载加
+  **120ms 驻留门槛**，划过的行在真正请求前即被取消，慢速浏览与缓存命中不受影响；
+  选择器网格、修复时间等所有用图处同步受益
+- 验证：模拟器 8550 项复现冻结 → 修复后同一手势 50 帧、连续 fling 持续前进；
+  247 条 JVM 用例全绿（4 条平台跳过）；新增主列表滚动回归测试
 
 ### v2.5.2-test1（预检弹窗重排版 · 测试版）
 
