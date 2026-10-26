@@ -117,6 +117,7 @@ import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ShareIntents
 import com.vliveconvert.app.ui.ThemedSnackbarHost
+import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateLabel
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -1626,7 +1627,17 @@ class MainActivity : ComponentActivity() {
                         } else {
                             Column {
                                 batchLogEntries.forEach { e ->
-                                    BatchLogRow(e)
+                                    BatchLogRow(
+                                        e,
+                                        onOpen = { uri ->
+                                            showBatchLog = false
+                                            try {
+                                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
+                                            } catch (_: Exception) {
+                                                ConvertCenter.statusText = "无法打开产物"
+                                            }
+                                        }
+                                    )
                                     HorizontalDivider(
                                         Modifier.padding(vertical = 8.dp),
                                         color = MaterialTheme.colorScheme.onSurface
@@ -2616,10 +2627,18 @@ internal fun PreflightLine(
 
 /** 「转换记录」弹窗中的一行批次摘要。internal 供截图夹具复用 */
 @Composable
-internal fun BatchLogRow(e: BatchLogEntry) {
+internal fun BatchLogRow(e: BatchLogEntry, onOpen: ((String) -> Unit)? = null) {
     val timeText = dateLabel(e.timeMs) + " " +
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(e.timeMs))
-    Column(Modifier.fillMaxWidth()) {
+    val openable = e.firstOutUri != null && onOpen != null
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (openable) Modifier.clickableNoRipple(onClick = { onOpen!!(e.firstOutUri!!) })
+                else Modifier
+            )
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 timeText,
@@ -2635,6 +2654,13 @@ internal fun BatchLogRow(e: BatchLogEntry) {
                 )
             }
             Spacer(Modifier.weight(1f))
+            if (openable) {
+                Text(
+                    "查看产物 ›",
+                    style = TextStyle(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         Spacer(Modifier.height(2.dp))
         val parts = buildList {

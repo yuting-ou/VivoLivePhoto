@@ -14,7 +14,9 @@ data class BatchLogEntry(
     val reconvert: Boolean,
     val deletedOriginals: Int,
     val movedToCamera: Int,
-    val dest: String
+    val dest: String,
+    /** 本批首个成功产物的 URI（记录页「查看」入口；旧记录为 null） */
+    val firstOutUri: String? = null
 )
 
 /**
@@ -67,6 +69,7 @@ internal object BatchLog {
                     .put("gps", e.noGps).put("rc", e.reconvert)
                     .put("del", e.deletedOriginals).put("mov", e.movedToCamera)
                     .put("dest", e.dest)
+                    .put("out", e.firstOutUri ?: "")
             )
         }
         return arr.toString()
@@ -86,7 +89,8 @@ internal object BatchLog {
                     reconvert = o.optBoolean("rc"),
                     deletedOriginals = o.optInt("del"),
                     movedToCamera = o.optInt("mov"),
-                    dest = o.optString("dest")
+                    dest = o.optString("dest"),
+                    firstOutUri = o.optString("out").takeIf { it.isNotBlank() }
                 )
             }
         } catch (_: Exception) {

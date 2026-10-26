@@ -37,6 +37,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 转换前台服务：批次实际执行处。
@@ -148,6 +149,7 @@ class ConvertService : Service() {
         val fail = AtomicInteger(0)
         // 源文件「读到的字节」不含 GPS 的张数（可能是拍摄时无位置，也可能是被系统脱敏）
         val noGps = AtomicInteger(0)
+        val firstOutUri = AtomicReference<String?>(null)
 
         // 并发度按应用堆大小动态决定：字节级转换的内存峰值约为源文件的 3~5 倍，
         // 大堆设备最多 2 路、小堆设备串行；配合 largeHeap 与 Throwable 兜底防 OOM 闪退
@@ -159,7 +161,8 @@ class ConvertService : Service() {
             // 必须显式 IO：serviceScope 默认 Main 调度器，不指定会把转换跑在主线程（ANR）
             serviceScope.launch(Dispatchers.IO) {
                 sem.withPermit {
-                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal, ok, fail, noGps)
+                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
+                        firstOutUri, ok, fail, noGps)
                     val d = done.incrementAndGet()
                     withContext(Dispatchers.Main) {
                         ConvertCenter.progress = d.toFloat() / total
@@ -228,7 +231,8 @@ class ConvertService : Service() {
                 reconvert = reconvertBatch,
                 deletedOriginals = deleteOutcome.deleted,
                 movedToCamera = deleteOutcome.moved,
-                dest = finalDest
+                dest = finalDest,
+                firstOutUri = firstOutUri.get()
             )
         )
 
@@ -252,6 +256,7 @@ class ConvertService : Service() {
         moveToCamera: Boolean,
         outputRelPath: String,
         deleteOriginal: Boolean,
+        firstOutUri: AtomicReference<String?>,
         ok: AtomicInteger,
         fail: AtomicInteger,
         noGps: AtomicInteger
@@ -305,6 +310,7 @@ class ConvertService : Service() {
                 oldUriString = if (isReconvert) ci.outUri else null)
             // 精确「已转」索引：源路径 → 产物 URI（选择器据此标记/筛选，不依赖名称猜测）
             ConvertedStore.record(app, ci.item.path, exportUri.toString())
+            firstOutUri.compareAndSet(null, exportUri.toString())
             ok.incrementAndGet()
             // 源图读到的字节无 GPS（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
             if (!result.sourceHasGps) noGps.incrementAndGet()

@@ -4,6 +4,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.service.BatchLog
 import com.vliveconvert.app.service.BatchLogEntry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -72,5 +73,18 @@ class BatchLogTest {
         BatchLog.append(context, entry(1L))
         BatchLog.clear(context)
         assertTrue(BatchLog.load(context).isEmpty())
+    }
+
+    @Test
+    fun firstOutputUriSurvivesRoundTrip() {
+        BatchLog.append(context, entry(1_000L).copy(firstOutUri = "content://media/external/images/media/9"))
+        assertEquals("content://media/external/images/media/9",
+            BatchLog.load(context).first().firstOutUri)
+    }
+
+    @Test
+    fun entryWithoutOutputUriLoadsNull() {
+        BatchLog.append(context, entry(1_000L))
+        assertNull(BatchLog.load(context).first().firstOutUri)
     }
 }
