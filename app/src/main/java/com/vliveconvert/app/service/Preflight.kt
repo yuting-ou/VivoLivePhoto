@@ -17,6 +17,24 @@ import java.io.File
  */
 internal object Preflight {
 
+    /** 可用空间守卫结论 */
+    enum class SpaceGuard { OK, INSUFFICIENT }
+
+    /**
+     * 空间守卫口径：可用 < 需求 + 1GB 预留 → 拦截（预留覆盖暂存/媒体库开销）。
+     * usable 读不到（=0，个别文件系统/挂载点会返回 0）视为「无法判断」放行——
+     * 宁可漏拦，不可误拦（误拦等于把能用的人挡在门外）。
+     */
+    fun spaceGuard(neededBytes: Long, usableBytes: Long): SpaceGuard = when {
+        usableBytes <= 0L -> SpaceGuard.OK
+        usableBytes < neededBytes + 1_000_000_000L -> SpaceGuard.INSUFFICIENT
+        else -> SpaceGuard.OK
+    }
+
+    /** 主存储可用字节（=0 表示无法判断） */
+    fun usableBytes(): Long =
+        try { File("/storage/emulated/0").usableSpace.takeIf { it > 0 } ?: 0L } catch (_: Exception) { 0L }
+
     class Info(
         /** 待转换条目数（不含已完成/已失败） */
         val pendingCount: Int,

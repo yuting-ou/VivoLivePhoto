@@ -345,6 +345,9 @@ class MainActivity : ComponentActivity() {
      */
     private var preflight: Preflight.Info? by mutableStateOf(null)
     private var skipPreflightNext by mutableStateOf(false)
+    // 空间守卫拦下「开始转换」后就地红字说明（模式同 outputPathError：
+    // 弹窗退场动画自愈后留在原地，用户必须先清理存储或减少所选照片）
+    private var preflightSpaceError by mutableStateOf(false)
     // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
     private var showAbout by mutableStateOf(false)
 
@@ -1144,18 +1147,26 @@ class MainActivity : ComponentActivity() {
                 // 转换前的影响面预估：把可确定的事实摊开再开跑
                 preflight?.let { info ->
                     if (showPreflightDialog) {
+                        // 主线程 stat 级操作（毫秒级），与 Preflight.compute 同一纪律
+                        val usableBytes = Preflight.usableBytes()
+                        val spaceGuard = Preflight.spaceGuard(info.totalSourceBytes, usableBytes)
                         GlassDialog(
                             hazeState = appHazeState,
                             onDismissRequest = { showPreflightDialog = false },
                             title = "开始转换",
                             confirmLabel = "开始转换",
                             onConfirm = {
-                                showPreflightDialog = false
-                                if (skipPreflightNext) {
-                                    getSharedPreferences("vliveconvert", MODE_PRIVATE)
-                                        .edit().putBoolean("skip_preflight", true).apply()
+                                if (spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
+                                    // 拒绝关闭：弹窗自愈淡回并就地显示红字（见下方 error Text）
+                                    preflightSpaceError = true
+                                } else {
+                                    showPreflightDialog = false
+                                    if (skipPreflightNext) {
+                                        getSharedPreferences("vliveconvert", MODE_PRIVATE)
+                                            .edit().putBoolean("skip_preflight", true).apply()
+                                    }
+                                    ConvertCenter.start(this)
                                 }
-                                ConvertCenter.start(this)
                             },
                             dismissLabel = "取消",
                             onDismissAction = { showPreflightDialog = false }
@@ -1174,6 +1185,14 @@ class MainActivity : ComponentActivity() {
                                     "源文件体积",
                                     Preflight.formatSize(info.totalSourceBytes) +
                                         "（输出体积与之相当）"
+                                )
+                                val spaceColor = if (spaceGuard == Preflight.SpaceGuard.INSUFFICIENT)
+                                    MaterialTheme.colorScheme.error else null
+                                PreflightLine(
+                                    "可用空间",
+                                    (if (usableBytes <= 0L) "无法读取" else Preflight.formatSize(usableBytes)) +
+                                        "（预计需要 ${Preflight.formatSize(info.totalSourceBytes)}）",
+                                    spaceColor
                                 )
                                 PreflightLine(
                                     "输出位置",
@@ -1200,6 +1219,15 @@ class MainActivity : ComponentActivity() {
                                     else "未授予位置权限，输出将不含位置信息",
                                     if (hasLoc) null else MaterialTheme.colorScheme.error
                                 )
+                                if (preflightSpaceError &&
+                                    spaceGuard == Preflight.SpaceGuard.INSUFFICIENT) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "空间不足，无法安全完成本批转换：请清理存储空间或减少所选照片后重试。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
                                 Spacer(Modifier.height(10.dp))
                                 if (deleteOriginal) {
                                     // 不给「不再提示」这个选项：勾了它也不会生效，
@@ -1676,6 +1704,7 @@ class MainActivity : ComponentActivity() {
         // （存在性/大小/伴生视频，毫秒级），根本不需要离开主线程
         val info = Preflight.compute(ConvertCenter.itemsSnapshot())
         preflight = info
+        preflightSpaceError = false
         showPreflightDialog = true
     }
 
