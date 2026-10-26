@@ -450,6 +450,8 @@ class MainActivity : ComponentActivity() {
     // 返回链路诊断：最近一次手势的事件数/路径/动画结果，就地显示在设置页（真机取证用）
     private var lastBackTrace by mutableStateOf("")
     private var crashExportMessage by mutableStateOf<String?>(null)
+    // 分享进成功后的确认弹窗文案（null = 不弹）
+    private var sharedImportMessage by mutableStateOf<String?>(null)
     private var outputPathInput by mutableStateOf("")
     // 路径校验失败要在弹窗里就地显示；底栏状态被弹窗遮住，用户看不到
     private var outputPathError by mutableStateOf<String?>(null)
@@ -1649,6 +1651,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 分享进确认：一次明确的落点反馈（底栏一行字容易被错过）
+                sharedImportMessage?.let { message ->
+                    GlassDialog(
+                        hazeState = appHazeState,
+                        onDismissRequest = { sharedImportMessage = null },
+                        title = "已接收分享",
+                        confirmLabel = "知道了",
+                        onConfirm = { sharedImportMessage = null }
+                    ) {
+                        Text(message)
+                    }
+                }
+
                 // 跳转设置对话框（用户选了「不再询问」）
                 if (showSettingsDialog) {
                     GlassDialog(
@@ -1779,6 +1794,7 @@ class MainActivity : ComponentActivity() {
         ConvertCenter.persistQueue(applicationContext, ConvertCenter.itemsSnapshot())
         ConvertCenter.statusText =
             "已加入分享的 1 对照片（来源不在相册，转换后不会删除任何原文件）"
+        sharedImportMessage = "已加入：${img.name}\n\n文件来源不在相册；转换后不会删除任何原文件。"
     }
 
     // ---------- 权限 ----------
