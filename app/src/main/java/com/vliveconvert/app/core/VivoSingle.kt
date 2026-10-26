@@ -137,7 +137,8 @@ internal object VivoSingle {
         return SingleWriteResult(
             outPath, segments,
             sourceHasGps = asset.extras["source_has_gps"] == true,
-            sourceFingerprint = sourceFingerprint)
+            sourceFingerprint = sourceFingerprint,
+            sourceFormat = asset.sourceFormat)
     }
 
     /**

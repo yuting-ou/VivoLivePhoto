@@ -182,6 +182,98 @@ internal object JpegUtil {
     }
 
     /**
+     * 读取 EXIF IFD0 的 Make(0x010F) 与 Model(0x0110) ASCII 值，返回 (Make, Model)。
+     * 无 EXIF / 无该标签 / 解析失败返回 null（调用方按「不是预期机型」处理）。
+     *
+     * 用途：破损实况修复的误报硬防线——候选 JPG 必须是 vivo 相机产物才收录。
+     * 与 [hasGpsExif] 同一风格的最小 TIFF 解析（仅用于判定，不阻塞流程）。
+     */
+    fun exifMakeModel(jpeg: ByteArray): Pair<String?, String?> {
+        return try {
+            for (seg in iterateSegments(jpeg)) {
+                val m = seg.marker.toInt() and 0xFF
+                if (m == 0xE1 && seg.payloadLen > exifPrefix.size &&
+                    BinaryUtils.arrayEquals(jpeg, seg.payloadStart, exifPrefix)
+                ) {
+                    val tiffStart = seg.payloadStart + exifPrefix.size
+                    return exifMakeModelFromTiff(jpeg, tiffStart, seg.payloadStart + seg.payloadLen)
+                }
+                if (m == 0xDA) return null to null
+            }
+            null to null
+        } catch (_: Exception) {
+            null to null
+        }
+    }
+
+    private fun exifMakeModelFromTiff(data: ByteArray, tiffStart: Int, tiffEnd: Int): Pair<String?, String?> {
+        if (tiffStart < 0 || tiffStart + 8 > tiffEnd || tiffEnd > data.size) return null to null
+        val little = when {
+            data[tiffStart] == 0x49.toByte() && data[tiffStart + 1] == 0x49.toByte() -> true  // "II"
+            data[tiffStart] == 0x4D.toByte() && data[tiffStart + 1] == 0x4D.toByte() -> false // "MM"
+            else -> return null to null
+        }
+
+        fun u16(off: Int): Int {
+            if (off < 0 || off + 2 > tiffEnd) return -1
+            return if (little)
+                (data[off].toInt() and 0xFF) or ((data[off + 1].toInt() and 0xFF) shl 8)
+            else
+                ((data[off].toInt() and 0xFF) shl 8) or (data[off + 1].toInt() and 0xFF)
+        }
+
+        fun u32(off: Int): Long {
+            if (off < 0 || off + 4 > tiffEnd) return -1L
+            return if (little)
+                (data[off].toInt() and 0xFF).toLong() or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 8) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 3].toInt() and 0xFF).toLong() shl 24)
+            else
+                ((data[off].toInt() and 0xFF).toLong() shl 24) or
+                    ((data[off + 1].toInt() and 0xFF).toLong() shl 16) or
+                    ((data[off + 2].toInt() and 0xFF).toLong() shl 8) or
+                    (data[off + 3].toInt() and 0xFF).toLong()
+        }
+
+        // ASCII 值：count N ≤4 内联在 entry+8，否则为相对 TIFF 头的偏移；尾部 NUL 去掉
+        fun ascii(entry: Int): String? {
+            val typ = u16(entry + 2)
+            if (typ != 2) return null
+            val count = u32(entry + 4).toInt()
+            if (count <= 0) return null
+            val base = if (count > 4) {
+                val off = u32(entry + 8).toInt()
+                if (off < 0 || tiffStart + off < 0) return null
+                tiffStart + off
+            } else entry + 8
+            if (base + count > tiffEnd) return null
+            val s = String(data, base, count, Charsets.US_ASCII).trimEnd('\u0000').trim()
+            return s.ifEmpty { null }
+        }
+
+        val ifd0Offset = u32(tiffStart + 4).toInt()
+        if (ifd0Offset < 0) return null to null
+        val ifd0 = tiffStart + ifd0Offset
+        val count = u16(ifd0)
+        if (count <= 0) return null to null
+        var make: String? = null
+        var model: String? = null
+        var i = 0
+        while (i < count) {
+            val entry = ifd0 + 2 + i * 12
+            if (entry + 12 > tiffEnd) break
+            when (u16(entry)) {
+                0x010F -> make = ascii(entry)
+                0x0110 -> model = ascii(entry)
+            }
+            if (make != null && model != null) break
+            i++
+        }
+        return make to model
+    }
+
+    /**
      * 最小化 TIFF/EXIF 解析：IFD0 中 tag 0x8825（GPSInfo 指针）指向的 GPS IFD 非空
      * 才判定为「含 GPS」。解析失败一律视为无 GPS（仅用于诊断提示，不阻塞转换）。
      */

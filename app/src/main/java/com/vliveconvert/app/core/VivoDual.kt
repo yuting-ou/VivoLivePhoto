@@ -11,6 +11,12 @@ import kotlin.math.round
  * 双文件 JPG 尾部布局：[JPEG 主体（Primary + GainMap）]["vivo" 前缀][footer JSON][cameralbum! footer]，
  * footer 内含 livephoto ID（28 字符）与 imageTime（封面帧序号）；
  * 伴生 MP4 尾部：[vivoMediaEStream uuid][vivoMediaExtInfo uuid（内嵌源 footer 包装）]。
+ *
+ * footer 是**可选**的（议题 #2 破损修复）：vivo X200 系列相机「前台算法优化被中断」
+ * （拍完立刻息屏/退后台）会留下破损实况——糊 JPG **没有** cameralbum! footer +
+ * 相册不可见的伴生 MP4。footer 有则取 liveId/imageTime，无则由
+ * [LivePhotoAsset.effectivePtsUs/effectiveImageTime] 的中点帧兜底；解析路径保持
+ * 唯一（footer 解析只有 FooterUtil.parseFooter 一份实现，此处不做第二份）。
  */
 internal object VivoDual {
 
@@ -55,16 +61,25 @@ internal object VivoDual {
         if (File(mp4).length() <= 8L) return false
         if (XmpTemplate.parseMotionXmp(XmpTemplate.sniffXmp(path)).isMotion) return false
 
+        return hasVivoFooter(path)
+    }
+
+    /**
+     * JPG 尾部能否解析出含 livephoto ID 的 cameralbum! footer。
+     * 正常双文件判定与破损判定共用这**唯一**的 footer 检查实现，禁止另写一份。
+     *
+     * 尾部窗口读取用 seek 而非 FileInputStream.skip：skip 的契约允许「少跳」，
+     * 一旦发生窗口就会错位、footer 解析失败，该照片会被静默判为非双文件而漏收。
+     *
+     * 窗口**自适应放大**：footer JSON 可能比固定 8KB 长（人像实况 faceInfo 多人时
+     * 最易触界），而 parseFooter 对「窗口太短」与「不是双文件」都返回 null、无法区分
+     * ——固定窗口会把大 footer 的真双文件漏收进选择器。parseFooter 按 marker 从后
+     * 向前定位，放大窗口不改变锚点，只可能让 jsonStart 从负变合法
+     */
+    private fun hasVivoFooter(path: String): Boolean {
         return try {
             val f = File(path)
             val size = f.length()
-            // 尾部窗口读取用 seek 而非 FileInputStream.skip：skip 的契约允许「少跳」，
-            // 一旦发生窗口就会错位、footer 解析失败，该照片会被静默判为非双文件而漏收。
-            //
-            // 窗口**自适应放大**：footer JSON 可能比固定 8KB 长（人像实况 faceInfo 多人时
-            // 最易触界），而 parseFooter 对「窗口太短」与「不是双文件」都返回 null、无法区分
-            // ——固定窗口会把大 footer 的真双文件漏收进选择器。parseFooter 按 marker 从后
-            // 向前定位，放大窗口不改变锚点，只可能让 jsonStart 从负变合法
             RandomAccessFile(f, "r").use { raf ->
                 for (window in longArrayOf(8192L, 32768L, 131072L, size)) {
                     val tailLen = minOf(window, size).toInt()
@@ -82,22 +97,84 @@ internal object VivoDual {
     }
 
     /**
+     * 相机目录判定（误报硬防线之一）：破损候选仅收录相机拍照目录。
+     * 与选择器 MediaRepo 的相册置顶判断共用同一口径（单一实现，picker 侧委托至此）。
+     */
+    internal fun isCameraDirPath(path: String?): Boolean {
+        val p = path ?: return false
+        return p.contains("/DCIM/Camera/", ignoreCase = true) ||
+            p.contains("/DCIM/相册/", ignoreCase = true) ||
+            p.contains("/DCIM/Camera", ignoreCase = true)
+    }
+
+    /** EXIF 机型校验（误报硬防线之一）：Make/Model 任一含 vivo 才认定为 vivo 相机产物 */
+    private fun isVivoExif(path: String): Boolean {
+        return try {
+            val (make, model) = JpegUtil.exifMakeModel(File(path).readBytes())
+            make?.contains("vivo", ignoreCase = true) == true ||
+                model?.contains("vivo", ignoreCase = true) == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 破损实况的判定结论（议题 #2）：破损形态 = 与 [isVivoDualFile] 共享同一套
+     * 廉价前置（扩展名 → 同目录同名伴生 MP4 → XMP 无内嵌标记），唯独 footer 检查
+     * 取反——正常双文件在此前已被选择器收走，剩下的「相机目录里的 JPG+MP4 对、
+     * 无内嵌标记、无 footer」就是「优化被中断」的破损形态。
+     *
+     * 误报硬防线（缺一不可，从严避免误收录）：
+     * 1. 仅收录相机目录（[isCameraDirPath]）
+     * 2. EXIF 机型校验（[isVivoExif]）
+     * 3. MP4 moov 必须存在——缺失即拍摄中断截断，结论为 [BrokenVerdict.VIDEO_CORRUPT]，
+     *    不得进可修判定（修复页据此明确标注，转换入口据此明确拒绝，不做半成品转换）
+     */
+    fun brokenVerdict(path: String): BrokenVerdict {
+        return try {
+            if (!path.endsWith(".jpg", ignoreCase = true) &&
+                !path.endsWith(".jpeg", ignoreCase = true)
+            ) return BrokenVerdict.NOT_BROKEN
+            val mp4 = siblingMp4(path) ?: return BrokenVerdict.NOT_BROKEN
+            if (File(mp4).length() <= 8L) return BrokenVerdict.NOT_BROKEN
+            if (XmpTemplate.parseMotionXmp(XmpTemplate.sniffXmp(path)).isMotion)
+                return BrokenVerdict.NOT_BROKEN
+            if (hasVivoFooter(path)) return BrokenVerdict.NOT_BROKEN
+            if (!isCameraDirPath(path)) return BrokenVerdict.NOT_BROKEN
+            if (!isVivoExif(path)) return BrokenVerdict.NOT_BROKEN
+            if (Mp4Util.hasMoov(mp4)) BrokenVerdict.REPAIRABLE else BrokenVerdict.VIDEO_CORRUPT
+        } catch (_: Exception) {
+            BrokenVerdict.NOT_BROKEN
+        }
+    }
+
+    /** 是否为「可修复」的破损实况（破损形态 + MP4 moov 完整）；修复页/转换入口的分发判据 */
+    fun isBrokenDualFile(path: String): Boolean =
+        brokenVerdict(path) == BrokenVerdict.REPAIRABLE
+
+    /**
      * 解析为 LivePhotoAsset（字节级无损：JPEG 原样拆分，MP4 仅剥离尾部 uuid box）。
+     *
+     * footer 可选：正常双文件从 footer 取 liveId/imageTime；破损对（无 footer，
+     * 见类注释）这两项为空，由 [LivePhotoAsset.effectivePtsUs/effectiveImageTime]
+     * 的中点帧兜底，sourceFormat 标记为 "vivo_broken"。
      */
     fun read(path: String, log: (String, String, String) -> Unit): LivePhotoAsset {
-        log("info", "按 vivo 双文件实况照片解析", "vivo")
         val data = File(path).readBytes()
         val footer = FooterUtil.parseFooter(data)
-            ?: throw VivoDualException("JPG 尾部未找到 vivo livephoto 标记")
-
-        val liveId = footer.livephotoId!!
+        val liveId = footer?.livephotoId
+        if (footer == null) {
+            log("info", "JPG 尾部无 vivo footer：按破损双文件实况解析（仅修复合并，画质无法还原）", "vivo")
+        } else {
+            log("info", "按 vivo 双文件实况照片解析", "vivo")
+        }
         val mp4Path = siblingMp4(path)
             ?: throw VivoDualException("缺少伴生视频文件：${File(path).nameWithoutExtension}.mp4")
 
-        // JPG 主体（footer 之前）→ 拆 Primary / GainMap / streamdata 附加块。
-        // 直接在整份文件上按区间解析（[0, footerStart)），不先 copyOfRange 出等长副本：
+        // JPG 主体（footer 之前；破损对无 footer 则全文件按图像流解析）→ 拆 Primary / GainMap /
+        // streamdata 附加块。直接在整份文件上按区间解析（不先 copyOfRange 出等长副本）：
         // 大照片这一份副本就与整图等大，省掉它可显著降低内存峰值。
-        val bodyEnd = footer.footerStart
+        val bodyEnd = footer?.footerStart ?: data.size
         val (jpegs, consumed) = JpegUtil.splitJpegs(data, 0, bodyEnd)
         if (jpegs.isEmpty()) throw VivoDualException("JPG 主体解析失败")
         val primary = jpegs[0]
@@ -110,11 +187,12 @@ internal object VivoDual {
         // MP4：剥离末尾 vivoMediaExtInfo uuid box（内嵌源 footer 包装）
         val mp4Raw = File(mp4Path).readBytes()
         val mp4Footer = FooterUtil.parseFooter(mp4Raw)
-        var imageTime: Long? = footer.imageTime
+        var imageTime: Long? = footer?.imageTime
         if (mp4Footer != null) {
             if (imageTime == null) imageTime = mp4Footer.imageTime
             val mp4Id = mp4Footer.livephotoId
-            if (mp4Id != null && mp4Id != liveId) {
+            // JPG 无 footer（破损对）时 liveId 为空，无从比对，不算不一致
+            if (liveId != null && mp4Id != null && mp4Id != liveId) {
                 log("warning", "JPG 与 MP4 的 livephoto ID 不一致：$liveId / $mp4Id", "vivo")
             }
         }
@@ -127,7 +205,7 @@ internal object VivoDual {
             primaryJpeg = primary,
             gainmapJpeg = gainmap,
             videoMp4 = video,
-            sourceFormat = "vivo_dual",
+            sourceFormat = if (footer == null) "vivo_broken" else "vivo_dual",
         )
         asset.livephotoId = liveId
         asset.imageTime = imageTime
@@ -135,7 +213,7 @@ internal object VivoDual {
         // 透传数据：streamdata 附加块 + 源 JPG/MP4 footer 的完整字段
         // （供单文件写出时合并人像标记 moduleid/joint.refocus 等）
         asset.extras["vivo_streamdata"] = streamData
-        footer.json?.let { asset.extras["vivo_jpg_footer"] = it }
+        footer?.json?.let { asset.extras["vivo_jpg_footer"] = it }
         mp4Footer?.json?.let { asset.extras["vivo_mp4_footer"] = it }
 
         // 源 JPEG「读到的字节」是否含 GPS EXIF：
@@ -154,3 +232,13 @@ internal object VivoDual {
 }
 
 internal class VivoDualException(message: String) : Exception(message)
+
+/** 破损实况判定结论（供修复页区分展示，转换入口据此明确拒绝，无静默失败） */
+internal enum class BrokenVerdict {
+    /** 不是破损形态（正常双文件 / 普通照片 / 不满足误报防线） */
+    NOT_BROKEN,
+    /** 破损形态且 MP4 完整（moov 存在）→ 可修复 */
+    REPAIRABLE,
+    /** 破损形态但 MP4 缺 moov（拍摄中断截断）→ 不可修：视频损坏 */
+    VIDEO_CORRUPT,
+}

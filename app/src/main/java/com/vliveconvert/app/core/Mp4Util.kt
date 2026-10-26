@@ -1,5 +1,8 @@
 package com.vliveconvert.app.core
 
+import java.io.File
+import java.io.RandomAccessFile
+
 /**
  * MP4 (ISOBMFF) box 级工具：box 遍历、vivo uuid 处理、
  * lpex box 插入（含 stco/co64 偏移修复）、视频轨信息解析。
@@ -51,6 +54,49 @@ internal object Mp4Util {
         if (data.size < 12) return false
         val ftyp = byteArrayOf(0x66, 0x74, 0x79, 0x70) // "ftyp"
         return BinaryUtils.arrayEquals(data, 4, ftyp)
+    }
+
+    /**
+     * 流式判定 MP4 是否存在 moov box（不整读文件，只顺序读各顶层 box 头、mdat 等
+     * 大块按 seek 跳过，内存 O(1)）。
+     *
+     * 用途：破损实况修复的误报硬防线——moov 缺失 = 拍摄中断把文件截断，视频不可修
+     * （lpex 合成 / getTrackInfo 都要求 moov 存在），必须明确报错而不是产出半成品。
+     * 遍历规则与 [iterateBoxes] 一致（size 合法、type 为可打印 ASCII），遇非法结构
+     * 或文件尾仍未见到 moov 一律返回 false（宁可误判不可修，不可误判可修）。
+     */
+    fun hasMoov(path: String): Boolean {
+        return try {
+            val f = File(path)
+            val len = f.length()
+            RandomAccessFile(f, "r").use { raf ->
+                val hdr = ByteArray(16)
+                var pos = 0L
+                while (pos + 8 <= len) {
+                    raf.seek(pos)
+                    if (raf.read(hdr, 0, 8) < 8) return false
+                    var size = BinaryUtils.readU32BE(hdr, 0)
+                    var header = 8
+                    if (size == 1L) {
+                        if (pos + 16 > len || raf.read(hdr, 8, 8) < 8) return false
+                        size = BinaryUtils.readU64BE(hdr, 8)
+                        header = 16
+                    } else if (size == 0L) {
+                        size = len - pos
+                    }
+                    if (size < header || pos + size > len) return false
+                    for (i in 4 until 8) {
+                        val c = hdr[i].toInt() and 0xFF
+                        if (c < 0x20 || c > 0x7E) return false
+                    }
+                    if (String(hdr, 4, 4, Charsets.ISO_8859_1) == "moov") return true
+                    pos += size
+                }
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** 若 MP4 末尾存在 UUID 为 'vivoMediaExtInfo' 的 uuid box，则去除。 */
