@@ -218,13 +218,6 @@ fun SettingsScreen(
                 )
                 GlassDivider(startInset = 58.dp)
                 ToolCard(
-                    icon = Icons.Filled.List,
-                    title = "转换记录（$batchLogCount）",
-                    subtitle = "最近 50 批的时间、成败与输出位置",
-                    onClick = onOpenBatchLog
-                )
-                GlassDivider(startInset = 58.dp)
-                ToolCard(
                     icon = Icons.Filled.Place,
                     iconOffset = androidx.compose.ui.unit.DpOffset(-0.9.dp, 0.dp),
                     title = "重建位置显示",
@@ -240,6 +233,19 @@ fun SettingsScreen(
                     subtitle = "把其它目录里的转换产物搬进 DCIM/Camera",
                     onClick = onMoveOutputsToCamera,
                     enabled = !isBusy
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── 记录与诊断（与常用工具分开：低频、含危险操作） ──
+            SectionLabel("记录与诊断")
+            GlassCard(radius = 24.dp) {
+                ToolCard(
+                    icon = Icons.Filled.List,
+                    title = "转换记录（$batchLogCount）",
+                    subtitle = "最近 50 批的时间、成败与输出位置",
+                    onClick = onOpenBatchLog
                 )
                 GlassDivider(startInset = 58.dp)
                 ToolCard(
