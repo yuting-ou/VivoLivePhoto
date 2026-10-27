@@ -393,7 +393,7 @@ private fun AlbumChip(album: AlbumInfo, selected: Boolean, onClick: () -> Unit) 
     }
     Box(
         Modifier
-            .height(34.dp)
+            .height(48.dp)
             .clip(shape)
             .background(fill)
             .border(1.dp, Color.White.copy(alpha = 0.65f), shape)

@@ -186,7 +186,7 @@ class V24PolishScreenshotTest {
             GlassDialog(
                 hazeState = rememberGlassHazeState(),
                 onDismissRequest = {},
-                title = "转换记录",
+                title = "转换与修复记录",
                 confirmLabel = "知道了",
                 onConfirm = {}
             ) {

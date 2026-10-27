@@ -58,7 +58,7 @@ class SettingsActionRowClickTest {
             }
         }
         compose.waitForIdle()
-        compose.onNodeWithText("把输出移到相机相册").performClick()
+        compose.onNodeWithText("移动输出到相册").performClick()
         compose.waitForIdle()
         return fired
     }

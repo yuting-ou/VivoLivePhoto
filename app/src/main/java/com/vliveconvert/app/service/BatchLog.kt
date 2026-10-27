@@ -16,7 +16,9 @@ data class BatchLogEntry(
     val movedToCamera: Int,
     val dest: String,
     /** 本批首个成功产物的 URI（记录页「查看」入口；旧记录为 null） */
-    val firstOutUri: String? = null
+    val firstOutUri: String? = null,
+    /** 破损实况修复批次（与普通转换区分，记录页显示「修复」） */
+    val repair: Boolean = false
 )
 
 /**
@@ -46,6 +48,16 @@ internal object BatchLog {
         }
     }
 
+    /** 破损修复批次：与普通转换同表，但带 repair 标记，记录页可区分并打开首个产物 */
+    fun appendRepair(context: Context, ok: Int, fail: Int, firstOutUri: String?) {
+        append(context, BatchLogEntry(
+            timeMs = System.currentTimeMillis(),
+            ok = ok, fail = fail, noGps = 0, reconvert = false,
+            deletedOriginals = 0, movedToCamera = 0,
+            dest = "DCIM/Camera", firstOutUri = firstOutUri, repair = true
+        ))
+    }
+
     fun load(context: Context): List<BatchLogEntry> {
         return try {
             val f = File(context.filesDir, FILE)
@@ -70,6 +82,7 @@ internal object BatchLog {
                     .put("del", e.deletedOriginals).put("mov", e.movedToCamera)
                     .put("dest", e.dest)
                     .put("out", e.firstOutUri ?: "")
+                    .put("repair", e.repair)
             )
         }
         return arr.toString()
@@ -90,7 +103,8 @@ internal object BatchLog {
                     deletedOriginals = o.optInt("del"),
                     movedToCamera = o.optInt("mov"),
                     dest = o.optString("dest"),
-                    firstOutUri = o.optString("out").takeIf { it.isNotBlank() }
+                    firstOutUri = o.optString("out").takeIf { it.isNotBlank() },
+                    repair = o.optBoolean("repair", false)
                 )
             }
         } catch (_: Exception) {

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -48,13 +49,18 @@ import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.VivoDual
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
+import com.vliveconvert.app.service.BatchLog
 import com.vliveconvert.app.service.ConvertedStore
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 /**
  * 修复破损实况（独立入口，议题 #2）：
@@ -115,6 +121,8 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
         scope.launch(Dispatchers.IO) {
             var ok = 0
             var fail = 0
+            var firstOutUri: String? = null
+            var firstError: String? = null
             val tempDir = File(context.cacheDir, "broken_fix").apply {
                 mkdirs()
                 listFiles()?.forEach { f -> try { f.delete() } catch (_: Exception) {} }
@@ -132,9 +140,14 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                     val uri = MediaExport.exportAndVerify(
                         context, result, ts, "DCIM/Camera", useCameraDir = true)
                     ConvertedStore.record(context, item.path, uri.toString())
+                    if (firstOutUri == null) firstOutUri = uri.toString()
                     ok++
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     fail++
+                    if (firstError == null) {
+                        firstError = (e as? com.vliveconvert.app.convert.ConvertException)?.message
+                            ?: "写入系统相册失败"
+                    }
                 }
                 tempDir.listFiles()?.forEach { f -> try { f.delete() } catch (_: Exception) {} }
                 val p = (index + 1).toFloat() / targets.size
@@ -144,7 +157,9 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                     fixStatus = status
                 }
             }
-            val msg = "修复成功 $ok 个，失败 $fail 个；原文件未删除，可自行在相册处理。"
+            val reason = firstError?.let { "；首个失败原因：$it" } ?: ""
+            val msg = "修复成功 $ok 个，失败 $fail 个$reason；原文件未删除，可自行在相册处理。"
+            if (targets.isNotEmpty()) BatchLog.appendRepair(context, ok, fail, firstOutUri)
             withContext(Dispatchers.Main) {
                 fixing = false
                 summary = msg
@@ -155,12 +170,13 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
     LaunchedEffect(Unit) { startScan() }
     BackHandler(enabled = !fixing) { onBack() }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .glassWallpaper()
-            .glassBackdropSource(hazeState)
-    ) {
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .glassWallpaper()
+                .glassBackdropSource(hazeState)
+        ) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -200,7 +216,7 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .navigationBarsPadding()
+                .padding(bottom = 100.dp)
         ) {
             Spacer(Modifier.height(10.dp))
             GlassCard(radius = 24.dp, contentPadding = PaddingValues(16.dp)) {
@@ -263,6 +279,12 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                         Row(
                             Modifier
                                 .fillMaxWidth()
+                                .toggleable(value = checked, role = Role.Checkbox,
+                                    onValueChange = {
+                                        selected = if (checked) selected - item.path
+                                        else selected + item.path
+                                    })
+                                .semantics { contentDescription = "选择 ${item.name}" }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -282,9 +304,9 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                                     maxLines = 1
                                 )
                                 Text(
-                                    "JPG ${item.size / 1024 / 1024}MB · MP4 ${
-                                        (VivoDual.siblingMp4(item.path)?.let { File(it).length() }
-                                            ?: 0L) / 1024 / 1024}MB",
+                                    "JPG ${formatFileSize(item.size)} · MP4 ${
+                                        formatFileSize(VivoDual.siblingMp4(item.path)
+                                            ?.let { File(it).length() } ?: 0L)}",
                                     style = TextStyle(fontSize = 11.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -292,34 +314,44 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                             CircleTriCheckbox(
                                 state = if (checked) androidx.compose.ui.state.ToggleableState.On
                                 else androidx.compose.ui.state.ToggleableState.Off,
-                                onClick = {
-                                    selected = if (checked) selected - item.path
-                                    else selected + item.path
-                                },
-                                contentDescription = "选择 ${item.name}"
+                                onClick = null
                             )
                         }
                         GlassDivider(startInset = 12.dp)
                     }
                 }
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GlassOutlineButton(
-                        text = "重新扫描",
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                        onClick = { if (!fixing) startScan() }
-                    )
-                    GlassOutlineButton(
-                        text = "修复所选（${selected.size}）",
-                        color = if (selected.isNotEmpty() && !fixing) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.weight(1f),
-                        onClick = { if (selected.isNotEmpty() && !fixing) confirm = true }
-                    )
-                }
             }
             Spacer(Modifier.height(24.dp))
+        }
+        }
+
+        // 批量操作固定底部，但必须仍是液态玻璃：Haze 玻璃 Dock 承托两个动作
+        HazeGlassCard(
+            hazeState = hazeState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .fillMaxWidth(),
+            radius = 28.dp,
+            contentPadding = PaddingValues(10.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassOutlineButton(
+                    text = "重新扫描",
+                    color = if (!fixing) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.weight(1f),
+                    onClick = { if (!fixing) startScan() }
+                )
+                GlassOutlineButton(
+                    text = "修复所选（${selected.size}）",
+                    color = if (selected.isNotEmpty() && !fixing) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.weight(1f),
+                    onClick = { if (selected.isNotEmpty() && !fixing) confirm = true }
+                )
+            }
         }
     }
 
@@ -346,11 +378,18 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
         GlassDialog(
             hazeState = hazeState,
             onDismissRequest = { summary = null },
-            title = "修复完成",
+            title = "修复结果",
             confirmLabel = "知道了",
             onConfirm = { summary = null }
         ) {
             Text(msg)
         }
     }
+}
+
+/** 小文件显示 KB，避免 151 字节被写成 0MB */
+private fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1fMB", bytes / 1024.0 / 1024.0)
+    bytes >= 1024L -> "${bytes / 1024}KB"
+    else -> "${bytes}B"
 }

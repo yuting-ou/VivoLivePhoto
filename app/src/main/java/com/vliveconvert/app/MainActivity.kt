@@ -94,6 +94,8 @@ import kotlinx.coroutines.withTimeout
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.LocationDisplayRepair
 import com.vliveconvert.app.convert.MediaExport
+import com.vliveconvert.app.core.outputPathErrorMessage
+import com.vliveconvert.app.core.sanitizeOutputRelPath
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.XmpTemplate
 import com.vliveconvert.app.picker.AlbumInfo
@@ -1017,7 +1019,8 @@ class MainActivity : ComponentActivity() {
                                     convertedPaths = convertedPaths,
                                     onBack = { animateBackPop() },
                                     onConfirm = { picked ->
-                                        showPicker = false
+                                        // 空选时留在选择器里就地提示，别把用户踹回主界面
+                                        if (picked.isNotEmpty()) showPicker = false
                                         addPickedItems(picked)
                                     },
                                     showAlbumSheet = showAlbumSheet,
@@ -1260,7 +1263,11 @@ class MainActivity : ComponentActivity() {
 
                 // 修复破损实况：独立入口，不走普通转换流程
                 if (showBrokenRepair) {
-                    BrokenRepairScreen(onBack = { showBrokenRepair = false })
+                    BrokenRepairScreen(onBack = {
+                        showBrokenRepair = false
+                        // 修复批次会写日志，回到设置时计数要立即反映
+                        batchLogCount = BatchLog.load(applicationContext).size
+                    })
                 }
 
                 // 转换前的影响面预估：把可确定的事实摊开再开跑
@@ -1512,10 +1519,9 @@ class MainActivity : ComponentActivity() {
                                 showOutputPathDialog = false
                                 ConvertCenter.statusText = "输出目录已恢复默认：$outputRelPath"
                             } else {
-                                val s = sanitizeRelPath(raw)
+                                val s = sanitizeOutputRelPath(raw)
                                 if (s == null) {
-                                    outputPathError =
-                                        "路径无效：不能包含 \\ : * ? \" < > | 或 .."
+                                    outputPathError = outputPathErrorMessage(raw)
                                 } else {
                                     outputPathError = null
                                     outputRelPath = s
@@ -1539,7 +1545,7 @@ class MainActivity : ComponentActivity() {
                             value = outputPathInput,
                             onValueChange = {
                                 outputPathInput = it
-                                outputPathError = null
+                                outputPathError = outputPathErrorMessage(it)
                             },
                             placeholder = "Pictures/VLiveConvert"
                         )
@@ -1559,13 +1565,13 @@ class MainActivity : ComponentActivity() {
                     GlassDialog(
                         hazeState = appHazeState,
                         onDismissRequest = { showBatchLog = false },
-                        title = "转换记录",
+                        title = "转换与修复记录",
                         confirmLabel = "知道了",
                         onConfirm = { showBatchLog = false }
                     ) {
                         if (batchLogEntries.isEmpty()) {
                             Text(
-                                "还没有转换记录",
+                                "还没有转换或修复记录",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2316,14 +2322,6 @@ class MainActivity : ComponentActivity() {
     // ---------- 输出目录与移动 ----------
 
     /** 清洗用户输入的相对路径；非法返回 null */
-    private fun sanitizeRelPath(input: String): String? {
-        val s = input.trim().replace('\\', '/').trim('/')
-        if (s.isEmpty() || s.contains("..")) return null
-        if (s.split('/').any { it.isEmpty() || it == "." }) return null
-        if (Regex("""[:*?"<>|]""").containsMatchIn(s)) return null
-        return s
-    }
-
     /** 查询指定相对路径下的全部图片（按加入时间降序；目录匹配大小写不敏感、兼容有无尾斜杠） */
     private fun queryImagesIn(relPath: String): List<MediaItem> {
         // LIKE 通配符转义：用户自定义目录名可含 % 与 _（ESCAPE '\'）
@@ -2795,6 +2793,14 @@ internal fun BatchLogRow(e: BatchLogEntry, onOpen: ((String) -> Unit)? = null) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "重转",
+                    style = TextStyle(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            if (e.repair) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "修复",
                     style = TextStyle(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.tertiary
                 )

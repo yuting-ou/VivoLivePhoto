@@ -959,7 +959,7 @@ fun GlassOutlineButton(
     Box(
         modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(48.dp)
             .graphicsLayer {
             scaleX = scale
             scaleY = scale

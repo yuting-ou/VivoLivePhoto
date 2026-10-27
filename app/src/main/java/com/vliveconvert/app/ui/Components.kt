@@ -225,21 +225,25 @@ fun CircleTriCheckbox(
     val fillColor = MaterialTheme.colorScheme.primary
     val checkColor = MaterialTheme.colorScheme.onPrimary
     val interactionSource = remember { MutableInteractionSource() }
-    Box(
-        modifier
-            // 触摸目标 ≥48dp：视觉仍是 26dp 圆，点击区域扩到 Material 标准最小尺寸
-            // （原先是 26dp，而本组件承担全选/按日期全选等关键交互，过小易误触）
+    // 触摸目标 ≥48dp：视觉仍是 26dp 圆，点击区域扩到 Material 标准最小尺寸
+    // （原先是 26dp，而本组件承担全选/按日期全选等关键交互，过小易误触）
+    // onClick=null 表示由外层整行 toggleable 承担交互，这里只画视觉，避免嵌套点击区
+    val interactive = if (onClick != null) {
+        Modifier
             .minimumInteractiveComponentSize()
             .clip(CircleShape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null
-            ) { onClick?.invoke() }
+            ) { onClick() }
             .semantics {
                 role = Role.Checkbox
                 toggleableState = state
                 if (contentDescription != null) this.contentDescription = contentDescription
-            },
+            }
+    } else Modifier
+    Box(
+        modifier.then(interactive),
         contentAlignment = Alignment.Center
     ) {
         // 视觉圆（26dp，与修复前完全一致）：描边 + 三态图形

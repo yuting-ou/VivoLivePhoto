@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  *
  * 这类缺陷的共同形状：`if (busy) return` 把一次点击吞掉，界面上没有任何一处解释
  * 为什么按不动 —— 用户视角就是「点了没反应 / 卡死」。「开始转换」主按钮（v1.7.10 已修）、
- * 修复时间入口与「把输出移到相机相册」都是同一个病根。UI 那半见 [SettingsActionRowClickTest]。
+ * 修复时间入口与「移动输出到相册」都是同一个病根。UI 那半见 [SettingsActionRowClickTest]。
  *
  * 本类刻意**不挂** compose 测试规则：手工 buildActivity 已经各建一棵 Compose 树，
  * 再加规则会在默认 512m 的测试堆里挤出 OutOfMemoryError（那会被误读成产品缺陷）。
@@ -139,7 +139,7 @@ class SilentControlsTest {
 
         callVoid(a, "moveOutputsToCamera")
 
-        assertTrue("转换中点「把输出移到相机相册」必须说明原因",
+        assertTrue("转换中点「移动输出到相册」必须说明原因",
             ConvertCenter.statusText.isNotEmpty())
         ConvertCenter.isConverting = false
         a.finish()

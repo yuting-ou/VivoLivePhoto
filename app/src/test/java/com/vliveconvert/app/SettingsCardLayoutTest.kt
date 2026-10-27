@@ -69,7 +69,7 @@ class SettingsCardLayoutTest {
         val first = action("修复文件时间").fetchSemanticsNode().boundsInRoot
         val second = action("修复破损实况").fetchSemanticsNode().boundsInRoot
         val third = action("重建位置显示").fetchSemanticsNode().boundsInRoot
-        val fourth = action("把输出移到相机相册").fetchSemanticsNode().boundsInRoot
+        val fourth = action("移动输出到相册").fetchSemanticsNode().boundsInRoot
         assertEquals(first.top, second.top, 1f)
         assertEquals(first.bottom, second.bottom, 1f)
         assertEquals(third.top, fourth.top, 1f)
@@ -77,13 +77,20 @@ class SettingsCardLayoutTest {
         assertEquals(first.left, third.left, 1f)
         assertEquals(second.right, fourth.right, 1f)
         assertEquals(textBounds("重建位置显示").bottom,
-            textBounds("把输出移到相机相册").bottom, 1f)
+            textBounds("移动输出到相册").bottom, 1f)
     }
 
     @Test fun summaryAndCardContentsShareLeftAlignment() {
         render()
         assertEquals(textBounds("已添加 3 张照片").left,
             textBounds("修复文件时间").left, 1f)
+    }
+
+    /** 整宽入口不再用行内图标把文字推到 74dp：所有正文左缘必须同一条线 */
+    @Test fun linkRowTextSharesLeftEdgeWithGridTitles() {
+        render()
+        assertEquals(textBounds("输出目录").left, textBounds("修复文件时间").left, 1f)
+        assertEquals(textBounds("转换与修复记录（0）").left, textBounds("修复文件时间").left, 1f)
     }
 
     @Test fun summaryScrollsAwaySoItCannotShrinkTheSettingsViewport() {
@@ -107,7 +114,7 @@ class SettingsCardLayoutTest {
     @Test fun busySwitchesDoNotToggleButToolActionsStillExplainBusyState() {
         render(busy = true)
         compose.onNodeWithText("删除原图").performClick()
-        action("把输出移到相机相册").performClick()
+        action("移动输出到相册").performClick()
         compose.runOnIdle {
             assertEquals(0, deleteCalls)
             assertEquals(1, moveCalls)
@@ -128,7 +135,7 @@ class SettingsCardLayoutTest {
         render(fontScale = 2f, path = path)
         assertEquals(textBounds("移到相机相册").left, textBounds("删除原图").left, 1f)
         assertTrue(textBounds("删除原图").top > textBounds("移到相机相册").bottom)
-        listOf("把输出移到相机相册", path).forEach { text ->
+        listOf("移动输出到相册", path).forEach { text ->
             val layouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText(text, useUnmergedTree = true).performScrollTo()
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }

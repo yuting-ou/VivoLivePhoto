@@ -170,8 +170,8 @@ class ToolReachabilityTest {
     @Test
     fun settingsRow_moveOutputs_speaksInsteadOfSwallowingTheTap() {        openSettings()
         ConvertCenter.statusText = ""
-        compose.onNodeWithText("把输出移到相机相册").performClick()
-        awaitUntil("点「把输出移到相机相册」后状态行应给出可读结果") {
+        compose.onNodeWithText("移动输出到相册").performClick()
+        awaitUntil("点「移动输出到相册」后状态行应给出可读结果") {
             ConvertCenter.statusText.isNotEmpty()
         }
     }
@@ -187,7 +187,7 @@ class ToolReachabilityTest {
         ConvertCenter.statusText = ""
         compose.waitForIdle()
 
-        compose.onNodeWithText("把输出移到相机相册").performClick()
+        compose.onNodeWithText("移动输出到相册").performClick()
         compose.waitForIdle()
         assertEquals("转换中点这一行必须给出拒绝原因，而不是把点击吞掉",
             "转换进行中，等本轮完成后再移动输出文件", ConvertCenter.statusText)
@@ -232,9 +232,16 @@ class ToolReachabilityTest {
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
 
-        compose.onNodeWithText("添加").performClick()
+        val adds = compose.onAllNodesWithText("添加")
+        assertEquals("顶部右上与底部玻璃 Dock 应各有一个「添加」入口",
+            2, adds.fetchSemanticsNodes().size)
+        adds[0].performClick()
         compose.waitForIdle()
-        assertEquals("一张没勾就点「添加」必须说明原因",
+        assertEquals("一张没勾就点顶部「添加」必须说明原因",
+            "先勾选要添加的照片", ConvertCenter.statusText)
+        adds[1].performClick()
+        compose.waitForIdle()
+        assertEquals("一张没勾就点底部「添加」必须说明原因",
             "先勾选要添加的照片", ConvertCenter.statusText)
     }
 

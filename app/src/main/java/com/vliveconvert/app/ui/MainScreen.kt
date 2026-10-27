@@ -470,7 +470,7 @@ fun MainScreen(
                                 GlassOutlineButton("取消转换", onCancelConvert)
                             } else {
                                 // 完成节拍：留一块与取消键等高的空位，免得 2→1 高度再跳
-                                Spacer(Modifier.fillMaxWidth().height(46.dp))
+                                Spacer(Modifier.fillMaxWidth().height(48.dp))
                             }
                         }
                     } else {

@@ -4,6 +4,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.service.BatchLog
 import com.vliveconvert.app.service.BatchLogEntry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -86,5 +87,25 @@ class BatchLogTest {
     fun entryWithoutOutputUriLoadsNull() {
         BatchLog.append(context, entry(1_000L))
         assertNull(BatchLog.load(context).first().firstOutUri)
+    }
+
+    @Test
+    fun repairBatchKeepsMarkerAndFirstOutput() {
+        BatchLog.appendRepair(context, ok = 2, fail = 1,
+            firstOutUri = "content://media/external/images/media/12")
+        val e = BatchLog.load(context).single()
+        assertTrue("修复批次必须带 repair 标记", e.repair)
+        assertEquals(2, e.ok)
+        assertEquals(1, e.fail)
+        assertEquals("DCIM/Camera", e.dest)
+        assertEquals("content://media/external/images/media/12", e.firstOutUri)
+    }
+
+    /** 旧版本写下的日志没有 repair 字段，升级后必须仍按普通批次读出 */
+    @Test
+    fun legacyEntryWithoutRepairFieldLoadsAsNormalBatch() {
+        logFile.writeText("""[{"t":1000,"ok":2,"fail":1,"gps":0,"rc":false,"del":0,"mov":0,"dest":"DCIM/Camera"}]""")
+        val e = BatchLog.load(context).single()
+        assertFalse(e.repair)
     }
 }

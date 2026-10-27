@@ -1,5 +1,6 @@
 package com.vliveconvert.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,13 +26,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
@@ -43,14 +40,19 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -114,26 +116,24 @@ fun SettingsScreen(
                 Spacer(Modifier.height(12.dp))
                 SettingsCard {
                     Text(
-                        "当前任务", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
                         "已添加 $queueCount 张照片",
-                        style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+                        style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "输出 ${if (moveToCamera) "DCIM/Camera" else outputRelPath}",
+                        buildAnnotatedString {
+                            append("输出 ${if (moveToCamera) "DCIM/Camera" else outputRelPath} · ")
+                            if (deleteOriginal) {
+                                withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+                                    append("删除原图")
+                                }
+                            } else {
+                                append("保留原图")
+                            }
+                        },
                         style = settingsDescriptionStyle(),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        if (deleteOriginal) "删除原图已开启" else "保留原 JPG 与 MP4",
-                        style = settingsDescriptionStyle(),
-                        color = if (deleteOriginal) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (statusText.isNotBlank()) {
                         Spacer(Modifier.height(10.dp))
@@ -144,20 +144,20 @@ fun SettingsScreen(
                     }
                 }
                 SettingsSection("输出")
-                SettingsLinkCard(Icons.Filled.Home, "输出目录", outputRelPath, onEditOutputPath)
+                SettingsLinkCard("输出目录", outputRelPath, onEditOutputPath)
                 SettingsSection("转换后处理")
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToggleCard(
                             Icons.AutoMirrored.Filled.ArrowForward, "移到相机相册",
                             "保存到 DCIM/Camera", moveToCamera, !isBusy,
-                            onToggleMoveToCamera, modifier, singleColumn
+                            onToggleMoveToCamera, modifier
                         )
                     },
                     second = { modifier ->
                         SettingsToggleCard(
-                            Icons.Filled.Delete, "删除原图", "转换成功后处理原 JPG 与 MP4",
-                            deleteOriginal, !isBusy, onToggleDeleteOriginal, modifier, singleColumn
+                            Icons.Filled.Delete, "删除原图", "转换成功后处理原文件",
+                            deleteOriginal, !isBusy, onToggleDeleteOriginal, modifier
                         )
                     }
                 )
@@ -165,14 +165,14 @@ fun SettingsScreen(
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToggleCard(
-                            Icons.Filled.Star, "跟随系统取色（莫奈）", "使用壁纸配色，关闭回到品牌蓝",
-                            dynamicColor, true, onToggleDynamicColor, modifier, singleColumn
+                            Icons.Filled.Star, "跟随系统取色", "莫奈取色，关闭回品牌蓝",
+                            dynamicColor, true, onToggleDynamicColor, modifier
                         )
                     },
                     second = { modifier ->
                         SettingsToggleCard(
-                            Icons.Filled.PlayArrow, "减少动效", "减少高光流动与弹窗动画",
-                            reduceMotion, true, onToggleReduceMotion, modifier, singleColumn
+                            Icons.Filled.PlayArrow, "减少动效", "减少高光与弹窗动画",
+                            reduceMotion, true, onToggleReduceMotion, modifier
                         )
                     }
                 )
@@ -180,14 +180,14 @@ fun SettingsScreen(
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.DateRange, "修复文件时间", "按拍摄时间校正修改时间",
-                            onOpenFixTime, modifier, singleColumn
+                            Icons.Filled.DateRange, "修复文件时间", "按拍摄时间校正",
+                            onOpenFixTime, modifier
                         )
                     },
                     second = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.Build, "修复破损实况", "合并破损的 JPG 与 MP4，保留原文件",
-                            onOpenBrokenRepair, modifier, singleColumn
+                            Icons.Filled.Build, "修复破损实况", "合并成实况，保留原文件",
+                            onOpenBrokenRepair, modifier
                         )
                     }
                 )
@@ -195,21 +195,21 @@ fun SettingsScreen(
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.Place, "重建位置显示", "让历史照片显示拍摄位置",
-                            onRepairLocationDisplay, modifier, singleColumn, available = !isBusy
+                            Icons.Filled.Place, "重建位置显示", "让老照片显示位置",
+                            onRepairLocationDisplay, modifier, available = !isBusy
                         )
                     },
                     second = { modifier ->
                         SettingsToolCard(
-                            Icons.AutoMirrored.Filled.ArrowForward, "把输出移到相机相册",
-                            "将已有产物搬到 DCIM/Camera", onMoveOutputsToCamera,
-                            modifier, singleColumn, available = !isBusy
+                            Icons.AutoMirrored.Filled.ArrowForward, "移动输出到相册",
+                            "已有产物搬进相机相册", onMoveOutputsToCamera,
+                            modifier, available = !isBusy
                         )
                     }
                 )
                 SettingsSection("记录与诊断")
                 SettingsLinkCard(
-                    Icons.Filled.List, "转换记录（$batchLogCount）", "查看最近 50 批的结果与产物",
+                    "转换与修复记录（$batchLogCount）", "查看最近 50 批的结果与产物",
                     onOpenBatchLog
                 )
                 Spacer(Modifier.height(12.dp))
@@ -217,21 +217,21 @@ fun SettingsScreen(
                     first = { modifier ->
                         SettingsToolCard(
                             Icons.Filled.Share, "导出崩溃日志（$crashLogCount）",
-                            "保存到 Download/VLiveConvert 供排查", onExportCrashLogs,
-                            modifier, singleColumn
+                            "导出到 Download", onExportCrashLogs,
+                            modifier
                         )
                     },
                     second = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.Delete, "清空崩溃日志", "仅删除本地日志，不能撤销",
-                            onClearCrashLogs, modifier, singleColumn,
+                            Icons.Filled.Delete, "清空崩溃日志", "删除后不可恢复",
+                            onClearCrashLogs, modifier,
                             available = crashLogCount > 0, destructive = true
                         )
                     }
                 )
                 SettingsSection("关于")
                 SettingsLinkCard(
-                    Icons.Filled.Info, "关于与开源许可", "版本信息与 GPL-3.0 许可证", onOpenAbout
+                    "关于与开源许可", "版本信息与 GPL-3.0 许可证", onOpenAbout
                 )
                 Spacer(Modifier.height(24.dp))
                 Text(
@@ -294,7 +294,6 @@ private fun SettingsToolCard(
     description: String,
     onClick: () -> Unit,
     modifier: Modifier,
-    singleColumn: Boolean,
     available: Boolean = true,
     destructive: Boolean = false
 ) {
@@ -308,14 +307,13 @@ private fun SettingsToolCard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SettingsGlyph(icon, accent)
             Spacer(Modifier.weight(1f))
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            SettingsChevron(MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(12.dp))
-        Text(title, style = settingsCardTitleStyle(), minLines = if (singleColumn) 1 else 2,
+        Text(title, style = settingsCardTitleStyle(),
             color = if (destructive && available) accent else MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
-        Text(description, style = settingsDescriptionStyle(), minLines = if (singleColumn) 1 else 2,
+        Text(description, style = settingsDescriptionStyle(),
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -328,8 +326,7 @@ private fun SettingsToggleCard(
     checked: Boolean,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
-    modifier: Modifier,
-    singleColumn: Boolean
+    modifier: Modifier
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val track = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
@@ -354,29 +351,42 @@ private fun SettingsToggleCard(
             )
         }
         Spacer(Modifier.height(12.dp))
-        Text(title, style = settingsCardTitleStyle(), minLines = if (singleColumn) 1 else 2,
+        Text(title, style = settingsCardTitleStyle(),
             color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
-        Text(description, style = settingsDescriptionStyle(), minLines = if (singleColumn) 1 else 2,
+        Text(description, style = settingsDescriptionStyle(),
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun SettingsLinkCard(icon: ImageVector, title: String, description: String, onClick: () -> Unit) {
+private fun SettingsLinkCard(title: String, description: String, onClick: () -> Unit) {
     SettingsCard(Modifier.clip(RoundedCornerShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SettingsGlyph(icon, MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = settingsCardTitleStyle(), color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(4.dp))
                 Text(description, style = settingsDescriptionStyle(), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(8.dp))
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            SettingsChevron(MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/** 墨迹右缘贴齐内容右线：系统箭头的字形内缩约 7dp，和开关轨道对不齐 */
+@Composable
+private fun SettingsChevron(color: Color) {
+    Canvas(Modifier.size(20.dp)) {
+        val stroke = 2.dp.toPx()
+        val right = size.width - stroke / 2
+        val left = right - 5.dp.toPx()
+        val centerY = size.height / 2
+        val half = 5.dp.toPx()
+        drawLine(color, Offset(left, centerY - half), Offset(right, centerY),
+            stroke, StrokeCap.Round)
+        drawLine(color, Offset(right, centerY), Offset(left, centerY + half),
+            stroke, StrokeCap.Round)
     }
 }
 

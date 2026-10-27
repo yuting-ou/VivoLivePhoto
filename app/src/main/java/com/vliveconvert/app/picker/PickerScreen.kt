@@ -105,6 +105,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.GlassDivider
+import com.vliveconvert.app.ui.GlossyButton
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.HazeGlassCard
 import com.vliveconvert.app.ui.EaseOutStrong
@@ -168,6 +169,7 @@ fun PickerScreen(
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
+    var emptyAddHint by remember { mutableStateOf(false) }
     // 选择查询表：每个格子/日期头若都线性扫 selected，八千张规模就是 O(n²)；
     // 真机全选 8550 张会把主线程打到 ANR。派生一次、全局 O(1) 查询。
     val selectedIds by remember {
@@ -368,7 +370,7 @@ fun PickerScreen(
                         running = running && !globalMode,
                         contentPadding = PaddingValues(
                             start = 16.dp, end = 16.dp,
-                            top = headerHeight + 12.dp, bottom = 10.dp)
+                            top = headerHeight + 12.dp, bottom = 120.dp)
                     )
                 }
             }
@@ -407,10 +409,11 @@ fun PickerScreen(
                                 .padding(horizontal = 4.dp, vertical = 8.dp)
                         )
                         Spacer(Modifier.weight(1f))
+                        // 双入口：右上保留常用位，底部玻璃 Dock 保证单手可达
                         val primary = MaterialTheme.colorScheme.primary
                         Box(
                             Modifier
-                                .heightIn(min = 32.dp)
+                                .heightIn(min = 48.dp)
                                 .clip(CircleShape)
                                 .shadow(10.dp, CircleShape, clip = false,
                                     ambientColor = primary.copy(alpha = 0.35f),
@@ -418,8 +421,11 @@ fun PickerScreen(
                                 .background(Brush.verticalGradient(listOf(
                                     lerp(primary, Color.White, 0.18f), primary)))
                                 .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
-                                .clickable { onConfirm(selected.toList()) }
-                                .padding(horizontal = 14.dp, vertical = 5.dp),
+                                .clickable {
+                                    if (selected.isEmpty()) emptyAddHint = true
+                                    onConfirm(selected.toList())
+                                }
+                                .padding(horizontal = 18.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text("添加", style = TextStyle(fontSize = 14.sp,
@@ -459,20 +465,21 @@ fun PickerScreen(
                 GlassDivider()
                 Spacer(Modifier.height(4.dp))
                 // ── 搜索行：文件名过滤（切相册自动清空）+ 只看未转换 ──
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     GlassTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = "搜索文件名",
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                     )
                     Spacer(Modifier.width(8.dp))
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
+                            .heightIn(min = 48.dp)
                             .clickableNoRipple(onClick = { onlyUnconverted = !onlyUnconverted })
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                            .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -552,6 +559,37 @@ fun PickerScreen(
                         Modifier.padding(top = 2.dp, bottom = 2.dp).height(3.dp)
                     )
                 }
+            }
+        }
+        // ── 主操作固定在底部：单手可达，与主界面/修复时间同一位置 ──
+        HazeGlassCard(
+            hazeState = hazeState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .fillMaxWidth(),
+            radius = 28.dp,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (emptyAddHint && selected.isEmpty()) {
+                    Text(
+                        "先勾选要添加的照片",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                GlossyButton(
+                    text = if (selected.isEmpty()) "添加" else "添加 ${selected.size} 张",
+                    onClick = {
+                        if (selected.isEmpty()) emptyAddHint = true
+                        onConfirm(selected.toList())
+                    }
+                )
             }
         }
         // ── 相册切换：玻璃底部面板（封面 + 名称 + 张数 + 当前勾选）。
@@ -781,7 +819,7 @@ private fun PickerChip(text: String, active: Boolean, onClick: () -> Unit) {
                 else Color.Transparent
             )
             .clickableNoRipple(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
         Text(
             text,
