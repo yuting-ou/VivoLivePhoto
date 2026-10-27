@@ -112,6 +112,7 @@ import com.vliveconvert.app.service.ConvertService
 import com.vliveconvert.app.service.Preflight
 import com.vliveconvert.app.service.mergeClearedUndo
 import com.vliveconvert.app.ui.AboutScreen
+import com.vliveconvert.app.ui.BrokenRepairScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.GlassDialog
@@ -376,6 +377,7 @@ class MainActivity : ComponentActivity() {
     private var preflightSpaceError by mutableStateOf(false)
     // 关于 / 开源许可页（GPL-3.0 合规：许可证文本随包内置）
     private var showAbout by mutableStateOf(false)
+    private var showBrokenRepair by mutableStateOf(false)
 
     // 预测性返回（Android 14+ 手势）：拖动进度实时驱动顶层页缩放/位移/圆角。
     // Animatable 而不是普通状态：拖动中 snapTo 逐帧跟手，取消时 animateTo 平滑收回
@@ -1252,6 +1254,11 @@ class MainActivity : ComponentActivity() {
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 160.dp, start = 16.dp, end = 16.dp)
                     )
+                }
+
+                // 修复破损实况：独立入口，不走普通转换流程
+                if (showBrokenRepair) {
+                    BrokenRepairScreen(onBack = { showBrokenRepair = false })
                 }
 
                 // 转换前的影响面预估：把可确定的事实摊开再开跑

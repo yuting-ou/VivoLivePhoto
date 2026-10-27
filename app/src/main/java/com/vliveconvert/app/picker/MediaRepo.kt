@@ -202,6 +202,49 @@ class MediaRepo(private val resolver: ContentResolver) {
         return out.sortedByDescending { it.sortTime }.take(limit)
     }
 
+    /** 查询全部图片（不过滤相册），按拍摄时间降序——供全库级工具使用 */
+    fun queryAllImages(): List<MediaItem> {
+        val result = mutableListOf<MediaItem>()
+        try {
+            resolver.query(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+                arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DATA,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.BUCKET_ID,
+                    MediaStore.Images.Media.DATE_TAKEN,
+                    MediaStore.Images.Media.DATE_MODIFIED,
+                    MediaStore.Images.Media.SIZE
+                ),
+                null, null,
+                MediaStore.Images.Media.DATE_TAKEN + " DESC"
+            )?.use { c ->
+                val iId = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val iPath = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+                val iName = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val iBucket = c.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
+                val iTaken = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+                val iModified = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+                val iSize = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                while (c.moveToNext()) {
+                    val path = c.getString(iPath) ?: continue
+                    result.add(MediaItem(
+                        id = c.getLong(iId),
+                        path = path,
+                        name = c.getString(iName) ?: path.substringAfterLast('/'),
+                        bucketId = c.getLong(iBucket),
+                        dateTaken = c.getLong(iTaken),
+                        dateModified = c.getLong(iModified),
+                        size = c.getLong(iSize)
+                    ))
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return result
+    }
+
     private class AlbumBuilder(
         val bucketId: Long,
         val name: String,

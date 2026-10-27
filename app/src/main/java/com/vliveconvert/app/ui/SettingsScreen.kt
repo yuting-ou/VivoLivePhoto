@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -72,6 +73,7 @@ fun SettingsScreen(
     onOpenFixTime: () -> Unit,
     batchLogCount: Int = 0,
     onOpenBatchLog: () -> Unit = {},
+    onOpenBrokenRepair: () -> Unit = {},
     onRepairLocationDisplay: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,
@@ -206,6 +208,13 @@ fun SettingsScreen(
                     title = "修复文件时间",
                     subtitle = "按拍摄时间校正已导出文件的「修改时间」",
                     onClick = onOpenFixTime
+                )
+                GlassDivider(startInset = 58.dp)
+                ToolCard(
+                    icon = Icons.Filled.Build,
+                    title = "修复破损实况",
+                    subtitle = "把拍摄中断留下的糊 JPG + MP4 合并成实况",
+                    onClick = onOpenBrokenRepair
                 )
                 GlassDivider(startInset = 58.dp)
                 ToolCard(
