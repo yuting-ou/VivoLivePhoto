@@ -75,6 +75,7 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
     var selected by remember { mutableStateOf(setOf<String>()) }
     var fixing by remember { mutableStateOf(false) }
     var fixProgress by remember { mutableStateOf(0f) }
+    var fixStatus by remember { mutableStateOf("") }
     var summary by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf(false) }
 
@@ -114,7 +115,10 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
         scope.launch(Dispatchers.IO) {
             var ok = 0
             var fail = 0
-            val tempDir = File(context.cacheDir, "broken_fix").apply { mkdirs() }
+            val tempDir = File(context.cacheDir, "broken_fix").apply {
+                mkdirs()
+                listFiles()?.forEach { f -> try { f.delete() } catch (_: Exception) {} }
+            }
             targets.forEachIndexed { index, item ->
                 try {
                     val result = Converter.convertToVivoSingle(
@@ -134,7 +138,11 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 }
                 tempDir.listFiles()?.forEach { f -> try { f.delete() } catch (_: Exception) {} }
                 val p = (index + 1).toFloat() / targets.size
-                withContext(Dispatchers.Main) { fixProgress = p }
+                val status = "${index + 1}/${targets.size} · ${item.name}"
+                withContext(Dispatchers.Main) {
+                    fixProgress = p
+                    fixStatus = status
+                }
             }
             val msg = "修复成功 $ok 个，失败 $fail 个；原文件未删除，可自行在相册处理。"
             withContext(Dispatchers.Main) {
@@ -160,12 +168,24 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            GlassIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
-                onClick = onBack,
-                size = 38.dp
-            )
+            if (fixing) {
+                // 修复中禁止返回：写入被取消会留下半截产物
+                Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.30f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            } else {
+                GlassIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    onClick = onBack,
+                    size = 38.dp
+                )
+            }
             Spacer(Modifier.width(12.dp))
             Text(
                 "修复破损实况",
@@ -210,7 +230,20 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
             }
             if (fixing) {
                 Spacer(Modifier.height(6.dp))
+                Text(
+                    fixStatus,
+                    style = TextStyle(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                Spacer(Modifier.height(4.dp))
                 GlassProgressBar(progress = fixProgress, height = 5.dp, active = true)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "修复中，请勿离开本页；完成后会自动提示。",
+                    style = TextStyle(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(Modifier.height(10.dp))
