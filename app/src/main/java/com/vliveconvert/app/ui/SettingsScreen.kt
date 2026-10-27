@@ -73,7 +73,7 @@ fun SettingsScreen(
     onOpenFixTime: () -> Unit,
     batchLogCount: Int = 0,
     onOpenBatchLog: () -> Unit = {},
-    onOpenBrokenRepair: () -> Unit = {},
+    onOpenBrokenRepair: () -> Unit,
     onRepairLocationDisplay: () -> Unit,
     onMoveOutputsToCamera: () -> Unit,
     onExportCrashLogs: () -> Unit,

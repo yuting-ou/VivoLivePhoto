@@ -156,9 +156,19 @@ class ToolReachabilityTest {
         assertEquals("设置页内容不应还留在画面上", 0, countNodes("转换后处理"))
     }
 
+    /** 修复破损实况入口自 test2 加入起没接线、点击静默无反应；用真实点击钉住 */
     @Test
-    fun settingsRow_moveOutputs_speaksInsteadOfSwallowingTheTap() {
+    fun settingsRow_brokenRepair_entersThePage() {
         openSettings()
+        compose.onNodeWithText("修复破损实况").performClick()
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        assertTrue("点「修复破损实况」必须进入修复页", flag("showBrokenRepair"))
+        compose.onNodeWithText("拍摄时连拍或立刻息屏", substring = true).assertExists()
+    }
+
+    @Test
+    fun settingsRow_moveOutputs_speaksInsteadOfSwallowingTheTap() {        openSettings()
         ConvertCenter.statusText = ""
         compose.onNodeWithText("把输出移到相机相册").performClick()
         awaitUntil("点「把输出移到相机相册」后状态行应给出可读结果") {

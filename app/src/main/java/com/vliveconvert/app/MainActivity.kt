@@ -1089,6 +1089,7 @@ class MainActivity : ComponentActivity() {
                                     MotionPrefs.set(this@MainActivity, on)
                                 },
                                 onOpenFixTime = { openFixTime() },
+                                onOpenBrokenRepair = { showBrokenRepair = true },
                                 onRepairLocationDisplay = { showRepairConfirm = true },
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onExportCrashLogs = { exportCrashLogs() },

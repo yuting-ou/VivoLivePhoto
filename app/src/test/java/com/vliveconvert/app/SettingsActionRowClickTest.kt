@@ -47,6 +47,7 @@ class SettingsActionRowClickTest {
                     onToggleDeleteOriginal = {},
                     onRepairLocationDisplay = {},
                     onOpenFixTime = {},
+                onOpenBrokenRepair = {},
                     onMoveOutputsToCamera = { fired = true },
                     onExportCrashLogs = {},
                 onClearCrashLogs = {},

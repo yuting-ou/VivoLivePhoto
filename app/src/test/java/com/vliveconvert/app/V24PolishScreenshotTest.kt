@@ -151,6 +151,7 @@ class V24PolishScreenshotTest {
                 onToggleMoveToCamera = {},
                 onToggleDeleteOriginal = {},
                 onOpenFixTime = {},
+                onOpenBrokenRepair = {},
                 batchLogCount = 3,
                 onOpenBatchLog = {},
                 onRepairLocationDisplay = {},
