@@ -1077,6 +1077,7 @@ class MainActivity : ComponentActivity() {
                                     getSharedPreferences("vliveconvert", MODE_PRIVATE)
                                         .edit().putBoolean("delete_original", on).apply()
                                 },
+                                queueCount = ConvertCenter.items.size,
                                 dynamicColor = dynamicColor,
                                 onToggleDynamicColor = { on ->
                                     dynamicColor = on

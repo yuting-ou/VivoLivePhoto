@@ -417,7 +417,8 @@ fun MainScreen(
                 hazeState = hazeState,
                 modifier = Modifier.fillMaxWidth(),
                 radius = 28.dp,
-                contentPadding = PaddingValues(10.dp)
+                contentPadding = PaddingValues(10.dp),
+                liquid = true
             ) {
                 // 三态：2 转换中 / 1 完成节拍 / 0 空闲；尺寸由 SizeTransform 平滑过渡
                 // 进度按张跳变：填色只做 160ms 追平，避免弹簧在快批次里落后两格；

@@ -69,6 +69,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -106,6 +107,33 @@ import dev.chrisbanes.haze.rememberHazeState
  * 这里用「半透明分层 + 顶部高光 + 折射描边 + 环境阴影」模拟；
  * 亮度按主题自动切换（浅色白玻璃 / 深色烟玻璃），跟随莫奈取色。
  */
+
+/** 液态 Dock：镜面高光跟随触点横向移动（只观测、不消费事件，按钮点击不受影响） */
+@Composable
+private fun Modifier.touchFollowGlow(): Modifier {
+    var x by remember { mutableStateOf<Float?>(null) }
+    return this
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.lastOrNull()
+                    x = if (change?.pressed == true) change.position.x else null
+                }
+            }
+        }
+        .drawBehind {
+            val cx = x ?: return@drawBehind
+            val band = size.width * 0.34f
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent,
+                        Color.White.copy(alpha = 0.12f), Color.Transparent),
+                    startX = cx - band, endX = cx + band
+                )
+            )
+        }
+}
 
 @Composable
 private fun isDarkGlass(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -228,11 +256,13 @@ fun HazeGlassCard(
     contentPadding: PaddingValues = PaddingValues(10.dp),
     /** 弹窗等文字密集场景加一层膜，保证高亮照片透上来时仍可读 */
     dense: Boolean = false,
+    /** 浮动 Dock 专用：更深的边缘透镜 + 跟随触点的镜面高光（「更液态」） */
+    liquid: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val backdrop = LocalGlassBackdrop.current
     if (backdrop != null && hazeAvailable()) {
-        LensGlassCard(backdrop, modifier, radius, contentPadding, dense, content)
+        LensGlassCard(backdrop, modifier, radius, contentPadding, dense, liquid, content)
         return
     }
     val hazeEnabled = hazeAvailable()
@@ -286,6 +316,9 @@ fun HazeGlassCard(
         Box(Modifier.matchParentSize().border(1.dp, Brush.verticalGradient(
             listOf(edgeTop, edgeBottom,
                 Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shape))
+        if (liquid) {
+            Box(Modifier.matchParentSize().touchFollowGlow())
+        }
         Column(Modifier.padding(contentPadding), content = content)
     }
 }
@@ -302,6 +335,7 @@ private fun LensGlassCard(
     radius: Dp,
     contentPadding: PaddingValues,
     dense: Boolean,
+    liquid: Boolean,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val dark = isDarkGlass()
@@ -311,18 +345,33 @@ private fun LensGlassCard(
     val surfaceAlpha = when {
         dense && dark -> 0.78f
         dense -> 0.78f
+        liquid -> if (dark) 0.60f else 0.46f
         dark -> 0.66f
         else -> 0.52f
     }
-    val blurRadius = if (dense) 18.dp else 18.dp
-    val refractionHeight = if (dense) 24.dp else 22.dp
-    val refractionAmount = if (dense) 44.dp else 40.dp
+    // 液态 Dock：边缘透镜更深（折射高度/位移更大）、更清澈（模糊更少）、高光更锐
+    val blurRadius = when {
+        dense -> 18.dp
+        liquid -> 14.dp
+        else -> 18.dp
+    }
+    val refractionHeight = when {
+        dense -> 24.dp
+        liquid -> 28.dp
+        else -> 22.dp
+    }
+    val refractionAmount = when {
+        dense -> 44.dp
+        liquid -> 52.dp
+        else -> 40.dp
+    }
     val highlight = if (dense) {
         Highlight.Plain.copy(width = 0.8.dp,
             alpha = if (dark) 0.28f else 0.36f)
     } else {
-        Highlight.Default.copy(width = 1.2.dp,
-            alpha = if (dark) 0.52f else 0.60f)
+        Highlight.Default.copy(width = if (liquid) 1.5.dp else 1.2.dp,
+            alpha = if (dark) (if (liquid) 0.60f else 0.52f)
+                    else (if (liquid) 0.72f else 0.60f))
     }
     val innerShadow = InnerShadow(
         radius = if (dense) 18.dp else 12.dp,
@@ -370,6 +419,9 @@ private fun LensGlassCard(
             }
         )
     ) {
+        if (liquid) {
+            Box(Modifier.matchParentSize().touchFollowGlow())
+        }
         Column(Modifier.padding(contentPadding), content = content)
     }
 }
