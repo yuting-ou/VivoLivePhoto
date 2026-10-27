@@ -7,7 +7,7 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/latest) ——
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test6) ——
 > 点开 `VivoLivePhoto-v2.6.0-test6.apk` 即可直接安装（推荐，**测试版**：设置页视觉对齐、
 > UI 五原则收口、修复记录、选择器双「添加」入口，待真机验收后转正式）。亦可从仓库根目录
 > [`VivoLivePhoto-v2.6.0-test6.apk`](./VivoLivePhoto-v2.6.0-test6.apk) 下载，内容一致。
