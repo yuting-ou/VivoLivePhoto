@@ -170,6 +170,8 @@ fun PickerScreen(
     convertedIndex: Map<String, Long> = emptyMap(),
     /** 精确索引：源路径（小写）→ 产物 URI（转换成功时落盘，优先于名称启发式） */
     convertedPaths: Map<String, String> = emptyMap(),
+    /** 当前待转换列表的 id 集合（与「添加」去重同一把钥匙）：驱动「已添加」角标 */
+    addedIds: Set<Long> = emptySet(),
     onBack: () -> Unit,
     onConfirm: (List<MediaItem>) -> Unit,
     showAlbumSheet: Boolean = false,
@@ -390,6 +392,9 @@ fun PickerScreen(
                             }
                         },
                         running = running && !globalMode,
+                        // 「已转」角标此前从未接上（默认恒 false，只有筛选生效）：一并接上
+                        isConverted = convertedChecker,
+                        isAdded = { it.id in addedIds },
                         contentPadding = PaddingValues(
                             start = 16.dp, end = 16.dp,
                             top = headerHeight + 12.dp, bottom = 120.dp)
@@ -787,6 +792,7 @@ private fun AlbumGridPage(
     onToggleGroup: (List<MediaItem>) -> Unit,
     onPreview: (MediaItem) -> Unit,
     isConverted: (MediaItem) -> Boolean = { false },
+    isAdded: (MediaItem) -> Boolean = { false },
     running: Boolean,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -823,6 +829,7 @@ private fun AlbumGridPage(
                     selected = item.id in selectedIds,
                     selectionIndex = selectedIndex[item.id] ?: -1,
                     converted = isConverted(item),
+                    added = isAdded(item),
                     onToggle = { onToggle(item) },
                     onPreview = { onPreview(item) }
                 )
@@ -961,6 +968,7 @@ private fun GridCell(
     selected: Boolean,
     selectionIndex: Int,
     converted: Boolean = false,
+    added: Boolean = false,
     onToggle: () -> Unit,
     onPreview: () -> Unit
 ) {
@@ -1023,17 +1031,26 @@ private fun GridCell(
                 .background(Color.White.copy(alpha = 0.9f), CircleShape)
         )
 
-        // 已转换角标（右下角）：提示性标记，导出层指纹校验才是覆盖决策的权威
-        if (converted && !selected) {
+        // 右下角状态角标：在当前待转换列表里的「已添加」优先于历史上的「已转」——
+        // 它才是此刻能改变行动的信息；移出队列或转完后自动退回显示「已转」
+        if (!selected && (added || converted)) {
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(
+                        if (added) MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
+                        else Color.Black.copy(alpha = 0.55f)
+                    )
                     .padding(horizontal = 5.dp, vertical = 2.dp)
             ) {
-                Text("已转", fontSize = 10.sp, lineHeight = 12.sp, color = Color.White)
+                Text(
+                    if (added) "已添加" else "已转",
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    color = Color.White
+                )
             }
         }
 

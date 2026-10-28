@@ -80,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
@@ -1047,6 +1048,13 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+                                // 当前待转换列表的 id：驱动选择器「已添加」角标。
+                                // derivedStateOf 只在队列真的增删时重算，逐张 any{} 在 8.5k 规模是 O(n²)
+                                val addedIds by remember {
+                                    derivedStateOf {
+                                        ConvertCenter.items.mapTo(HashSet()) { it.item.id }
+                                    }
+                                }
                                 // 精确索引（转换成功时落盘）：与名称启发式并集使用
                                 val convertedPaths by produceState(
                                     emptyMap<String, String>(), showPicker
@@ -1064,6 +1072,7 @@ class MainActivity : ComponentActivity() {
                                     mediaRepo = mediaRepo,
                                     convertedIndex = convertedIndex,
                                     convertedPaths = convertedPaths,
+                                    addedIds = addedIds,
                                     onBack = { animateBackPop() },
                                     onConfirm = { picked ->
                                         // 空选时留在选择器里就地提示，别把用户踹回主界面

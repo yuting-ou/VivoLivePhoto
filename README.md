@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test11) ——
-> 点开 `VivoLivePhoto-v2.6.0-test11.apk` 即可直接安装（推荐，**测试版**：选择器原图查看、
-> 转场期玻璃不再透出上一页，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test11.apk`](./VivoLivePhoto-v2.6.0-test11.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test12) ——
+> 点开 `VivoLivePhoto-v2.6.0-test12.apk` 即可直接安装（推荐，**测试版**：选择器新增「已添加」
+> 角标 + 原图查看，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test12.apk`](./VivoLivePhoto-v2.6.0-test12.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,21 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test12（选择器「已添加」角标 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **新标志**：已经加进待转换列表的照片，在相册选择器里右下角打「已添加」（主题色底 + 白字）。
+  补照片时一眼能看出哪些加过，不用凭记忆重复添加
+- **实时**：数据源就是列表本身（与「添加」去重同一把 id 集合，`derivedStateOf` 只在队列增删时
+  重算）。从主界面移除一张，回到选择器那张的角标立刻消失；转换完清空列表后由「已转」接管
+- **与「已转」共用右下角槽位**：同时命中只显示「已添加」（当下能改变行动的信息优先）
+- **顺手修好一处死代码**：`AlbumGridPage.isConverted` 自 v2.4 起在调用处从未被传入
+  （默认恒 false），所以**「已转」角标一直没显示过**，只有「只看未转换」筛选生效；本版接上
+- **验证**：3 条角标用例（只有已添加的有标 / 已添加压掉已转 / 未添加时保留已转），
+  变异检验把两处接线摘掉三条全红；模拟器实测添加 2 张 → 重进选择器两枚角标、移除 1 张后只剩 1 枚。
+  298 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test11（修转场时上一页透过玻璃闪一下 · 测试版）
 
