@@ -20,8 +20,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.imePadding
@@ -91,10 +93,15 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
@@ -115,6 +122,7 @@ import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.glassSurface
 import com.vliveconvert.app.ui.glassWallpaper
 import com.vliveconvert.app.ui.rememberGlassHazeState
+import com.vliveconvert.app.ui.rememberPressScale
 import dev.chrisbanes.haze.HazeState
 import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.clickableNoRipple
@@ -212,6 +220,7 @@ fun PickerScreen(
     // 文件名搜索：过滤在 displayOrder 之后、日期分组之前；全选与计数都随可见集合收窄。
     // 切换相册即清空（搜索是「在本相册里找」的心智模型）
     var searchQuery by remember(bucketId) { mutableStateOf("") }
+    var previewIndex by remember(bucketId) { mutableStateOf<Int?>(null) }
     // 搜索范围：默认当前相册；「全部相册」走全库查询（去抖 400ms，候选逐一校验伴生 mp4）
     var searchScopeAll by remember(bucketId) { mutableStateOf(false) }
     // 日期范围：0=不限、7、30
@@ -367,6 +376,10 @@ fun PickerScreen(
                         selectedIndex = selectedIndex,
                         onToggle = toggleItem,
                         onToggleGroup = toggleGroup,
+                        onPreview = { item ->
+                            val idx = visible.indexOf(item)
+                            if (idx >= 0) previewIndex = idx
+                        },
                         running = running && !globalMode,
                         contentPadding = PaddingValues(
                             start = 16.dp, end = 16.dp,
@@ -623,6 +636,16 @@ fun PickerScreen(
                 }
             )
         }
+
+        previewIndex?.let { index ->
+            OriginalViewer(
+                items = visible,
+                initialIndex = index,
+                selectedIds = selectedIds,
+                onToggleSelected = toggleItem,
+                onClose = { previewIndex = null }
+            )
+        }
     }
 }
 
@@ -753,6 +776,7 @@ private fun AlbumGridPage(
     selectedIndex: Map<Long, Int>,
     onToggle: (MediaItem) -> Unit,
     onToggleGroup: (List<MediaItem>) -> Unit,
+    onPreview: (MediaItem) -> Unit,
     isConverted: (MediaItem) -> Boolean = { false },
     running: Boolean,
     contentPadding: PaddingValues = PaddingValues()
@@ -790,7 +814,8 @@ private fun AlbumGridPage(
                     selected = item.id in selectedIds,
                     selectionIndex = selectedIndex[item.id] ?: -1,
                     converted = isConverted(item),
-                    onToggle = { onToggle(item) }
+                    onToggle = { onToggle(item) },
+                    onPreview = { onPreview(item) }
                 )
             }
         }
@@ -927,7 +952,8 @@ private fun GridCell(
     selected: Boolean,
     selectionIndex: Int,
     converted: Boolean = false,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onPreview: () -> Unit
 ) {
     val resolver = LocalContext.current.contentResolver
     val transition = updateTransition(selected, label = "cell")
@@ -1057,6 +1083,65 @@ private fun GridCell(
                             .size(16.dp)
                             .graphicsLayer { alpha = 0.8f }
                             .border(1.5.dp, Color.White, CircleShape)
+                    )
+                }
+            }
+        }
+
+        // 左上角放大镜：只开原图查看器，不改变勾选
+        val previewInteraction = remember { MutableInteractionSource() }
+        val previewScale by rememberPressScale(previewInteraction, pressedScale = 0.92f)
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(2.dp)
+                .size(48.dp)
+                .graphicsLayer {
+                    scaleX = previewScale
+                    scaleY = previewScale
+                }
+                .clickable(
+                    interactionSource = previewInteraction,
+                    indication = null,
+                    onClick = onPreview
+                )
+                .semantics { contentDescription = "查看 ${item.name} 原图" },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.88f))
+                    .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                val iconColor = Color(0xFF1B2433)
+                Canvas(Modifier.size(16.dp)) {
+                    val stroke = 1.6.dp.toPx()
+                    val r = size.minDimension * 0.27f
+                    val c = Offset(size.width * 0.42f, size.height * 0.42f)
+                    drawCircle(iconColor, r, c, style = Stroke(stroke))
+                    drawLine(
+                        iconColor,
+                        Offset(c.x + r * 0.72f, c.y + r * 0.72f),
+                        Offset(size.width * 0.82f, size.height * 0.82f),
+                        stroke,
+                        StrokeCap.Round
+                    )
+                    drawLine(
+                        iconColor,
+                        Offset(c.x - r * 0.45f, c.y),
+                        Offset(c.x + r * 0.45f, c.y),
+                        stroke * 0.9f,
+                        StrokeCap.Round
+                    )
+                    drawLine(
+                        iconColor,
+                        Offset(c.x, c.y - r * 0.45f),
+                        Offset(c.x, c.y + r * 0.45f),
+                        stroke * 0.9f,
+                        StrokeCap.Round
                     )
                 }
             }
