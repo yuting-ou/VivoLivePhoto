@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test13) ——
-> 点开 `VivoLivePhoto-v2.6.0-test13.apk` 即可直接安装（推荐，**测试版**：筛选行窄屏换行、
-> 玻璃全程液态 + 「已添加」角标，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test13.apk`](./VivoLivePhoto-v2.6.0-test13.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test14) ——
+> 点开 `VivoLivePhoto-v2.6.0-test14.apk` 即可直接安装（推荐，**测试版**：待转换列表可滑动、
+> 筛选行窄屏换行、玻璃全程液态 + 「已添加」角标，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test14.apk`](./VivoLivePhoto-v2.6.0-test14.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,18 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test14（修待转换列表划不动 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修「照片一多列表就划不动、最后一张永远看不到」**：底部 Dock 是浮在列表上方的，
+  列表视口却铺到屏幕底；原逻辑是「能滚才加底部留白」——而内容恰好被 Dock 盖住时
+  `canScroll` 恒为 false，留白永远加不上，最后一行也就永远滚不出来（8 张照片的真机报障）。
+  改成**视口直接扣掉 Dock 高度**，预留不再依赖滚动状态
+- 验证：真机（360dp）8 张队列覆盖安装后，滑动可滚到第 8 张且完整露出在 Dock 上方；
+  短列表仍然是「内容多高、卡片多高」，没有多余留白
+- 295 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test13（筛选行窄屏换行 + 玻璃全程液态 · 测试版）
 

@@ -158,10 +158,6 @@ fun MainScreen(
     // 否则 5 条照片也会在玻璃面板尾部拖出一截约 110dp 的空白
     val dockInset = if (isConverting || finishedBeat) 176.dp else 132.dp
     val listState = rememberLazyListState()
-    val canScroll by remember {
-        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
-    }
-    val listBottomInset = if (canScroll) dockInset else 0.dp
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -357,7 +353,10 @@ fun MainScreen(
                     // 面板只在内容高度内铺玻璃：两条记录时若撑满剩余高度，
                     // 大半个屏幕会是一块空白白板（转换中尤其刺眼）
                     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 6.dp)) {
-                        val listMaxHeight = maxHeight
+                        // 视口直接扣掉底部 Dock：用「canScroll 才加底部 padding」是自反馈的——
+                        // 内容恰好被 Dock 盖住时 canScroll 恒 false，padding 永远加不上，
+                        // 最后一行也就永远滚不出来（8 张照片的实机报障）
+                        val listMaxHeight = maxHeight - dockInset
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -367,8 +366,7 @@ fun MainScreen(
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
-                                contentPadding = PaddingValues(
-                                    top = 4.dp, bottom = 4.dp + listBottomInset),
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
                                 items(items, key = { it.item.key }) { ci ->
