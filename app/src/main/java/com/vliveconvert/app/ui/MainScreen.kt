@@ -68,6 +68,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -93,7 +94,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -158,6 +162,10 @@ fun MainScreen(
     // 否则 5 条照片也会在玻璃面板尾部拖出一截约 110dp 的空白
     val dockInset = if (isConverting || finishedBeat) 176.dp else 132.dp
     val listState = rememberLazyListState()
+    // 列表容器底边 与 Dock 顶边的实测位置：用来算「Dock 到底盖住了多少」。
+    // 别用常量估——Dock 三态高度不同，实测在 360dp 机器上盖住 152dp 而不是 132dp。
+    var listBottomPx by remember { mutableFloatStateOf(0f) }
+    var dockTopPx by remember { mutableFloatStateOf(0f) }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -352,11 +360,39 @@ fun MainScreen(
                 } else {
                     // 面板只在内容高度内铺玻璃：两条记录时若撑满剩余高度，
                     // 大半个屏幕会是一块空白白板（转换中尤其刺眼）
-                    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 6.dp)) {
-                        // 视口直接扣掉底部 Dock：用「canScroll 才加底部 padding」是自反馈的——
-                        // 内容恰好被 Dock 盖住时 canScroll 恒 false，padding 永远加不上，
-                        // 最后一行也就永远滚不出来（8 张照片的实机报障）
-                        val listMaxHeight = maxHeight - dockInset
+                    BoxWithConstraints(
+                        Modifier.fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                            .onGloballyPositioned {
+                                listBottomPx = it.positionInRoot().y + it.size.height
+                            }
+                    ) {
+                        // 视口铺到屏幕底：列表从底部 Dock 底下穿过，照片滑过时被玻璃折射——
+                        // 这是要保留的液态玻璃手感，别为了避让把视口抬到 Dock 上方。
+                        // 最后一行要能滚出 Dock，靠「底部留白 = Dock 高度」；但**不能用
+                        // canScroll 反推**（内容恰好被 Dock 盖住时它恒 false，留白永远加不上），
+                        // 改用「行高 × 条数」估内容高度：超过可见区才垫，短列表不留空白尾巴。
+                        val listMaxHeight = maxHeight
+                        val density = LocalDensity.current
+                        val rowHeightPx by remember {
+                            derivedStateOf {
+                                listState.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: 0
+                            }
+                        }
+                        val rowHeight = with(density) { rowHeightPx.toDp() }
+                        // Dock 实际盖住的高度（列表容器底边 − Dock 顶边）；还没量到时按 0 处理
+                        val occluded = with(density) {
+                            (listBottomPx - dockTopPx).coerceAtLeast(0f).toDp()
+                        }
+                        val visibleHeight = (listMaxHeight - occluded).coerceAtLeast(0.dp)
+                        // 估算按「行高 × 条数 + 一行余量」：宁可多留一行，也不能让最后一张
+                        // 卡在 Dock 底下滚不出来（估算偏一行以内都能被这条余量兜住）
+                        val listBottomInset =
+                            if (rowHeight > 0.dp && rowHeight * (items.size + 1) > visibleHeight) {
+                                occluded
+                            } else {
+                                0.dp
+                            }
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -366,7 +402,8 @@ fun MainScreen(
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
-                                contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
+                                contentPadding = PaddingValues(
+                                    top = 4.dp, bottom = 4.dp + listBottomInset),
                                 verticalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
                                 items(items, key = { it.item.key }) { ci ->
@@ -413,7 +450,11 @@ fun MainScreen(
             )
             HazeGlassCard(
                 hazeState = hazeState,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned {
+                        dockTopPx = it.positionInRoot().y
+                    },
                 radius = 28.dp,
                 contentPadding = PaddingValues(10.dp),
                 liquid = true

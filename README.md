@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test14) ——
-> 点开 `VivoLivePhoto-v2.6.0-test14.apk` 即可直接安装（推荐，**测试版**：待转换列表可滑动、
-> 筛选行窄屏换行、玻璃全程液态 + 「已添加」角标，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test14.apk`](./VivoLivePhoto-v2.6.0-test14.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test16) ——
+> 点开 `VivoLivePhoto-v2.6.0-test16.apk` 即可直接安装（推荐，**测试版**：待转换列表从 Dock 底下穿过、
+> 最后一张可滚出，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test16.apk`](./VivoLivePhoto-v2.6.0-test16.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,20 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test16（列表穿过 Dock + 最后一张可滚出 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **恢复「照片从底部 Dock 底下穿过」的手感**：test14 为了让最后一张能滚出来，把列表视口抬到了
+  Dock 上方，等于把列表和 Dock 拆成两层——滑过时没有玻璃折射了。本版视口重新铺到屏幕底，
+  列表从 Dock 底下穿过
+- **最后一张仍能滚出**：滚动内容底部留出「Dock 实际盖住的高度」。这个高度**实测**（列表容器底边 −
+  Dock 顶边），不再用 132dp 常量估——Dock 三态高度不同，360dp 机器上实测盖住 152dp，
+  按常量估会差一行；条数也按「行高 ×（条数+1）」估，多留一行余量兜住估算误差
+- **短列表不留空白尾巴**：放得下就不加底部留白（2 张时卡片仍是内容高度）
+- 验证：模拟器 360dp、6 张实测——滚到底 6 行全部露在 Dock 上方、卡片仍延伸到 Dock 底下；
+  295 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test14（修待转换列表划不动 · 测试版）
 
