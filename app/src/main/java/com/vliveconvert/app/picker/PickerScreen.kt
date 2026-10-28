@@ -100,9 +100,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -228,6 +230,8 @@ fun PickerScreen(
     var globalResults by remember(bucketId) { mutableStateOf<List<MediaItem>?>(null) }
     var globalSearching by remember(bucketId) { mutableStateOf(false) }
     val localContext = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val searchRepo = mediaRepo ?: remember(localContext) {
         MediaRepo(localContext.contentResolver)
     }
@@ -329,7 +333,7 @@ fun PickerScreen(
                     ) {
                         Text("没有可用相册", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    results.isEmpty() && !running -> Column(
+                    showsAlbumEmptyState(results.isEmpty(), running, globalMode) -> Column(
                         Modifier.fillMaxSize()
                             .padding(top = headerHeight + 14.dp, bottom = 48.dp),
                         verticalArrangement = Arrangement.Center,
@@ -378,7 +382,12 @@ fun PickerScreen(
                         onToggleGroup = toggleGroup,
                         onPreview = { item ->
                             val idx = visible.indexOf(item)
-                            if (idx >= 0) previewIndex = idx
+                            if (idx >= 0) {
+                                // 搜索后进预览时键盘不收会盖住底部玻璃选图栏
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                previewIndex = idx
+                            }
                         },
                         running = running && !globalMode,
                         contentPadding = PaddingValues(
@@ -1148,3 +1157,15 @@ private fun GridCell(
         }
     }
 }
+
+/**
+ * 当前相册扫完确实没有双文件实况时，才用相册空态占满网格区。
+ *
+ * 全局搜索（全部相册）模式下必须让位：当前相册为空是常态（默认相册可能就没有实况），
+ * 但全库结果在 `visible` 里，用空态盖住就等于「搜到了却显示搜不到」。
+ */
+internal fun showsAlbumEmptyState(
+    resultsEmpty: Boolean,
+    running: Boolean,
+    globalMode: Boolean
+): Boolean = resultsEmpty && !running && !globalMode

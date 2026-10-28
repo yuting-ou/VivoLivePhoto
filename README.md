@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test7) ——
-> 点开 `VivoLivePhoto-v2.6.0-test7.apk` 即可直接安装（推荐，**测试版**：选择器原图查看、
-> 设置页视觉对齐、UI 五原则收口、选择器双「添加」入口，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test7.apk`](./VivoLivePhoto-v2.6.0-test7.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test8) ——
+> 点开 `VivoLivePhoto-v2.6.0-test8.apk` 即可直接安装（推荐，**测试版**：选择器原图查看 +
+> 全库搜索空态修复，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test8.apk`](./VivoLivePhoto-v2.6.0-test8.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,21 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test8（修全库搜索空态盖结果 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修「全库搜索明明匹配到照片，页面却显示没有找到双文件实况照片」**：当前相册被扫完且
+  为空时，相册空态分支先于全库结果命中，把整页网格盖掉。默认相册恰好没有实况时最容易
+  触发（v2.5.0 引入全库搜索起就存在；此前真机验证时当前相册非空，没暴露）。
+  修复后相册空态只在「当前相册」模式下生效，全库模式交给匹配数与「没有匹配的照片」空态
+- **修「从搜索进原图查看后键盘不收」**：键盘会盖住查看器底部的玻璃选图栏，现在进入预览
+  即清焦点收键盘
+- **验证**：新增 3 条分支用例（先复现失败再修复），289 条 JVM 用例全绿（4 条平台跳过）；
+  模拟器发布包实测「Camera 相册 0 张 + 全部相册搜到 1 张」正常出格子并进入原图查看；
+  4000×3000、EXIF Orientation=6 的真实大图方向正确（长边解码到 2048）；
+  解码失败的文件显示「无法打开原图 / 重试」；test7→test8 覆盖安装保数据
 
 ### v2.6.0-test7（选择器原图查看 · 测试版）
 
