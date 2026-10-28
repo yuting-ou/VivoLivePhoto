@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test16) ——
-> 点开 `VivoLivePhoto-v2.6.0-test16.apk` 即可直接安装（推荐，**测试版**：待转换列表从 Dock 底下穿过、
-> 最后一张可滚出，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test16.apk`](./VivoLivePhoto-v2.6.0-test16.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test17) ——
+> 点开 `VivoLivePhoto-v2.6.0-test17.apk` 即可直接安装（推荐，**测试版**：放大镜改为玻璃圆盘、
+> 与勾选圈同尺寸同位置，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test17.apk`](./VivoLivePhoto-v2.6.0-test17.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test17（放大镜玻璃化 + 与勾选圈统一 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **放大镜更透**：原来是不透明白盘（白 0.88），现在改成跟主题走的玻璃圆盘（浅色 0.36 / 深色 0.42），
+  描边与勾选圈同浓度、镜头符号跟随 onSurface，压在照片上更像一层玻璃而不是贴纸
+- **位置与尺寸统一**：从「2dp 内距 + 居中 28dp 盘」改成「6dp 内距 + 22dp 盘」，与右上角勾选圈
+  完全平行、同直径；触控区仍是 48dp（按下缩放也改成围绕圆盘，不再往热区中心跑）
+- **顺带**：未选中的勾选圈从「22dp 盒子里画 16dp 环」改成画满 22dp、描边 2dp（与旧的 16dp/1.5dp 同比例），
+  否则放大镜缩小后两个圆又对不齐
+- 验证：模拟器 360dp、真实色块与选中态截图比对（盘/徽章/环三者 22dp、同一水平线）；
+  295 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test16（列表穿过 Dock + 最后一张可滚出 · 测试版）
 

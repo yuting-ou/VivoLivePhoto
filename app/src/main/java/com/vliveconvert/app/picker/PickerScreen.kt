@@ -1107,27 +1107,33 @@ private fun GridCell(
                         fontWeight = FontWeight.Bold
                     )
                 } else {
+                    // 未选中圈画满 22dp 徽章：旧版是 22dp 盒子里画 16dp 的环，
+                    // 可见直径比左上角放大镜盘小一圈，同一张卡片上两个圆看着不一样大
                     Box(
                         Modifier
-                            .size(16.dp)
-                            .graphicsLayer { alpha = 0.8f }
-                            .border(1.5.dp, Color.White, CircleShape)
+                            .size(22.dp)
+                            .graphicsLayer { alpha = 0.85f }
+                            // 22dp 圈配 2dp 描边，跟旧的 16dp/1.5dp 同比例，不然圈大了一圈反而显细
+                            .border(2.dp, Color.White, CircleShape)
                     )
                 }
             }
         }
 
-        // 左上角放大镜：只开原图查看器，不改变勾选
+        // 左上角放大镜：只开原图查看器，不改变勾选。
+        // 与右上角勾选圈同一套几何：22dp 圆盘、内距 6dp，两者平行；触控区仍是 48dp
         val previewInteraction = remember { MutableInteractionSource() }
         val previewScale by rememberPressScale(previewInteraction, pressedScale = 0.92f)
         Box(
             Modifier
                 .align(Alignment.TopStart)
-                .padding(2.dp)
+                .padding(top = 6.dp, start = 6.dp)
                 .size(48.dp)
                 .graphicsLayer {
                     scaleX = previewScale
                     scaleY = previewScale
+                    // 圆盘贴在 48dp 热区左上角，缩放围绕它转，别让图标在按下时往中心跑
+                    transformOrigin = TransformOrigin(0.35f, 0.35f)
                 }
                 .clickable(
                     interactionSource = previewInteraction,
@@ -1135,19 +1141,26 @@ private fun GridCell(
                     onClick = onPreview
                 )
                 .semantics { contentDescription = "查看 ${item.name} 原图" },
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopStart
         ) {
+            // 玻璃圆盘：底色跟主题走、比旧版更透（旧版纯白 0.88），描边与勾选圈同一浓度
+            val darkGlass = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+            val discBase = if (darkGlass) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
             Box(
                 Modifier
-                    .size(28.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.88f))
-                    .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape),
+                    .background(discBase.copy(alpha = if (darkGlass) 0.42f else 0.36f))
+                    .border(
+                        1.dp,
+                        Color.White.copy(alpha = if (darkGlass) 0.22f else 0.55f),
+                        CircleShape
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                val iconColor = Color(0xFF1B2433)
-                Canvas(Modifier.size(16.dp)) {
-                    val stroke = 1.6.dp.toPx()
+                val iconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+                Canvas(Modifier.size(13.dp)) {
+                    val stroke = 1.5.dp.toPx()
                     val r = size.minDimension * 0.27f
                     val c = Offset(size.width * 0.42f, size.height * 0.42f)
                     drawCircle(iconColor, r, c, style = Stroke(stroke))
