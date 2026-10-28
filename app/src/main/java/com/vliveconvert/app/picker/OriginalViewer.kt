@@ -115,6 +115,8 @@ internal fun OriginalViewer(
 
     val scale = remember { Animatable(1f) }
     val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
+    // 翻页开关单独存状态：直接在组合里读 scale.value 会让每帧平移都重组整个 Pager
+    var zoomed by remember { mutableStateOf(false) }
     var container by remember { mutableStateOf(IntSize.Zero) }
     var imageSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -122,6 +124,7 @@ internal fun OriginalViewer(
     val item = items[page]
     val selected = item.id in selectedIds
     val resetZoom: () -> Unit = {
+        zoomed = false
         scope.launch {
             coroutineScope {
                 launch { scale.animateTo(1f, tween(ZOOM_MS)) }
@@ -136,6 +139,7 @@ internal fun OriginalViewer(
     LaunchedEffect(page) {
         scale.snapTo(1f)
         offset.snapTo(Offset.Zero)
+        zoomed = false
         imageSize = IntSize.Zero
     }
     DisposableEffect(Unit) {
@@ -149,13 +153,9 @@ internal fun OriginalViewer(
                 Modifier
                     .fillMaxSize()
                     .onSizeChanged { container = it }
-                    .graphicsLayer {
-                        scaleX = scale.value
-                        scaleY = scale.value
-                        translationX = offset.value.x
-                        translationY = offset.value.y
-                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                    }
+                    // pointerInput 必须挂在 graphicsLayer 之前：挂在它后面拿到的是被 scale
+                    // 反算过的局部坐标（手指 300px 在 2.5× 下只剩 120px），而平移量按屏幕
+                    // 像素施加，于是放大后拖拽只跟得上半程
                     .pointerInput(Unit) {
                         var lastTapUp = 0L
                         var lastTapPos = Offset.Unspecified
@@ -163,20 +163,25 @@ internal fun OriginalViewer(
                             val down = awaitFirstDown(requireUnconsumed = false)
                             var up: PointerInputChange? = null
                             var moved = false
+                            // 手势内同步累加的当前变换：Animatable 只能在协程里写，
+                            // 若每条事件都读回 offset.value 再写，同一帧内的多条事件会读到
+                            // 同一个旧值、后写覆盖前写 ⇒ 平移丢掉大半位移（实测 300px 只走 120px）
+                            var liveScale = scale.value
+                            var liveOffset = offset.value
                             do {
                                 val event = awaitPointerEvent()
                                 val pressed = event.changes.count { it.pressed }
-                                val oldScale = scale.value
+                                val oldScale = liveScale
                                 val newScale = (oldScale * event.calculateZoom()).coerceIn(1f, 4f)
                                 val shouldHandle = pressed >= 2 || oldScale > 1.01f
                                 if (shouldHandle) {
                                     val centroid = event.calculateCentroid(useCurrent = true)
                                     val center = Offset(container.width / 2f, container.height / 2f)
                                     val pan = event.calculatePan()
-                                    var target = offset.value + pan
+                                    var target = liveOffset + pan
                                     if (centroid != Offset.Unspecified && newScale != oldScale) {
                                         val focus = centroid - center
-                                        target = (offset.value - focus) * (newScale / oldScale) +
+                                        target = (liveOffset - focus) * (newScale / oldScale) +
                                             focus + pan
                                     }
                                     val max = maxPan(newScale, container, imageSize)
@@ -184,9 +189,14 @@ internal fun OriginalViewer(
                                         target.x.coerceIn(-max.x, max.x),
                                         target.y.coerceIn(-max.y, max.y)
                                     )
+                                    liveScale = newScale
+                                    liveOffset = target
+                                    zoomed = newScale > 1.01f
+                                    val appliedScale = newScale
+                                    val appliedOffset = target
                                     scope.launch {
-                                        scale.snapTo(newScale)
-                                        offset.snapTo(target)
+                                        scale.snapTo(appliedScale)
+                                        offset.snapTo(appliedOffset)
                                     }
                                     event.changes.forEach { it.consume() }
                                 }
@@ -209,7 +219,8 @@ internal fun OriginalViewer(
                                     lastTapUp = 0L
                                     lastTapPos = Offset.Unspecified
                                     scope.launch {
-                                        if (scale.value > 1.01f) {
+                                        if (liveScale > 1.01f) {
+                                            zoomed = false
                                             coroutineScope {
                                                 launch { scale.animateTo(1f, tween(ZOOM_MS)) }
                                                 launch {
@@ -220,6 +231,7 @@ internal fun OriginalViewer(
                                             val target = doubleTapZoomTarget(
                                                 tap.position, container, imageSize
                                             )
+                                            zoomed = true
                                             // 两条动画必须同帧起步、同一曲线：
                                             // 先放大再平移会把锚点甩出手指，看起来就是「缩放时图片跑偏」
                                             coroutineScope {
@@ -237,11 +249,18 @@ internal fun OriginalViewer(
                             }
                         }
                     }
+                    .graphicsLayer {
+                        scaleX = scale.value
+                        scaleY = scale.value
+                        translationX = offset.value.x
+                        translationY = offset.value.y
+                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                    }
             ) {
                 HorizontalPager(
                     state = pager,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = scale.value <= 1.01f,
+                    userScrollEnabled = !zoomed,
                     key = { items[it].id }
                 ) { index ->
                     OriginalPage(

@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test9) ——
-> 点开 `VivoLivePhoto-v2.6.0-test9.apk` 即可直接安装（推荐，**测试版**：选择器原图查看、
-> 全库搜索空态修复、双击缩放锚点修复，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test9.apk`](./VivoLivePhoto-v2.6.0-test9.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test10) ——
+> 点开 `VivoLivePhoto-v2.6.0-test10.apk` 即可直接安装（推荐，**测试版**：选择器原图查看、
+> 放大后平移已跟手，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test10.apk`](./VivoLivePhoto-v2.6.0-test10.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,18 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test10（修放大后平移跟不上手 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修「放大后左右滑动拖顿、跟不上手」**：手势节点挂在 `graphicsLayer` **之后**，收到的是被
+  缩放反算过的局部坐标——2.5× 时手指划 300px，手势里只剩 120px，而平移量是按屏幕像素施加的，
+  于是图片只跟上半程（放大倍数越大越"黏"）。把 `pointerInput` 移到 `graphicsLayer` 之前，
+  坐标系与变换一致，平移 1:1 跟手
+- **验证**（模拟器注入固定距离滑动 + 图内标记像素中心测量）：修复前手指 300px → 图片 121px；
+  修复后 debug/release 分别 294px / **298px**；纵向平移 303px；双击缩放锚点回归仍停在
+  (298,900) 全程不动。292 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test9（修原图双击缩放偏移 · 测试版）
 
