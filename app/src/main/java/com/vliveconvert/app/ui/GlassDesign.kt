@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -236,6 +237,32 @@ fun Modifier.glassHazeSource(state: HazeState): Modifier {
  */
 val LocalGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
+/**
+ * 转场收浓量 0→1：换页动画与预测性返回「两层页面重叠」期间抬到 1，落位后淡回 0。
+ * 传 Animatable 而不是布尔值——布尔会让 provider 之下的整棵子树跟着重组，
+ * 而且硬切回玻璃本身会变成另一次跳变。
+ */
+val LocalGlassVeil = staticCompositionLocalOf<Animatable<Float, AnimationVector1D>?> { null }
+
+/** 玻璃面底色透明度。veil=0 时的稳态值不许改动；抬到 1 时收浓到几乎不透。 */
+internal fun glassSurfaceAlpha(
+    dark: Boolean,
+    dense: Boolean,
+    liquid: Boolean,
+    veil: Float
+): Float {
+    val steady = when {
+        dense && dark -> 0.78f
+        dense -> 0.78f
+        liquid -> if (dark) 0.60f else 0.46f
+        dark -> 0.66f
+        else -> 0.52f
+    }
+    if (veil <= 0f) return steady
+    val veiled = if (dark) 0.94f else 0.92f
+    return steady + (veiled - steady) * veil.coerceAtMost(1f)
+}
+
 /** 页面内容的采样源：有折射层时用 LayerBackdrop，否则退回 Haze */
 @Composable
 fun Modifier.glassBackdropSource(hazeState: HazeState): Modifier {
@@ -339,16 +366,12 @@ private fun LensGlassCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val dark = isDarkGlass()
+    // 转场收浓量 0..1：读 Animatable.value 只订阅这张卡，不会牵动整棵子树
+    val veil = (LocalGlassVeil.current?.value ?: 0f).coerceIn(0f, 1f)
     val shape = RoundedCornerShape(radius)
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     // 玻璃中心要留出显示背景的余量；文字密集的弹窗膜更厚
-    val surfaceAlpha = when {
-        dense && dark -> 0.78f
-        dense -> 0.78f
-        liquid -> if (dark) 0.60f else 0.46f
-        dark -> 0.66f
-        else -> 0.52f
-    }
+    val surfaceAlpha = glassSurfaceAlpha(dark, dense, liquid, veil)
     // 液态 Dock：边缘透镜更深（折射高度/位移更大）、更清澈（模糊更少）、高光更锐
     val blurRadius = when {
         dense -> 18.dp
@@ -390,12 +413,15 @@ private fun LensGlassCard(
             effects = {
                 vibrancy()
                 blur(blurRadius.toPx())
-                lens(
-                    refractionHeight = refractionHeight.toPx(),
-                    refractionAmount = refractionAmount.toPx(),
-                    depthEffect = true,
-                    chromaticAberration = !dense
-                )
+                // 转场期采到的背景是错位的，透镜会把上一页的边缘拽出来：随 veil 收掉折射
+                if (veil < 0.999f) {
+                    lens(
+                        refractionHeight = refractionHeight.toPx() * (1f - veil),
+                        refractionAmount = refractionAmount.toPx() * (1f - veil),
+                        depthEffect = true,
+                        chromaticAberration = !dense
+                    )
+                }
                 if (dense && !dark) {
                     colorControls(brightness = 0.06f, saturation = 1.15f)
                 }
