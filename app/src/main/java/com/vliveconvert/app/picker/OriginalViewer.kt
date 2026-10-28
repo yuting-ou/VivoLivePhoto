@@ -85,6 +85,7 @@ import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -122,8 +123,10 @@ internal fun OriginalViewer(
     val selected = item.id in selectedIds
     val resetZoom: () -> Unit = {
         scope.launch {
-            scale.animateTo(1f, tween(200))
-            offset.animateTo(Offset.Zero, tween(200))
+            coroutineScope {
+                launch { scale.animateTo(1f, tween(ZOOM_MS)) }
+                launch { offset.animateTo(Offset.Zero, tween(ZOOM_MS)) }
+            }
         }
     }
 
@@ -207,22 +210,24 @@ internal fun OriginalViewer(
                                     lastTapPos = Offset.Unspecified
                                     scope.launch {
                                         if (scale.value > 1.01f) {
-                                            scale.animateTo(1f, tween(220))
-                                            offset.animateTo(Offset.Zero, tween(220))
+                                            coroutineScope {
+                                                launch { scale.animateTo(1f, tween(ZOOM_MS)) }
+                                                launch {
+                                                    offset.animateTo(Offset.Zero, tween(ZOOM_MS))
+                                                }
+                                            }
                                         } else {
-                                            val target = 2.5f
-                                            val center = Offset(
-                                                container.width / 2f,
-                                                container.height / 2f
+                                            val target = doubleTapZoomTarget(
+                                                tap.position, container, imageSize
                                             )
-                                            val focus = (center - tap.position) * (target - 1f)
-                                            val max = maxPan(target, container, imageSize)
-                                            val clamped = Offset(
-                                                focus.x.coerceIn(-max.x, max.x),
-                                                focus.y.coerceIn(-max.y, max.y)
-                                            )
-                                            scale.animateTo(target, tween(220))
-                                            offset.animateTo(clamped, tween(220))
+                                            // 两条动画必须同帧起步、同一曲线：
+                                            // 先放大再平移会把锚点甩出手指，看起来就是「缩放时图片跑偏」
+                                            coroutineScope {
+                                                launch {
+                                                    scale.animateTo(DOUBLE_TAP_SCALE, tween(ZOOM_MS))
+                                                }
+                                                launch { offset.animateTo(target, tween(ZOOM_MS)) }
+                                            }
                                         }
                                     }
                                 } else {
@@ -489,6 +494,27 @@ internal object OriginalImageLoader {
     fun clear() {
         cache.evictAll()
     }
+}
+
+/** 双击放大到的目标倍率，与「一屏放不下时的夹取」一起决定锚点平移量 */
+internal const val DOUBLE_TAP_SCALE = 2.5f
+private const val ZOOM_MS = 220
+
+/**
+ * 双击放大时让手指点保持不动所需的平移量。
+ * 屏幕位置 = 容器中心 + (内容点-容器中心)×scale + offset ⇒ offset = (中心-手指)×(scale-1)，
+ * 再按图片边界夹取：某一轴放大后仍填不满屏幕时，该轴不许偏移（保持居中）。
+ */
+internal fun doubleTapZoomTarget(
+    tap: Offset,
+    container: IntSize,
+    image: IntSize,
+    scale: Float = DOUBLE_TAP_SCALE
+): Offset {
+    val center = Offset(container.width / 2f, container.height / 2f)
+    val raw = (center - tap) * (scale - 1f)
+    val max = maxPan(scale, container, image)
+    return Offset(raw.x.coerceIn(-max.x, max.x), raw.y.coerceIn(-max.y, max.y))
 }
 
 private fun maxPan(scale: Float, container: IntSize, image: IntSize): Offset {

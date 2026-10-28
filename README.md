@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test8) ——
-> 点开 `VivoLivePhoto-v2.6.0-test8.apk` 即可直接安装（推荐，**测试版**：选择器原图查看 +
-> 全库搜索空态修复，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test8.apk`](./VivoLivePhoto-v2.6.0-test8.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test9) ——
+> 点开 `VivoLivePhoto-v2.6.0-test9.apk` 即可直接安装（推荐，**测试版**：选择器原图查看、
+> 全库搜索空态修复、双击缩放锚点修复，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test9.apk`](./VivoLivePhoto-v2.6.0-test9.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test9（修原图双击缩放偏移 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修「双击放大/缩小原图时图片会跑偏」**：放大与平移两条动画是**串行**执行的——先把图片
+  绕屏幕中心放大（手指点下的内容被甩到别处），再把它平移回来，看起来就是"缩放时图片自己
+  滑了一段"。改为**同帧起步、同一曲线**并行播放，手指点那一点全程不动
+- **锚点算法收口成可测函数** `doubleTapZoomTarget(手指, 容器, 图片)`：`offset = (中心-手指)×(倍率-1)`，
+  并按图片边界夹取——某一轴放大后仍填不满屏幕时该轴保持居中、不硬偏
+- **验证**：新增 3 条锚点用例（含变异检验：把 offset 归零能被测出）；模拟器把动画放慢 10×
+  逐帧取样，修复前手指点从 (298,900) 被甩到 (14,456) 再滑回，修复后全程停在 (298,900)；
+  缩小方向同样取样确认无漂移。292 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test8（修全库搜索空态盖结果 · 测试版）
 
