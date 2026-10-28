@@ -123,7 +123,7 @@ import com.vliveconvert.app.ui.GlassDialog
 import com.vliveconvert.app.ui.GlassIndeterminateBar
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.LocalGlassBackdrop
-import com.vliveconvert.app.ui.LocalGlassVeil
+import com.vliveconvert.app.ui.LocalGlassSourceEnabled
 import com.vliveconvert.app.ui.LocalReduceMotion
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.MotionPrefs
@@ -243,10 +243,6 @@ internal data class BackAnim(val target: Float, val durationMs: Int)
 
 // 手势提交后的续完：从当前进度到位，要短——手已经松了
 internal const val COMMIT_FINISH_MS = 120
-
-// 转场收浓：换页动画/手势两层页面重叠的这段时间玻璃不透底，之后渐变回液态玻璃
-internal const val GLASS_VEIL_HOLD_MS = 380L
-internal const val GLASS_VEIL_FADE_MS = 220
 
 /** 顶层页（正在退出的那个）的手势变换。
  *  官方规范的原版参数（缩 0.9、移 1/20 窗宽）在全屏页面之间**读不出来**——
@@ -391,21 +387,6 @@ class MainActivity : ComponentActivity() {
     // 预测性返回（Android 14+ 手势）：拖动进度实时驱动顶层页缩放/位移/圆角。
     // Animatable 而不是普通状态：拖动中 snapTo 逐帧跟手，取消时 animateTo 平滑收回
     private val backProgressAnim = Animatable(0f)
-    // 转场收浓量 0→1：换页动画与预测性返回两层重叠期间抬到 1（玻璃不透出上一页），
-    // 落位后淡回 0。抬升必须瞬时、回落要渐变——硬切回玻璃本身会变成另一次跳变
-    private val glassVeilAnim = Animatable(0f)
-    private var glassVeilEpoch = 0
-    private var glassVeilInitialized = false
-
-    /** 抬一次转场收浓：瞬时罩满（慢一步就会被看见透底），停 [GLASS_VEIL_HOLD_MS] 后淡回 */
-    private suspend fun veilGlass() {
-        val epoch = ++glassVeilEpoch
-        glassVeilAnim.snapTo(1f)
-        delay(GLASS_VEIL_HOLD_MS)
-        if (epoch == glassVeilEpoch && backProgressAnim.value <= 0f) {
-            glassVeilAnim.animateTo(0f, tween(GLASS_VEIL_FADE_MS))
-        }
-    }
     // 手势从哪条边发起：左缘 → 顶层页向右让位（+1），右缘 → 向左（-1），0 = 无手势
     private var backEdgeSign by mutableFloatStateOf(0f)
     // 非空 = 有一段续接动画要跑。**只记账不执行**：animateTo 必须在组合内的
@@ -817,10 +798,7 @@ class MainActivity : ComponentActivity() {
                 val appHazeState = rememberGlassHazeState()
                 // 折射采样层：页面内容录进 GraphicsLayer，所有玻璃卡按自身位置取背景做 SDF 折射
                 val appGlassBackdrop = rememberLayerBackdrop()
-                CompositionLocalProvider(
-                    LocalGlassBackdrop provides appGlassBackdrop,
-                    LocalGlassVeil provides glassVeilAnim
-                ) {
+                CompositionLocalProvider(LocalGlassBackdrop provides appGlassBackdrop) {
                 // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
                 // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
                 //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
@@ -998,30 +976,7 @@ class MainActivity : ComponentActivity() {
 // armed 必须等「换层重组把 transitionSpec 评估完」之后才能复位——
                 // 复位太早（弹层后立刻置 false）会让短路根本不生效；挂在 targetScreen 上
                 // 最可靠：换层组合时 armed 仍为 true，组合完成后再清掉，不污染后续过渡
-                LaunchedEffect(targetScreen) {
-                    predictiveCommitArmed = false
-                    // 冷启动首帧不收浓：那时没有「上一页」会透进来，收浓只会让玻璃晚一点变清
-                    if (glassVeilInitialized) veilGlass() else glassVeilInitialized = true
-                }
-
-                // 预测性返回拖动：两层页面从手指按下就重叠，立刻收浓；
-                // 松手回到 0 进度（取消）时等换页窗口过去再淡回
-                LaunchedEffect(Unit) {
-                    snapshotFlow { backProgressAnim.value > 0f }
-                        .distinctUntilChanged()
-                        .collect { inGesture ->
-                            if (inGesture) {
-                                glassVeilEpoch++
-                                glassVeilAnim.snapTo(1f)
-                            } else {
-                                val epoch = glassVeilEpoch
-                                delay(GLASS_VEIL_HOLD_MS)
-                                if (epoch == glassVeilEpoch && backProgressAnim.value <= 0f) {
-                                    glassVeilAnim.animateTo(0f, tween(GLASS_VEIL_FADE_MS))
-                                }
-                            }
-                        }
-                }
+                LaunchedEffect(targetScreen) { predictiveCommitArmed = false }
 
                     // 页面内容抽成可复用的 lambda：预测性返回进行时，
                     // 底层还要再画一份「返回目标页」作为被揭开的下一层
@@ -1244,7 +1199,11 @@ class MainActivity : ComponentActivity() {
                                         translationX = -backEdgeSign *
                                             incoming.shiftFraction * size.width
                                     }
-                            ) { renderScreen(reveal) }
+                            ) {
+                                CompositionLocalProvider(
+                                    LocalGlassSourceEnabled provides false
+                                ) { renderScreen(reveal) }
+                            }
                         }
                     }
 
@@ -1303,7 +1262,13 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             label = "screenTransition"
-                        ) { screen -> renderScreen(screen) }
+                        ) { screen ->
+                            // 只有进场页注册采样源：两层同时注册会让玻璃采到
+                            // 「另一页 + 错位位置」，上一页从卡片底下透出来闪一下
+                            CompositionLocalProvider(
+                                LocalGlassSourceEnabled provides (screen == targetScreen)
+                            ) { renderScreen(screen) }
+                        }
                     }
 
                     // 移除撤销条（Gmail 式）：滑动/按钮移除后 4 秒内可撤销。

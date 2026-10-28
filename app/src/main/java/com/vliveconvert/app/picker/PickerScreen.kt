@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -520,15 +521,17 @@ fun PickerScreen(
                 }
                 Spacer(Modifier.height(4.dp))
                 // ── 范围行：搜索范围（当前相册/全部）+ 日期范围 ──
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // FlowRow 而不是 Row：360dp 下五枚 chip 实测需要约 328dp、卡内只有 296dp，
+                // 固定 Row 会把最后一枚（30 天）挤成竖排的「3/0/天」
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     PickerChip("当前相册", active = !searchScopeAll) { searchScopeAll = false }
-                    Spacer(Modifier.width(6.dp))
                     PickerChip("全部相册", active = searchScopeAll) { searchScopeAll = true }
-                    Spacer(Modifier.weight(1f))
                     PickerChip("不限日期", active = dateDays == 0) { dateDays = 0 }
-                    Spacer(Modifier.width(6.dp))
                     PickerChip("7 天", active = dateDays == 7) { dateDays = 7 }
-                    Spacer(Modifier.width(6.dp))
                     PickerChip("30 天", active = dateDays == 30) { dateDays = 30 }
                 }
                 Spacer(Modifier.height(4.dp))

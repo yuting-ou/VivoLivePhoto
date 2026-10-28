@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test12) ——
-> 点开 `VivoLivePhoto-v2.6.0-test12.apk` 即可直接安装（推荐，**测试版**：选择器新增「已添加」
-> 角标 + 原图查看，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test12.apk`](./VivoLivePhoto-v2.6.0-test12.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test13) ——
+> 点开 `VivoLivePhoto-v2.6.0-test13.apk` 即可直接安装（推荐，**测试版**：筛选行窄屏换行、
+> 玻璃全程液态 + 「已添加」角标，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test13.apk`](./VivoLivePhoto-v2.6.0-test13.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,19 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test13（筛选行窄屏换行 + 玻璃全程液态 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修「30 天那排排版错乱」**：范围行是固定 `Row`，五枚 chip 在 360dp 上需要约 328dp、卡内只有
+  296dp，最后一枚被压成竖排的「3 / 0 / 天」。改成 `FlowRow`，放不下就整枚换行（411dp 及以上仍是
+  一行，不变）
+- **撤掉 test11 的转场收浓，玻璃全程液态**：不再出现「一进来先白底、再慢慢变成玻璃」。
+  改为**只有进场页注册折射采样层**（离场页与预测性返回的底层页都不注册）——上一页照样不会从
+  玻璃底下透出来，但玻璃从头到尾都是玻璃。360dp + 转场放慢 10 倍对照：旧版卡片左上角有明显
+  灰色残影，新版干净
+- 验证：360dp 实机密度实测换行；295 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test12（选择器「已添加」角标 · 测试版）
 
