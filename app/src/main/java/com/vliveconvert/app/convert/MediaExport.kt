@@ -51,6 +51,116 @@ internal object MediaExport {
         } catch (_: Exception) {}
     }
 
+    /** 读既有行的坐标列（两者皆有才返回；与 vivo 相册「位置」显示同源） */
+    private fun queryLocationColumns(
+        resolver: android.content.ContentResolver,
+        uri: Uri
+    ): Pair<Double, Double>? {
+        return try {
+            resolver.query(uri, arrayOf(GPS_LATITUDE_COLUMN, GPS_LONGITUDE_COLUMN),
+                null, null, null)?.use { c ->
+                if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1))
+                    c.getDouble(0) to c.getDouble(1)
+                else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 坐标一致性（EXIF 解析值 vs 媒体库列值）：EXIF 有理数与十进制度互转存在
+     * 低位精度差，1e-6（约 0.1 米）内视为相同，避免重建被数值毛刺反复触发。
+     */
+    internal fun coordsMatch(
+        a: Pair<Double, Double>?, b: Pair<Double, Double>?
+    ): Boolean = when {
+        a == null && b == null -> true
+        a == null || b == null -> false
+        else -> kotlin.math.abs(a.first - b.first) < 1e-6 &&
+            kotlin.math.abs(a.second - b.second) < 1e-6
+    }
+
+    /**
+     * 行重建（覆盖路径专用）：vivo 对既有行的坐标列 UPDATE 静默忽略，坐标不一致时
+     * 只能「删行重插」让新行出生带坐标。文件名/目录/时间戳逐项保留（recreateRow 同款
+     * 纪律：DATE_ADDED 决定微信等按加入时间的分组，必须沿用）；字节来自 [src]
+     * （已通过 MD5 自检的产物）。失败时清理半成品并返回 null（调用方落到新建路径）。
+     */
+    internal fun rebuildRowWithCoords(
+        resolver: android.content.ContentResolver,
+        old: Uri,
+        src: File,
+        timestamp: Long,
+        coords: Pair<Double, Double>?
+    ): Uri? {
+        var name: String
+        var relPath: String
+        var dateTaken: Long
+        var dateModified: Long
+        var dateAdded: Long
+        try {
+            resolver.query(old, arrayOf(
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.DATE_TAKEN,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATE_ADDED
+            ), null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return null
+                name = c.getString(0) ?: return null
+                relPath = c.getString(1) ?: return null
+                dateTaken = if (c.isNull(2)) timestamp else c.getLong(2)
+                dateModified = if (c.isNull(3)) timestamp / 1000 else c.getLong(3)
+                dateAdded = if (c.isNull(4)) 0L else c.getLong(4)
+            } ?: return null
+        } catch (_: Exception) {
+            return null
+        }
+        if (dateTaken <= 0L) dateTaken = timestamp
+        if (dateModified <= 0L) dateModified = timestamp / 1000
+        if (dateAdded <= 0L) dateAdded = dateTaken / 1000
+
+        val deleted = try {
+            resolver.delete(old, null, null)
+        } catch (_: Exception) {
+            return null
+        }
+        if (deleted <= 0) return null
+
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        var newUri: Uri? = null
+        return try {
+            newUri = resolver.insert(collection, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+                put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
+                put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
+                put(MediaStore.MediaColumns.DATE_ADDED, dateAdded)
+                if (coords != null) {
+                    put(GPS_LATITUDE_COLUMN, coords.first)
+                    put(GPS_LONGITUDE_COLUMN, coords.second)
+                }
+            }) ?: return null
+            resolver.openOutputStream(newUri, "w")?.use { out ->
+                src.inputStream().use { it.copyTo(out) }
+            } ?: return null
+            try {
+                resolver.update(newUri, ContentValues().apply {
+                    put(MediaStore.MediaColumns.SIZE, src.length())
+                }, null, null)
+            } catch (_: Exception) {}
+            fixTimestamps(resolver, newUri, timestamp)
+            fixPhysicalMtime(resolver, newUri, timestamp)
+            newUri
+        } catch (_: Exception) {
+            newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
+            null
+        }
+    }
+
     /**
      * 导出转换产物到系统相册并做写后自检，返回入库 URI。
      *
@@ -95,13 +205,25 @@ internal object MediaExport {
         // 拍摄坐标（源 EXIF 的 GPS，随主图进入产物）：写入媒体库坐标列。
         // vivo 相册的「位置」显示读媒体库列、不回读文件 EXIF，相机拍照时由系统写入该列；
         // 应用插入的行若不带坐标，相册就永远显示不出位置（2026-10 真机结论）
-        val coords = try {
+        var coords = try {
             JpegUtil.gpsCoordinates(outBytes)
         } catch (_: Exception) {
             null
         }
-        // 位置交付校验：源有位置而产物没有 = 管线丢了 EXIF，绝不能当「成功」交付
-        // （原图删除等后续动作以导出成功为前提，抛出即整张按失败处理，原图不动）
+        // 坐标兜底：产物 EXIF 无 GPS 但嵌入视频段带坐标（vivo 相机在 mp4 udta/©xyz
+        // 写 ISO 6709 串，部分源 EXIF 缺失/解析不出的照片视频段仍在）→ 用视频段坐标
+        // 写入媒体库列，产物出生带坐标，不再落到「转完没位置」。字节不动（MD5 自检链
+        // 保持）；EXIF 回写留给「找回位置」的行重建
+        if (coords == null) {
+            coords = try {
+                GpsRecovery.recoverFromVideoSegment(outBytes)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        // 位置交付校验：源有位置而产物没有任何坐标来源 = 管线丢了 EXIF，绝不能当
+        // 「成功」交付（原图删除等后续动作以导出成功为前提，抛出即整张按失败处理，
+        // 原图不动）
         if (requireGps && coords == null) {
             throw IOException("位置校验失败：源照片有位置信息，转换产物却丢失了（已放弃本张，原图未删）")
         }
@@ -222,8 +344,20 @@ internal object MediaExport {
                 } == true
             } catch (_: Exception) { false }
             if (verified) {
-                // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）
+                // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）。
+                // ⚠ 不能只靠 UPDATE：vivo 对既有记录的坐标列 UPDATE **静默忽略**
+                // （2026-10 真机结论，见 LocationDisplayRepair）——旧行若出生时没坐标，
+                // 覆盖后 UPDATE 无效，文件里有 GPS 相册却不显示（批量重转时零星几张
+                // 「转了还是没位置」的根因）。先 UPDATE 再复查，没写进去就走行重建
+                // （删行重插，文件名/目录/时间戳全部保持）。
                 updateLocationColumns(resolver, old, coords)
+                val afterUpdate = queryLocationColumns(resolver, old)
+                if (!coordsMatch(coords, afterUpdate)) {
+                    // UPDATE 没生效且坐标不一致 → 行重建（出生带坐标）
+                    rebuildRowWithCoords(resolver, old, src, timestamp, coords)?.let { return it }
+                    // 重建失败：旧行已被删、调用方会落到新建路径（同名空出，无序号）
+                    return null
+                }
                 return old
             }
             // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
