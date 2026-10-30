@@ -64,6 +64,9 @@ internal object MediaExport {
      *
      * @param useCameraDir true 时写入 DCIM/Camera，false 时写入 [relPath]
      * @param oldUriString 显式指定的既有产物 URI（重转路径）
+     * @param requireGps 位置交付校验：源字节含 GPS（读取未脱敏）时，产物 EXIF 也必须
+     *   带上坐标，否则视为本张转换失败——「成功」的定义包含位置不失守。破损修复
+     *   （糊图）不开启。正常管线逐字节保留 EXIF，此校验是防线而非常触发路径
      */
     fun exportAndVerify(
         context: Context,
@@ -71,7 +74,8 @@ internal object MediaExport {
         timestamp: Long,
         relPath: String,
         useCameraDir: Boolean,
-        oldUriString: String? = null
+        oldUriString: String? = null,
+        requireGps: Boolean = false
     ): Uri {
         val resolver = context.contentResolver
         val src = File(result.path)
@@ -95,6 +99,11 @@ internal object MediaExport {
             JpegUtil.gpsCoordinates(outBytes)
         } catch (_: Exception) {
             null
+        }
+        // 位置交付校验：源有位置而产物没有 = 管线丢了 EXIF，绝不能当「成功」交付
+        // （原图删除等后续动作以导出成功为前提，抛出即整张按失败处理，原图不动）
+        if (requireGps && coords == null) {
+            throw IOException("位置校验失败：源照片有位置信息，转换产物却丢失了（已放弃本张，原图未删）")
         }
 
         // 覆盖既有产物（显式指定优先；否则自动识别同源既往产物）

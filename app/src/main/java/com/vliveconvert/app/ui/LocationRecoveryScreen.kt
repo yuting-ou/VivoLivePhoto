@@ -64,7 +64,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.convert.LocationDisplayRepair
-import com.vliveconvert.app.service.BatchLog
+import com.vliveconvert.app.service.ConvertCenter
+import com.vliveconvert.app.service.LocationRepairService
 import com.vliveconvert.app.ui.theme.statusColors
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
@@ -104,71 +105,58 @@ fun LocationRecoveryScreen(
     var scanProgress by remember { mutableStateOf(Triple(0, 0, 0)) }
     var rows by remember { mutableStateOf<List<LocationDisplayRepair.MissingRow>>(emptyList()) }
     var selected by remember { mutableStateOf(setOf<String>()) }
-    var rebuilding by remember { mutableStateOf(false) }
-    var rebuildDone by remember { mutableStateOf(0 to 0) }
-    var rebuildCurrent by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
+    // 重建进度来自 LocationRepairService 的共享状态（后台跑，离开页面不中断）
+    val repairing = ConvertCenter.isLocationRepairing
+    val repairProgress = ConvertCenter.repairProgress
+    val repairCurrent = ConvertCenter.repairCurrent
 
     val startScan: () -> Unit = {
-        scanning = true
-        scanProgress = Triple(0, 0, 0)
-        rows = emptyList()
-        selected = emptySet()
-        summary = null
-        scope.launch(Dispatchers.IO) {
-            val found = LocationDisplayRepair.scanMissingLocation(context) { done, total, foundN ->
-                scanProgress = Triple(done, total, foundN)
-            }
-            withContext(Dispatchers.Main) {
-                rows = found
-                // 缺坐标的产物默认全选：用户的诉求就是「把没位置的修回来」，
-                // 逐个手点反而是负担；不想修的自行取消勾选
-                selected = found.map { it.uri.toString() }.toSet()
-                scanning = false
+        if (!ConvertCenter.isLocationRepairing) {
+            scanning = true
+            scanProgress = Triple(0, 0, 0)
+            rows = emptyList()
+            selected = emptySet()
+            scope.launch(Dispatchers.IO) {
+                val found = LocationDisplayRepair.scanMissingLocation(context) { done, total, foundN ->
+                    scanProgress = Triple(done, total, foundN)
+                }
+                withContext(Dispatchers.Main) {
+                    rows = found
+                    // 缺坐标的产物默认全选：用户的诉求就是「把没位置的修回来」，
+                    // 逐个手点反而是负担；不想修的自行取消勾选
+                    selected = found.map { it.uri.toString() }.toSet()
+                    scanning = false
+                }
             }
         }
     }
 
     val startRebuild: () -> Unit = {
         val targets = rows.filter { it.uri.toString() in selected }
-        if (targets.isNotEmpty() && !rebuilding) {
-            rebuilding = true
-            scope.launch(Dispatchers.IO) {
-                val processed = LocationDisplayRepair.loadProcessed(context)
-                val stats = LocationDisplayRepair.rebuildSelected(
-                    context, targets, processed,
-                    onProgress = { done, total ->
-                        rebuildDone = done to total
-                        rebuildCurrent = targets.getOrNull(done)?.name
-                    })
-                LocationDisplayRepair.saveProcessed(context, processed)
-                // 修复记录落盘：与破损实况修复同一通道，记录页显示「修复」条目
-                BatchLog.appendRepair(context, stats.rebuilt, stats.failed, null)
-                val msg = StringBuilder("重建成功 ${stats.rebuilt} 张").apply {
-                    if (stats.noCoords > 0) append("，无坐标可恢复跳过 ${stats.noCoords} 张")
-                    if (stats.failed > 0) append("，失败 ${stats.failed} 张")
-                    append("。")
-                    if (stats.pausedForSpace) {
-                        append("\n\n可用空间不足已暂停——请到相册「最近删除 / 第三方删除拦截」" +
-                            "清空回收站后重新扫描，剩余的会继续出现在列表里。")
-                    }
-                    if (stats.rebuilt > 0) {
-                        append("\n\n重建过的照片「加入相册时间」已变为今天（拍摄时间不受影响）。")
-                    }
-                }
-                withContext(Dispatchers.Main) {
-                    rebuilding = false
-                    summary = msg.toString()
-                }
-            }
+        if (targets.isNotEmpty() && !ConvertCenter.isLocationRepairing) {
+            // 后台服务执行重建：离开页面/切后台不中断，进度走共享状态 + 通知栏
+            LocationRepairService.start(context, targets)
         }
     }
 
-    // 完成节拍触感：与转换底栏的完成态同一时刻、同一语义
-    LaunchedEffect(summary) {
-        if (summary != null) {
+    // 服务完成/中止 → 结果摘要（服务写 repairResult；消费后置回 null 并重扫）。
+    // 完成节拍触感与转换底栏的完成态同一语义
+    LaunchedEffect(ConvertCenter.repairResult) {
+        val result = ConvertCenter.repairResult
+        if (result != null) {
+            ConvertCenter.repairResult = null
+            summary = result
             view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+        }
+    }
+
+    // 扫描/重建完成回到本页时刷新列表：重建过的行已换新 URI、坐标已就位，
+    // 停留旧结果会误导用户。空闲且无结果待展示时自动重扫
+    LaunchedEffect(repairing) {
+        if (!repairing && !scanning && ConvertCenter.repairResult == null && rows.isNotEmpty()) {
+            startScan()
         }
     }
 
@@ -180,9 +168,9 @@ fun LocationRecoveryScreen(
     val allSelected = rows.isNotEmpty() && selected.size == rows.size
 
     LaunchedEffect(locationGranted) {
-        if (locationGranted && !rebuilding) startScan()
+        if (locationGranted && !ConvertCenter.isLocationRepairing) startScan()
     }
-    BackHandler(enabled = !rebuilding) { onBack() }
+    BackHandler(enabled = !repairing) { onBack() }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -198,7 +186,7 @@ fun LocationRecoveryScreen(
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (rebuilding) {
+            if (repairing) {
                 // 重建中禁止返回：行重建中途被打断会留下回收站副本
                 Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
                     Icon(
@@ -255,7 +243,7 @@ fun LocationRecoveryScreen(
                     when {
                         scanning -> "扫描中 ${scanProgress.first}/${scanProgress.second} · " +
                             "已发现 ${scanProgress.third} 张"
-                        rebuilding -> "重建中 ${rebuildDone.first}/${rebuildDone.second}"
+                        repairing -> "重建中 ${repairProgress.first}/${repairProgress.second}"
                         else -> "发现 ${rows.size} 张没有位置"
                     },
                     style = glassSubtitleStyle(), modifier = Modifier.weight(1f)
@@ -396,10 +384,11 @@ fun LocationRecoveryScreen(
                 radius = 28.dp,
                 contentPadding = PaddingValues(10.dp)
             ) {
-                if (rebuilding) {
-                    val (done, total) = rebuildDone
+                if (repairing) {
+                    val done = repairProgress.first
+                    val total = repairProgress.second
                     Text(
-                        "已重建 $done/$total" + (rebuildCurrent?.let { " · $it" } ?: ""),
+                        "已重建 $done/$total" + (repairCurrent?.let { " · $it" } ?: ""),
                         style = TextStyle(fontSize = 12.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -413,19 +402,19 @@ fun LocationRecoveryScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         GlassOutlineButton(
                             text = "重新扫描",
-                            color = if (!scanning) MaterialTheme.colorScheme.primary
+                            color = if (!scanning && !repairing) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.weight(1f),
-                            onClick = { if (!scanning) startScan() }
+                            onClick = { if (!scanning && !repairing) startScan() }
                         )
                         GlassOutlineButton(
                             text = "重建所选（${selected.size}）",
-                            color = if (selected.isNotEmpty() && !scanning)
+                            color = if (selected.isNotEmpty() && !scanning && !repairing)
                                 MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                if (selected.isNotEmpty() && !scanning) confirm = true
+                                if (selected.isNotEmpty() && !scanning && !repairing) confirm = true
                             }
                         )
                     }

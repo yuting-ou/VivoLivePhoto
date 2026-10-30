@@ -1,5 +1,6 @@
 package com.vliveconvert.app.service
 
+import com.vliveconvert.app.core.JpegUtil
 import com.vliveconvert.app.core.VivoDual
 import com.vliveconvert.app.ui.ConvertItem
 import java.io.File
@@ -13,7 +14,8 @@ import java.io.File
  * 本对象在开跑前把这些**确定的事实**汇总出来，供确认弹窗展示。
  *
  * 只统计无需读取文件内容即可确定的项（存在性 / 大小 / 伴生视频），
- * 因此开销极小；「是否含位置信息」不在其中（需读文件内容，成本高且可能误判）。
+ * 因此开销极小；「是否含位置信息」由 [countSourceGps] 在 IO 线程异步普查
+ * （逐张读文件头），结果补进预检弹窗——不打破 compute 的主线程纪律。
  */
 internal object Preflight {
 
@@ -75,6 +77,45 @@ internal object Preflight {
             }
         }
         return Info(pending, missing, bytes, videos)
+    }
+
+    /** 源照片位置普查结果：哪些拍摄时记录了位置、哪些本来就没有 */
+    class GpsCensus(
+        /** 源字节含 GPS EXIF 的张数（转换后将保留位置） */
+        val withGps: Int,
+        /** 源字节无 GPS 的张数（拍摄时未记录位置，转后也不会有——与脱敏无关） */
+        val withoutGps: Int
+    )
+
+    /**
+     * 源照片位置普查（关1「先确定每一张都有位置」）：逐张读文件头判 EXIF GPS。
+     *
+     * 调用前提：**位置权限已授予**（门禁保证）——此时读到无 GPS 即拍摄时未记录，
+     * 不存在脱敏误判；转换后产物若无位置反而说明管线失守（另由导出侧交付校验把关）。
+     * 只读头部（EXIF 必在文件头），每张开销一次开流；在 IO 线程调用，结果异步
+     * 补进预检弹窗——不打破 compute 的「主线程 stat 级」纪律。
+     */
+    fun countSourceGps(paths: List<String>): GpsCensus {
+        var withGps = 0
+        var withoutGps = 0
+        for (path in paths) {
+            val head = try {
+                File(path).inputStream().use { ins ->
+                    val buf = ByteArray(128 * 1024)
+                    var n = 0
+                    while (n < buf.size) {
+                        val r = ins.read(buf, n, buf.size - n)
+                        if (r < 0) break
+                        n += r
+                    }
+                    if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
+                }
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if (JpegUtil.hasGpsExif(head)) withGps++ else withoutGps++
+        }
+        return GpsCensus(withGps, withoutGps)
     }
 
     /** 人类可读体积（保留一位小数；< 1MB 时用 KB） */

@@ -66,6 +66,12 @@
             android:name=".service.ConvertService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 找回位置·后台重建前台服务：离开页面/切后台不中断，通知栏进度可取消 -->
+        <service
+            android:name=".service.LocationRepairService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

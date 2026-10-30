@@ -344,7 +344,9 @@ class ConvertService : Service() {
             val exportUri = MediaExport.exportAndVerify(
                 app, result, ts, outputRelPath,
                 useCameraDir = moveToCamera && !deferToCamera,
-                oldUriString = if (isReconvert) ci.outUri else null)
+                oldUriString = if (isReconvert) ci.outUri else null,
+                // 位置交付校验：源读到 GPS（未脱敏）时产物必须仍带坐标，否则本张判失败
+                requireGps = result.sourceHasGps)
             // 精确「已转」索引：源路径 → 产物 URI（选择器据此标记/筛选，不依赖名称猜测）
             ConvertedStore.record(app, ci.item.path, exportUri.toString())
             firstOutUri.compareAndSet(null, exportUri.toString())

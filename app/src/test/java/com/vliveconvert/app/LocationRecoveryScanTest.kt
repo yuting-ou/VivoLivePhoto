@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.convert.LocationDisplayRepair
+import com.vliveconvert.app.service.ConvertedStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -150,5 +151,46 @@ class LocationRecoveryScanTest {
         val stats = LocationDisplayRepair.rebuildSelected(app, found, processed)
         assertEquals("已在续跑名单里的不再动", 0, stats.rebuilt)
         assertEquals(0, stats.remaining)
+    }
+
+    /** 索引直查：ConvertedStore 记录的产物行免嗅探直接上报（含无标记行的兼容语义） */
+    @Test
+    fun scanUsesConvertedStoreIndexWithoutSniff() {
+        // cameraOriginal() 无产物标记——嗅探兜底会拒绝它，只有索引直查能认出
+        val row = putImage("DCIM/Camera", "IMG_IDX.jpg", cameraOriginal())
+        ConvertedStore.record(app, "/storage/emulated/0/DCIM/Camera/src.jpg", row.toString())
+
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
+        assertEquals(
+            "索引指向的缺坐标产物应直接上报",
+            setOf("IMG_IDX.jpg"), found.map { it.name }.toSet())
+    }
+
+    /** 索引里已有坐标的产物不上报（已修过/相机写入过，不缺） */
+    @Test
+    fun scanSkipsIndexedRowsThatHaveCoords() {
+        val row = resolver.insert(images, ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "IMG_FIXED.jpg")
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+            put("latitude", 22.8389)
+            put("longitude", 108.1780)
+        })!!
+        resolver.openOutputStream(row, "w")?.use { it.write(cameraOriginal()) }
+        ConvertedStore.record(app, "/storage/emulated/0/DCIM/Camera/src.jpg", row.toString())
+
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
+        assertTrue("有坐标的不缺，不应上报", found.isEmpty())
+    }
+
+    /** 非产物名单持久化：本次确认的相机原片，下次扫描不再嗅探 */
+    @Test
+    fun scanPersistsNonProductsForNextScan() {
+        putImage("DCIM/Camera", "IMG_ORIG.jpg", cameraOriginal())
+        runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
+        val processed = LocationDisplayRepair.loadProcessed(app)
+        assertTrue(
+            "确认非产物应记入名单（下次扫描免嗅探）",
+            processed.contains("IMG_ORIG.jpg"))
     }
 }

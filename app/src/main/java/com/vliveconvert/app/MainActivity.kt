@@ -377,6 +377,8 @@ class MainActivity : ComponentActivity() {
      */
     private var preflight: Preflight.Info? by mutableStateOf(null)
     private var skipPreflightNext by mutableStateOf(false)
+    /** 预检位置普查（关1）：IO 线程逐张读源头判 GPS，异步补进预检弹窗；null = 普查中 */
+    private var preflightGps by mutableStateOf<Preflight.GpsCensus?>(null)
     // 空间守卫拦下「开始转换」后就地红字说明（模式同 outputPathError：
     // 弹窗退场动画自愈后留在原地，用户必须先清理存储或减少所选照片）
     private var preflightSpaceError by mutableStateOf(false)
@@ -1343,6 +1345,7 @@ class MainActivity : ComponentActivity() {
                                 outputRelPath = outputRelPath,
                                 deleteOriginal = deleteOriginal,
                                 hasLocationPermission = hasMediaLocationPermission(),
+                                gpsCensus = preflightGps,
                                 spaceError = preflightSpaceError &&
                                     spaceGuard == Preflight.SpaceGuard.INSUFFICIENT,
                                 skipPreflight = skipPreflightNext,
@@ -1898,7 +1901,18 @@ class MainActivity : ComponentActivity() {
         val info = Preflight.compute(ConvertCenter.itemsSnapshot())
         preflight = info
         preflightSpaceError = false
+        preflightGps = null
         showPreflightDialog = true
+        // 关1 位置普查：IO 逐张读源文件头（EXIF 必在头部），完成后补进弹窗。
+        // 前提是位置权限已授予（门禁保证），读到无 GPS = 拍摄时未记录，无误判
+        val paths = ConvertCenter.itemsSnapshot()
+            .filter { !it.done && !it.failed }
+            .filter { File(it.item.path).exists() }
+            .map { it.item.path }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val census = Preflight.countSourceGps(paths)
+            withContext(Dispatchers.Main) { preflightGps = census }
+        }
     }
 
     /**
@@ -2517,6 +2531,8 @@ internal fun PreflightContent(
     outputRelPath: String,
     deleteOriginal: Boolean,
     hasLocationPermission: Boolean,
+    /** 关1 位置普查（异步补齐）：有/无位置张数；null = 普查中 */
+    gpsCensus: Preflight.GpsCensus? = null,
     spaceError: Boolean = false,
     skipPreflight: Boolean = false,
     onSkipPreflightChange: (Boolean) -> Unit = {}
@@ -2561,9 +2577,24 @@ internal fun PreflightContent(
         }
         PreflightRow(
             "位置信息",
-            if (hasLocationPermission) "将保留" else "不含位置信息",
-            if (hasLocationPermission) null else "未授予「位置」权限",
-            if (hasLocationPermission) null else MaterialTheme.colorScheme.error
+            if (!hasLocationPermission) "不含位置信息"
+            else when (val census = gpsCensus) {
+                // 普查中：先给权限结论，张数随后补上（大批量头几秒）
+                null -> "将保留（核对中…）"
+                else -> when {
+                    census.withoutGps == 0 -> "全部将保留（${census.withGps} 张）"
+                    census.withGps == 0 -> "全部不含位置（${census.withoutGps} 张）"
+                    else -> "${census.withGps} 张保留；${census.withoutGps} 张不含"
+                }
+            },
+            when {
+                !hasLocationPermission -> "未授予「位置」权限"
+                gpsCensus != null && gpsCensus.withoutGps > 0 ->
+                    "无位置为拍摄时未记录，非转换丢失"
+                else -> null
+            },
+            // 源本身无位置不是失败（不染错误色）；只有权限缺失才是「会丢失」
+            if (!hasLocationPermission) MaterialTheme.colorScheme.error else null
         )
         // 时间线副作用披露（与「重建位置显示」同源，但用户最常走的
         // 转换路径此前从未被告知）：产物是新媒体行，date_added 由

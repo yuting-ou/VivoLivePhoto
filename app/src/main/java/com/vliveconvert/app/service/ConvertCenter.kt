@@ -51,6 +51,19 @@ object ConvertCenter {
     /** 应用级状态行（权限提示 / 转换进度 / 完成摘要共用） */
     var statusText by mutableStateOf("")
 
+    // ── 找回位置·后台重建（LocationRepairService ↔ 页面共享状态）──
+    // 重建挪进前台服务：切后台/离开页面不再中断（此前页面协程一退就停），
+    // 进度经通知栏与这些状态双通道可见
+
+    /** 重建进行中（服务存活即 true；页面据此渲染进度态并禁止重复发起） */
+    var isLocationRepairing by mutableStateOf(false)
+    /** (已重建, 总数) */
+    var repairProgress by mutableStateOf(0 to 0)
+    /** 当前正在重建的文件名 */
+    var repairCurrent by mutableStateOf<String?>(null)
+    /** 重建结果摘要（服务完成/中止时写入；页面消费后置回 null） */
+    var repairResult by mutableStateOf<String?>(null)
+
     /**
      * 批次结束后待 Activity 发起「移入回收站」确认的原图 URI
      * （未授予所有文件访问权限时的删除路径；系统弹窗只能由 Activity 拉起）。

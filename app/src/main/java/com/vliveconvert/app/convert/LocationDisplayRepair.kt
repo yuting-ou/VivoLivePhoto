@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import com.vliveconvert.app.core.JpegUtil
+import com.vliveconvert.app.service.ConvertedStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -99,16 +100,16 @@ internal object LocationDisplayRepair {
     /**
      * 扫描相机相册里「应用产物、媒体库无坐标」的记录。
      *
-     * 与 [rebuildAll] 的全量扫不同：只把**真正缺坐标**的产物报给调用方——
-     * 用户看得到、选得出，重建只动选中的那几张，不再全库跑批。
+     * 两阶段（v2.6.0-test21 起索引优先）：
+     * - **索引直查**：ConvertedStore（源路径→产物 URI，转换成功时精确落盘）逐条查
+     *   产物行坐标列，行存在且无坐标 → 直接进结果，**免嗅探**。新版本转换的产物
+     *   几乎全部命中，毫秒级
+     * - **全相册嗅探兜底**：覆盖索引之外的历史产物（老版本转换、复制回退移动后
+     *   URI 失效）与相机原始文件（排除）；确认非产物的文件名记入已处理名单并
+     *   持久化——**下次扫描不再嗅探它们**，二次扫描近瞬时
      *
      * 需要位置权限：未授予时系统把坐标列抹成 null，会把全部产物误报为缺坐标
      * （调用方负责先确认权限再扫描）。
-     *
-     * 性能纪律（19000 张实机教训）：嗅探限 [SCAN_SNIFF_LIMIT] 且 4 路并行；
-     * [loadProcessed] 名单里的名字直接跳过——已重建的（现在有坐标，查询就排除了）、
-     * 已标记无坐标的（重建也无用）、已确认非产物的，都不该再耗一次嗅探。
-     * 结果按拍摄时间倒序（新的在前，与相册时间线一致）。
      */
     suspend fun scanMissingLocation(
         context: Context,
@@ -118,7 +119,32 @@ internal object LocationDisplayRepair {
         val resolver = context.contentResolver
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val processed = loadProcessed(context)
+        val results = ArrayList<MissingRow>()
 
+        // ── 阶段 A：索引直查（ConvertedStore：源路径 → 产物 URI）──
+        val knownProductUris = HashSet<Uri>()
+        val pairs = try { ConvertedStore.load(context).toList() } catch (_: Exception) { emptyList() }
+        for ((srcPath, outUriString) in pairs) {
+            val uri = try { Uri.parse(outUriString) } catch (_: Exception) { continue }
+            try {
+                resolver.query(
+                    uri,
+                    arrayOf(
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.DATE_TAKEN, "latitude", "longitude"
+                    ), null, null, null
+                )?.use { c ->
+                    if (!c.moveToFirst()) return@use // 行已失效（删除/移动）：交嗅探兜底
+                    if (!c.isNull(2) || !c.isNull(3)) return@use // 已有坐标：不缺
+                    val name = c.getString(0) ?: File(srcPath).name
+                    val dateTaken = if (c.isNull(1)) 0L else c.getLong(1)
+                    knownProductUris.add(uri)
+                    results.add(MissingRow(uri, name, dateTaken))
+                }
+            } catch (_: Exception) {}
+        }
+
+        // ── 阶段 B：全相册坐标缺行嗅探（排除索引已报与已处理名单）──
         data class Row(val uri: Uri, val name: String, val dateTaken: Long)
         val rows = ArrayList<Row>()
         try {
@@ -139,10 +165,13 @@ internal object LocationDisplayRepair {
                 while (c.moveToNext()) {
                     // 有任一坐标列就视为相册能显示位置，跳过（重建只治「不显示」的那批）
                     if (!c.isNull(3) || !c.isNull(4)) continue
+                    val id = c.getLong(0)
+                    val uri = ContentUrisWithId(images, id)
+                    if (uri in knownProductUris) continue // 阶段 A 已报，免重复
                     val name = c.getString(1) ?: continue
                     if (name in processed) continue
                     val dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
-                    rows.add(Row(ContentUrisWithId(images, c.getLong(0)), name, dateTaken))
+                    rows.add(Row(uri, name, dateTaken))
                 }
             }
         } catch (_: Exception) {}
@@ -158,20 +187,25 @@ internal object LocationDisplayRepair {
                     sem.withPermit {
                         try {
                             val header = readHeader(resolver, row.uri, SCAN_SNIFF_LIMIT) ?: return@withPermit
-                            // 非本工具产物（相机原始双文件等）不在修复范围，嗅探后跳过
+                            // 非本工具产物（相机原始双文件等）不在修复范围，嗅探后跳过；
+                            // 非产物名单持久化（rebuildAll 同语义），下次扫描不再嗅探
                             if (containsBytes(header, APP_OUTPUT_MARKER)) {
                                 missing.add(MissingRow(row.uri, row.name, row.dateTaken))
+                            } else {
+                                synchronized(processed) { processed.add(row.name) }
                             }
                         } catch (_: Exception) {
                         } finally {
-                            onProgress(sniffed.incrementAndGet(), rows.size, missing.size)
+                            onProgress(sniffed.incrementAndGet(), rows.size,
+                                results.size + missing.size)
                         }
                     }
                 }
             }
         }
-        onProgress(rows.size, rows.size, missing.size)
-        return missing.sortedWith(
+        saveProcessed(context, processed)
+        onProgress(rows.size, rows.size, results.size + missing.size)
+        return (results + missing).sortedWith(
             compareByDescending<MissingRow> { it.dateTaken }.thenByDescending { it.name })
     }
 
