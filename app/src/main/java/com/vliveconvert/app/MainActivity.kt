@@ -439,6 +439,7 @@ class MainActivity : ComponentActivity() {
                 showLocationDialog = false
                 pendingLocationAction = null
             }
+            showLocationBypassConfirm -> showLocationBypassConfirm = false
             showLocationSettingsDialog -> {
                 showLocationSettingsDialog = false
                 pendingLocationAction = null
@@ -512,8 +513,14 @@ class MainActivity : ComponentActivity() {
 
     /** 位置权限缺失（Compose 状态：驱动主界面警示条与门禁弹窗） */
     private var locationDenied by mutableStateOf(false)
-    /** 用户已在本会话中明确选择「仍要转换」（缺位置权限）：后续批次不再重复门禁 */
-    private var locationForceChosen = false
+    /**
+     * 「不想要位置信息，直接转换」的二次确认弹窗。
+     * 防丢失纪律（v2.6.0）：**没有会话级豁免**——每批转换只要缺「位置」权限都必过门禁。
+     * 曾经点过一次「仍要转换」就整批静默放行，用户一批十几张全部丢了位置才发现
+     * （2026-10 真机教训）；现在「转换时丢位置」只剩一条刻意路径：门禁弹窗底部小字入口
+     * → 二次确认。授权走主按钮，授权后自动继续本批。
+     */
+    private var showLocationBypassConfirm by mutableStateOf(false)
     /** 位置权限就绪后要继续的动作（开始转换 / 重新转换）；系统设置返回时消费 */
     private var pendingLocationAction: (() -> Unit)? = null
     /** 待权限动作是「重新转换」：无权限时执行毫无意义，设置引导弹窗不提供「仍要转换」 */
@@ -842,7 +849,8 @@ class MainActivity : ComponentActivity() {
                 // 弹层改为应用内浮层后，必须自己接管返回：先于页面级预测性返回判定，
                 // 否则按一次返回会把底下的页面（甚至 Activity）弹掉。
                 val anyDialogOpen = showPreflightDialog || showAllFilesDialog ||
-                    showLocationDialog || showLocationSettingsDialog || showSettingsDialog ||
+                    showLocationDialog || showLocationBypassConfirm ||
+                    showLocationSettingsDialog || showSettingsDialog ||
                     showStatusDetail || crashExportMessage != null ||
                     showOutputPathDialog || showAlbumSheet
                 BackHandler(enabled = anyDialogOpen) { dismissTopDialog() }
@@ -1292,7 +1300,11 @@ class MainActivity : ComponentActivity() {
                             locationPermissionLauncher.launch(
                                 Manifest.permission.ACCESS_MEDIA_LOCATION)
                         },
-                        onBack = { showLocationRecovery = false }
+                        onBack = {
+                            showLocationRecovery = false
+                            // 重建会写修复记录，回到设置时计数要立即反映
+                            batchLogCount = BatchLog.load(applicationContext).size
+                        }
                     )
                 }
 
@@ -1365,7 +1377,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // 位置权限门禁弹窗：未授予时开始转换必丢 GPS，需用户显式确认
+                // 位置权限门禁弹窗：未授予时开始转换必丢 GPS。每批必问（无会话豁免），
+                // 主路径是「去授权」（授权后自动继续本批）；「不要位置」收进小字入口 + 二次确认
                 if (showLocationDialog) {
                     GlassDialog(
                         hazeState = appHazeState,
@@ -1384,17 +1397,42 @@ class MainActivity : ComponentActivity() {
                             locationPermissionLauncher.launch(
                                 Manifest.permission.ACCESS_MEDIA_LOCATION)
                         },
-                        dismissLabel = "仍要转换",
+                        dismissLabel = "取消",
                         onDismissAction = {
                             showLocationDialog = false
-                            pendingLocationAction = null // 消费挂起动作（强转路径自行继续）
-                            proceedConvertAfterPermissionCheck(force = true)
+                            pendingLocationAction = null // 取消挂起的转换
                         }
                     ) {
                         Text(
                             "未授予「位置」权限时，Android 会在本应用读取照片时实时剥离 " +
                             "GPS 位置信息（系统脱敏），转换后的照片将丢失地点信息，且事后无法找回。\n\n" +
-                            "强烈建议先授予「位置」权限再开始转换。"
+                            "授予后本批会自动继续转换。"
+                        )
+                        Text(
+                            "不想要位置信息，直接转换 →",
+                            style = TextStyle(fontSize = 12.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .clickableNoRipple(onClick = { showLocationBypassConfirm = true })
+                        )
+                    }
+                }
+
+                // 「直接转换」二次确认：刻意两步，杜绝顺手点掉门禁丢掉整批位置
+                if (showLocationBypassConfirm) {
+                    GlassDialog(
+                        hazeState = appHazeState,
+                        onDismissRequest = { showLocationBypassConfirm = false },
+                        title = "不要位置信息？",
+                        confirmLabel = "直接转换（丢位置）",
+                        onConfirm = { convertWithoutLocation() },
+                        dismissLabel = "返回授权",
+                        onDismissAction = { showLocationBypassConfirm = false }
+                    ) {
+                        Text(
+                            "本批照片将丢失 GPS 地点信息，且事后无法找回（除非原图仍在，" +
+                            "之后可用「找回位置」重新转换）。确定直接转换？"
                         )
                     }
                 }
@@ -1413,15 +1451,12 @@ class MainActivity : ComponentActivity() {
                             showLocationSettingsDialog = false
                             openAppDetailSettings()
                         },
-                        dismissLabel = if (pendingActionIsReconvert) "取消" else "仍要转换",
+                        dismissLabel = "取消",
                         onDismissAction = {
                             showLocationSettingsDialog = false
                             val action = pendingLocationAction
                             pendingLocationAction = null
-                            if (action != null && !pendingActionIsReconvert) {
-                                // 普通转换：用户明确选择无位置继续
-                                proceedConvertAfterPermissionCheck(force = true)
-                            } else if (action != null) {
+                            if (action != null && pendingActionIsReconvert) {
                                 // 重转：无权限时执行无意义，仅取消
                                 ConvertCenter.statusText =
                                     "未授予「位置」权限，已取消重新转换（授权后可再点「重新转换」）"
@@ -1436,6 +1471,16 @@ class MainActivity : ComponentActivity() {
                             "若权限页没有相关开关，也可尝试给本应用开启" +
                             "「所有文件访问权限」后重新转换。"
                         )
+                        if (!pendingActionIsReconvert) {
+                            Text(
+                                "不想要位置信息，直接转换 →",
+                                style = TextStyle(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .padding(top = 10.dp)
+                                    .clickableNoRipple(onClick = { showLocationBypassConfirm = true })
+                            )
+                        }
                     }
                 }
 
@@ -1813,8 +1858,9 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (!hasMediaLocationPermission() && !locationForceChosen) {
-            pendingLocationAction = { proceedConvertAfterPermissionCheck() }
+        // 防丢失门禁：缺「位置」权限时每批必问，没有会话级豁免（见 showLocationBypassConfirm 注释）
+        if (!hasMediaLocationPermission()) {
+            pendingLocationAction = { showPreflightThenConvert() }
             pendingActionIsReconvert = false
             showLocationDialog = true
             return
@@ -1822,16 +1868,12 @@ class MainActivity : ComponentActivity() {
         showPreflightThenConvert()
     }
 
-    /** 门禁弹窗后的复查：已授权（或用户选择「仍要转换」）才继续 */
-    private fun proceedConvertAfterPermissionCheck(force: Boolean = false) {
-        if (force) locationForceChosen = true
-        if (hasMediaLocationPermission() || force) {
-            showPreflightThenConvert()
-        } else {
-            pendingLocationAction = { proceedConvertAfterPermissionCheck() }
-            pendingActionIsReconvert = false
-            showLocationDialog = true
-        }
+    /** 门禁弹窗里「不想要位置信息」小字入口的二次确认后：本批无位置继续（下一批仍会门禁） */
+    private fun convertWithoutLocation() {
+        showLocationBypassConfirm = false
+        val action = pendingLocationAction
+        pendingLocationAction = null
+        action?.invoke()
     }
 
     /**

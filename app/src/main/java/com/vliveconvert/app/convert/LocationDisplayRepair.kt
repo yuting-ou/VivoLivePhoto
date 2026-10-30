@@ -112,7 +112,8 @@ internal object LocationDisplayRepair {
      */
     suspend fun scanMissingLocation(
         context: Context,
-        onProgress: (Int, Int) -> Unit = { _, _ -> }
+        /** (已嗅探, 待嗅探总数, 已发现缺坐标产物数)——扫描中实时报数用 */
+        onProgress: (Int, Int, Int) -> Unit = { _, _, _ -> }
     ): List<MissingRow> {
         val resolver = context.contentResolver
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -163,13 +164,13 @@ internal object LocationDisplayRepair {
                             }
                         } catch (_: Exception) {
                         } finally {
-                            onProgress(sniffed.incrementAndGet(), rows.size)
+                            onProgress(sniffed.incrementAndGet(), rows.size, missing.size)
                         }
                     }
                 }
             }
         }
-        onProgress(rows.size, rows.size)
+        onProgress(rows.size, rows.size, missing.size)
         return missing.sortedWith(
             compareByDescending<MissingRow> { it.dateTaken }.thenByDescending { it.name })
     }
