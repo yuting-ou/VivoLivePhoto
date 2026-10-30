@@ -94,7 +94,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.withTimeout
 import com.vliveconvert.app.R
-import com.vliveconvert.app.convert.LocationDisplayRepair
 import com.vliveconvert.app.convert.MediaExport
 import com.vliveconvert.app.core.outputPathErrorMessage
 import com.vliveconvert.app.core.sanitizeOutputRelPath
@@ -120,6 +119,7 @@ import com.vliveconvert.app.ui.BrokenRepairScreen
 import com.vliveconvert.app.ui.ConvertItem
 import com.vliveconvert.app.ui.FixTimeScreen
 import com.vliveconvert.app.ui.GlassDialog
+import com.vliveconvert.app.ui.LocationRecoveryScreen
 import com.vliveconvert.app.ui.GlassIndeterminateBar
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.LocalGlassBackdrop
@@ -433,7 +433,6 @@ class MainActivity : ComponentActivity() {
      */
     private fun dismissTopDialog() {
         when {
-            isRepairingLocation || showSpacePause -> Unit
             showPreflightDialog -> showPreflightDialog = false
             showAllFilesDialog -> showAllFilesDialog = false
             showLocationDialog -> {
@@ -447,7 +446,6 @@ class MainActivity : ComponentActivity() {
             showSettingsDialog -> showSettingsDialog = false
             showStatusDetail -> showStatusDetail = false
             crashExportMessage != null -> crashExportMessage = null
-            showRepairConfirm -> showRepairConfirm = false
             showOutputPathDialog -> showOutputPathDialog = false
             showAlbumSheet -> showAlbumSheet = false
         }
@@ -477,13 +475,8 @@ class MainActivity : ComponentActivity() {
     private var batchLogEntries by mutableStateOf(listOf<BatchLogEntry>())
     // 输出文件批量移动到 DCIM/Camera
     private var isMovingOutputs by mutableStateOf(false)
-    // 重建历史产物的媒体库记录（让相册显示位置）
-    private var isRepairingLocation by mutableStateOf(false)
-    private var showRepairConfirm by mutableStateOf(false)
-    private var repairProgressText by mutableStateOf("")
-    // 分批重建的空间守卫：可用空间不足时暂停，提示清空回收站
-    private var showSpacePause by mutableStateOf(false)
-    private var spacePauseText by mutableStateOf("")
+    // 找回位置：检测缺坐标的本工具产物，勾选后只重建选中的几张（替代全量重建弹窗流程）
+    private var showLocationRecovery by mutableStateOf(false)
     // 列表项移除的撤销条（滑动/按钮移除后 4 秒内可撤销）
     private val snackbarHostState = SnackbarHostState()
     // 跟随系统取色（莫奈）：默认开，可在设置里切回品牌蓝
@@ -850,8 +843,8 @@ class MainActivity : ComponentActivity() {
                 // 否则按一次返回会把底下的页面（甚至 Activity）弹掉。
                 val anyDialogOpen = showPreflightDialog || showAllFilesDialog ||
                     showLocationDialog || showLocationSettingsDialog || showSettingsDialog ||
-                    showStatusDetail || crashExportMessage != null || showRepairConfirm ||
-                    isRepairingLocation || showSpacePause || showOutputPathDialog || showAlbumSheet
+                    showStatusDetail || crashExportMessage != null ||
+                    showOutputPathDialog || showAlbumSheet
                 BackHandler(enabled = anyDialogOpen) { dismissTopDialog() }
                 PredictiveBackHandler(
                     enabled = hasReadPermission() && !ConvertCenter.isConverting &&
@@ -1070,7 +1063,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 isBusy = ConvertCenter.isConverting || isMovingOutputs ||
-                                    isFixing || isRepairingLocation,
+                                    isFixing,
                                 onBack = { animateBackPop() },
                                 onEditOutputPath = {
                                     outputPathInput = outputRelPath
@@ -1104,7 +1097,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onOpenFixTime = { openFixTime() },
                                 onOpenBrokenRepair = { showBrokenRepair = true },
-                                onRepairLocationDisplay = { showRepairConfirm = true },
+                                onRepairLocationDisplay = { showLocationRecovery = true },
                                 onMoveOutputsToCamera = { moveOutputsToCamera() },
                                 onExportCrashLogs = { exportCrashLogs() },
                                 onClearCrashLogs = { clearCrashLogs() },
@@ -1291,6 +1284,18 @@ class MainActivity : ComponentActivity() {
                     })
                 }
 
+                // 找回位置：检测缺坐标的本工具产物，勾选后只重建选中的几张
+                if (showLocationRecovery) {
+                    LocationRecoveryScreen(
+                        locationGranted = hasMediaLocationPermission(),
+                        onGrantLocation = {
+                            locationPermissionLauncher.launch(
+                                Manifest.permission.ACCESS_MEDIA_LOCATION)
+                        },
+                        onBack = { showLocationRecovery = false }
+                    )
+                }
+
                 // 转换前的影响面预估：把可确定的事实摊开再开跑
                 preflight?.let { info ->
                     if (showPreflightDialog) {
@@ -1465,64 +1470,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // 位置显示重建：确认 + 进度 + 空间暂停弹窗
-                if (showRepairConfirm) {
-                    GlassDialog(
-                        hazeState = appHazeState,
-                        onDismissRequest = { showRepairConfirm = false },
-                        title = "重建位置显示",
-                        confirmLabel = "开始",
-                        onConfirm = {
-                            showRepairConfirm = false
-                            rebuildLocationDisplay()
-                        },
-                        dismissLabel = "取消",
-                        onDismissAction = { showRepairConfirm = false }
-                    ) {
-                        Text(
-                            "将分批重建历史转换产物的媒体库记录，让 vivo 相册显示拍摄位置。\n\n" +
-                                "· 照片内容与文件名不变，重建后字节逐字节一致\n" +
-                                "· 旧记录会进相册「最近删除/第三方删除拦截」（可恢复）\n" +
-                                "· 存储空间不足时自动暂停，清空回收站后点「继续」即可续跑\n\n" +
-                                "⚠ 重要副作用：重建会把照片的「加入相册时间」重置为操作当天，" +
-                                "且该时间由系统强制托管、事后无法恢复——微信等按" +
-                                "「加入时间」分组的应用会把这些照片全部归入「今天」。\n" +
-                                "照片的拍摄时间、EXIF、相册时间线不受影响。\n\n" +
-                                "共约 4400 张，预计 3~4 批。确认开始？"
-                        )
-                    }
-                }
-                if (isRepairingLocation) {
-                    GlassDialog(
-                        hazeState = appHazeState,
-                        onDismissRequest = {},
-                        title = "重建位置显示",
-                        dismissOnBack = false,
-                        dismissOnOutside = false
-                    ) {
-                        Text(repairProgressText)
-                        Spacer(Modifier.height(14.dp))
-                        GlassIndeterminateBar(height = 4.dp)
-                    }
-                }
-                if (showSpacePause) {
-                    GlassDialog(
-                        hazeState = appHazeState,
-                        onDismissRequest = {},
-                        title = "需要释放存储空间",
-                        confirmLabel = "继续",
-                        onConfirm = {
-                            showSpacePause = false
-                            rebuildLocationDisplay()
-                        },
-                        dismissLabel = "结束",
-                        onDismissAction = { showSpacePause = false },
-                        dismissOnBack = false,
-                        dismissOnOutside = false
-                    ) {
-                        Text(spacePauseText)
-                    }
-                }
-
                 // 输出目录修改弹窗
                 if (showOutputPathDialog) {
                     GlassDialog(
@@ -2453,53 +2400,6 @@ class MainActivity : ComponentActivity() {
      * 删旧记录会让文件进「第三方删除拦截」回收站——因此按可用空间分批：
      * 低于守卫线自动暂停，提示用户清空回收站后继续（已处理名单持久化，可续跑）。
      */
-    private fun rebuildLocationDisplay() {
-        if (isRepairingLocation) return
-        if (ConvertCenter.isConverting) {
-            ConvertCenter.statusText = "转换进行中，等本轮完成后再重建位置显示"
-            return
-        }
-        lifecycleScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) {
-                isRepairingLocation = true
-                repairProgressText = "正在扫描相机相册…"
-            }
-            try {
-                val processed = LocationDisplayRepair.loadProcessed(applicationContext)
-                val stats = LocationDisplayRepair.rebuildAll(
-                    this@MainActivity, processed,
-                    onProgress = { done, total ->
-                        if (done % 25 == 0 || done == total) {
-                            // mutableStateOf 可从任意线程写（快照系统保证安全）
-                            repairProgressText = "正在重建 $done/$total…"
-                        }
-                    }
-                )
-                LocationDisplayRepair.saveProcessed(applicationContext, processed)
-                withContext(Dispatchers.Main) {
-                    isRepairingLocation = false
-                    if (stats.pausedForSpace) {
-                        spacePauseText = "本批已重建 ${stats.rebuilt} 张（失败 ${stats.failed}，" +
-                            "无坐标跳过 ${stats.noCoords}）。\n\n可用空间已低于 10GB——请到相册" +
-                            "「最近删除 / 第三方删除拦截」清空回收站释放空间，然后点「继续」跑下一批。"
-                        showSpacePause = true
-                        ConvertCenter.statusText = "位置显示重建已暂停：请清空回收站后继续"
-                    } else {
-                        ConvertCenter.statusText = "位置显示重建完成：本批重建 ${stats.rebuilt} 张，" +
-                            "失败 ${stats.failed}，无坐标跳过 ${stats.noCoords}" +
-                            (if (stats.remaining > 0) "；剩余 ${stats.remaining} 张，再次运行可继续"
-                             else "；全部处理完毕")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    isRepairingLocation = false
-                    ConvertCenter.statusText = "重建失败：${e.message}"
-                }
-            }
-        }
-    }
-
     /**
      * 把单个输出文件移动到 DCIM/Camera（拍摄/修改时间不变）：
      * 实现在 MediaExport.moveUriToCamera（owner 原生 move 优先，失败回退流式复制）。

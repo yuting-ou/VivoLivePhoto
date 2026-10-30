@@ -169,7 +169,7 @@ class SettingsVariantsPreviewTest {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Tile(Icons.Filled.DateRange, "修复文件时间", "按拍摄时间校正修改时间")
-                        Tile(Icons.Filled.Place, "重建位置显示", "历史照片显示拍摄位置")
+                        Tile(Icons.Filled.Place, "找回位置", "检测缺位置的产物，选中重建")
                     }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Tile(Icons.Filled.Build, "修复破损实况", "糊 JPG + MP4 合并成实况")
@@ -222,7 +222,7 @@ class SettingsVariantsPreviewTest {
                 GlassDivider(startInset = 60.dp)
                 RowItem(Icons.Filled.Build, "修复破损实况", "糊 JPG + MP4 合并成实况")
                 GlassDivider(startInset = 60.dp)
-                RowItem(Icons.Filled.Place, "重建位置显示", "历史照片显示拍摄位置")
+                RowItem(Icons.Filled.Place, "找回位置", "检测缺位置的产物，选中重建")
                 GlassDivider(startInset = 60.dp)
                 RowItem(Icons.AutoMirrored.Filled.ArrowForward, "输出移到相机", "搬进 DCIM/Camera")
                 GlassDivider(startInset = 60.dp)

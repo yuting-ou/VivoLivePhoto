@@ -76,6 +76,120 @@ internal object LocationDisplayRepair {
         try { File(context.filesDir, PROGRESS_FILE).delete() } catch (_: Exception) {}
     }
 
+    /** 扫描结果：一条「应用产物、媒体库无坐标」的记录（vivo 相册不显示位置的那批） */
+    data class MissingRow(val uri: Uri, val name: String, val dateTaken: Long)
+
+    /**
+     * 扫描相机相册里「应用产物、媒体库无坐标」的记录。
+     *
+     * 与 [rebuildAll] 的全量扫不同：只把**真正缺坐标**的产物报给调用方——
+     * 用户看得到、选得出，重建只动选中的那几张，不再全库跑批。
+     *
+     * 需要位置权限：未授予时系统把坐标列抹成 null，会把全部产物误报为缺坐标
+     * （调用方负责先确认权限再扫描）。
+     */
+    fun scanMissingLocation(
+        context: Context,
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ): List<MissingRow> {
+        val resolver = context.contentResolver
+        val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+
+        data class Row(val uri: Uri, val name: String, val dateTaken: Long)
+        val rows = ArrayList<Row>()
+        try {
+            resolver.query(
+                images,
+                arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.DATE_TAKEN,
+                    "latitude",
+                    "longitude"
+                ),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                arrayOf("DCIM/Camera", "DCIM/Camera/%"),
+                null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    // 有任一坐标列就视为相册能显示位置，跳过（重建只治「不显示」的那批）
+                    if (!c.isNull(3) || !c.isNull(4)) continue
+                    val name = c.getString(1) ?: continue
+                    val dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
+                    rows.add(Row(ContentUrisWithId(images, c.getLong(0)), name, dateTaken))
+                }
+            }
+        } catch (_: Exception) {}
+
+        val missing = ArrayList<MissingRow>()
+        for ((index, row) in rows.withIndex()) {
+            onProgress(index, rows.size)
+            try {
+                // 非本工具产物（相机原始双文件等）不在修复范围，嗅探后跳过
+                val header = readHeader(resolver, row.uri) ?: continue
+                if (containsBytes(header, APP_OUTPUT_MARKER)) {
+                    missing.add(MissingRow(row.uri, row.name, row.dateTaken))
+                }
+            } catch (_: Exception) {}
+        }
+        onProgress(rows.size, rows.size)
+        return missing
+    }
+
+    /**
+     * 只重建传入的记录（选中式修复）：逐张沿用 [recreateRow]，
+     * 已处理的记入 [processed]（与全量扫共享续跑名单，后续运行不会再碰）。
+     * 空间不足即停（重建会在回收站留副本）：返回 pausedForSpace=true，
+     * 未处理的条目仍在扫描结果里，清理空间后重新扫描即可续跑。
+     */
+    fun rebuildSelected(
+        context: Context,
+        rows: List<MissingRow>,
+        processed: MutableSet<String>,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        freeSpaceBytes: () -> Long = { defaultFreeSpaceBytes() },
+        minFreeBytes: Long = MIN_FREE_BYTES
+    ): RebuildStats {
+        var rebuilt = 0
+        var failed = 0
+        var noCoords = 0
+        var paused = false
+        for ((index, row) in rows.withIndex()) {
+            onProgress(index, rows.size)
+            if (row.name in processed) continue
+            if (freeSpaceBytes() < minFreeBytes) {
+                paused = true
+                break
+            }
+            try {
+                when (recreateRow(context, row.uri)) {
+                    RecreateResult.OK -> {
+                        rebuilt++
+                        processed.add(row.name)
+                    }
+                    RecreateResult.NO_COORDS -> {
+                        // 无坐标也无视频段坐标：不删记录，标记已处理避免反复重试
+                        noCoords++
+                        processed.add(row.name)
+                    }
+                    RecreateResult.FAILED -> failed++
+                }
+            } catch (_: Exception) {
+                failed++
+            }
+        }
+        onProgress(rows.size, rows.size)
+        return RebuildStats(
+            scanned = rows.size,
+            rebuilt = rebuilt,
+            failed = failed,
+            noCoords = noCoords,
+            pausedForSpace = paused,
+            remaining = rows.count { it.name !in processed }
+        )
+    }
+
     /**
      * 分批重建。[processed] 为已处理名单（就地更新，调用方负责落盘）。
      * [onProgress] (已扫描, 总数)。[freeSpaceBytes] 可注入用于测试。

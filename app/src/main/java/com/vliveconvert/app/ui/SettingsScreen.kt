@@ -195,7 +195,7 @@ fun SettingsScreen(
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.Place, "重建位置显示", "让老照片显示位置",
+                            Icons.Filled.Place, "找回位置", "检测缺位置的产物，选中重建",
                             onRepairLocationDisplay, modifier, available = !isBusy
                         )
                     },

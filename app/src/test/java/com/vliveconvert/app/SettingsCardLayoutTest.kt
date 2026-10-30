@@ -68,7 +68,7 @@ class SettingsCardLayoutTest {
         render()
         val first = action("修复文件时间").fetchSemanticsNode().boundsInRoot
         val second = action("修复破损实况").fetchSemanticsNode().boundsInRoot
-        val third = action("重建位置显示").fetchSemanticsNode().boundsInRoot
+        val third = action("找回位置").fetchSemanticsNode().boundsInRoot
         val fourth = action("移动输出到相册").fetchSemanticsNode().boundsInRoot
         assertEquals(first.top, second.top, 1f)
         assertEquals(first.bottom, second.bottom, 1f)
@@ -76,7 +76,7 @@ class SettingsCardLayoutTest {
         assertEquals(third.bottom, fourth.bottom, 1f)
         assertEquals(first.left, third.left, 1f)
         assertEquals(second.right, fourth.right, 1f)
-        assertEquals(textBounds("重建位置显示").bottom,
+        assertEquals(textBounds("找回位置").bottom,
             textBounds("移动输出到相册").bottom, 1f)
     }
 
