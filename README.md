@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test19) ——
-> 点开 `VivoLivePhoto-v2.6.0-test19.apk` 即可直接安装（推荐，**测试版**：「重建位置显示」改为
-> 检测 + 勾选式，只修缺位置的那几张，待真机验收后转正式）。亦可从仓库根目录
-> [`VivoLivePhoto-v2.6.0-test19.apk`](./VivoLivePhoto-v2.6.0-test19.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test20) ——
+> 点开 `VivoLivePhoto-v2.6.0-test20.apk` 即可直接安装（推荐，**测试版**：修大相册下
+> 「找回位置」扫描卡死闪退，待真机验收后转正式）。亦可从仓库根目录
+> [`VivoLivePhoto-v2.6.0-test20.apk`](./VivoLivePhoto-v2.6.0-test20.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,18 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test20（修「找回位置」大相册闪退 + 扫描提速 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修实机闪退（19000 张相册）**：扫描结果列表此前用非懒加载布局——结果一出来就
+  一次性组合全部行、并发请求全部缩略图，相机相册上万张时内存爆掉直接闪退。
+  改为 LazyColumn 懒加载，只组合屏幕可见的行
+- **扫描提速约 4 倍**：逐张嗅探产物标记从 512KB 降到 128KB（标记必在文件头部），
+  并 4 路并行开流读取；「已处理名单」里重建过/已确认无坐标/非产物的名字直接跳过，
+  不再重复嗅探。扫描结果按拍摄时间倒序（新的在前）
+- 验证：302 条 JVM 用例全绿（4 条平台跳过），含扫描/选中重建/空间暂停/续跑名单用例
 
 ### v2.6.0-test19（找回位置：检测 + 勾选式重建 · 测试版）
 

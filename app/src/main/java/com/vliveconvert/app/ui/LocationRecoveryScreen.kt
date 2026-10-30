@@ -15,10 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
@@ -77,6 +78,7 @@ fun LocationRecoveryScreen(
     val context = LocalContext.current
     val resolver = context.contentResolver
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     var scanning by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableStateOf(0 to 0) }
@@ -185,13 +187,14 @@ fun LocationRecoveryScreen(
             )
         }
 
+        // 头部（说明 + 进度）不滚动；列表必须用 LazyColumn——相机相册动辄上万张，
+        // 曾经用 Column+verticalScroll 一次性组合全部行并请求全部缩略图，
+        // 实机 19000 张直接 OOM 闪退（LazyColumn 只组合可见行）
         Column(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 100.dp)
         ) {
             Spacer(Modifier.height(10.dp))
             if (!locationGranted) {
@@ -247,8 +250,11 @@ fun LocationRecoveryScreen(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                if (!scanning && rows.isEmpty()) {
-                    GlassCard(radius = 24.dp, contentPadding = PaddingValues(16.dp)) {
+                when {
+                    scanning -> Unit // 上方已有扫描进度条
+                    rows.isEmpty() -> GlassCard(
+                        radius = 24.dp, contentPadding = PaddingValues(16.dp)
+                    ) {
                         Text(
                             "没有发现缺位置的产物。\n\n只有「相册里不显示拍摄位置」的本工具" +
                                 "产物会出现在这里；刚转换完的照片稍等片刻再扫描。",
@@ -256,60 +262,69 @@ fun LocationRecoveryScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                } else {
-                    GlassCard(radius = 24.dp, contentPadding = PaddingValues(vertical = 6.dp)) {
-                        rows.forEach { row ->
-                            val checked = row.name in selected
-                            val uri = row.uri
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .toggleable(value = checked, role = Role.Checkbox,
-                                        onValueChange = {
-                                            selected = if (checked) selected - row.name
-                                            else selected + row.name
-                                        })
-                                    .semantics { contentDescription = "选择 ${row.name}" }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
+                    else -> GlassCard(
+                        radius = 24.dp,
+                        contentPadding = PaddingValues(vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth().weight(1f)
+                    ) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(
+                                top = 4.dp, bottom = 110.dp) // 底部 Dock 悬浮，留出滚出空间
+                        ) {
+                            items(rows, key = { it.name }) { row ->
+                                val checked = row.name in selected
+                                val uri = row.uri
+                                Row(
                                     Modifier
-                                        .size(width = 46.dp, height = 46.dp)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .fillMaxWidth()
+                                        .toggleable(value = checked, role = Role.Checkbox,
+                                            onValueChange = {
+                                                selected = if (checked) selected - row.name
+                                                else selected + row.name
+                                            })
+                                        .semantics { contentDescription = "选择 ${row.name}" }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    MediaThumbnail(uri, resolver, Modifier.fillMaxSize())
-                                }
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        row.name,
-                                        style = TextStyle(fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1
+                                    Box(
+                                        Modifier
+                                            .size(width = 46.dp, height = 46.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                    ) {
+                                        MediaThumbnail(uri, resolver, Modifier.fillMaxSize())
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            row.name,
+                                            style = TextStyle(fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            if (row.dateTaken > 0)
+                                                "拍摄 " + SimpleDateFormat(
+                                                    "yyyy-MM-dd HH:mm", Locale.getDefault()
+                                                ).format(Date(row.dateTaken))
+                                            else "拍摄时间未知",
+                                            style = TextStyle(fontSize = 11.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    CircleTriCheckbox(
+                                        state = if (checked) androidx.compose.ui.state.ToggleableState.On
+                                        else androidx.compose.ui.state.ToggleableState.Off,
+                                        onClick = null
                                     )
-                                    Text(
-                                        if (row.dateTaken > 0)
-                                            "拍摄 " + SimpleDateFormat(
-                                                "yyyy-MM-dd HH:mm", Locale.getDefault()
-                                            ).format(Date(row.dateTaken))
-                                        else "拍摄时间未知",
-                                        style = TextStyle(fontSize = 11.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
-                                CircleTriCheckbox(
-                                    state = if (checked) androidx.compose.ui.state.ToggleableState.On
-                                    else androidx.compose.ui.state.ToggleableState.Off,
-                                    onClick = null
-                                )
+                                GlassDivider(startInset = 12.dp)
                             }
-                            GlassDivider(startInset = 12.dp)
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
             }
         }
         }

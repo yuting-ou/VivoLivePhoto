@@ -6,7 +6,14 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import com.vliveconvert.app.core.JpegUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 「重建已有照片的位置显示」：让历史转换产物在 vivo 相册里显示拍摄位置。
@@ -80,6 +87,16 @@ internal object LocationDisplayRepair {
     data class MissingRow(val uri: Uri, val name: String, val dateTaken: Long)
 
     /**
+     * 扫描嗅探长度：XMP 产物标记在头部 APP1 段（EXIF 缩略图之后、SOS 之前），
+     * 128KB 足够命中；比 [SNIFF_LIMIT] 小 4 倍——相机相册动辄上万张，
+     * 全量 512KB 嗅探既慢又产生大量短命大对象。
+     */
+    private const val SCAN_SNIFF_LIMIT = 128 * 1024
+
+    /** 嗅探并行度：IO 密集，4 路已能打满 FUSE 读取，再高只会抢主线程 CPU */
+    private const val SCAN_PARALLELISM = 4
+
+    /**
      * 扫描相机相册里「应用产物、媒体库无坐标」的记录。
      *
      * 与 [rebuildAll] 的全量扫不同：只把**真正缺坐标**的产物报给调用方——
@@ -87,13 +104,19 @@ internal object LocationDisplayRepair {
      *
      * 需要位置权限：未授予时系统把坐标列抹成 null，会把全部产物误报为缺坐标
      * （调用方负责先确认权限再扫描）。
+     *
+     * 性能纪律（19000 张实机教训）：嗅探限 [SCAN_SNIFF_LIMIT] 且 4 路并行；
+     * [loadProcessed] 名单里的名字直接跳过——已重建的（现在有坐标，查询就排除了）、
+     * 已标记无坐标的（重建也无用）、已确认非产物的，都不该再耗一次嗅探。
+     * 结果按拍摄时间倒序（新的在前，与相册时间线一致）。
      */
-    fun scanMissingLocation(
+    suspend fun scanMissingLocation(
         context: Context,
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): List<MissingRow> {
         val resolver = context.contentResolver
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val processed = loadProcessed(context)
 
         data class Row(val uri: Uri, val name: String, val dateTaken: Long)
         val rows = ArrayList<Row>()
@@ -116,25 +139,39 @@ internal object LocationDisplayRepair {
                     // 有任一坐标列就视为相册能显示位置，跳过（重建只治「不显示」的那批）
                     if (!c.isNull(3) || !c.isNull(4)) continue
                     val name = c.getString(1) ?: continue
+                    if (name in processed) continue
                     val dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
                     rows.add(Row(ContentUrisWithId(images, c.getLong(0)), name, dateTaken))
                 }
             }
         } catch (_: Exception) {}
 
-        val missing = ArrayList<MissingRow>()
-        for ((index, row) in rows.withIndex()) {
-            onProgress(index, rows.size)
-            try {
-                // 非本工具产物（相机原始双文件等）不在修复范围，嗅探后跳过
-                val header = readHeader(resolver, row.uri) ?: continue
-                if (containsBytes(header, APP_OUTPUT_MARKER)) {
-                    missing.add(MissingRow(row.uri, row.name, row.dateTaken))
+        // 嗅探是逐文件开流读头部（IO 密集）：并行 4 路把上万张的扫描压到原来的 ~1/4；
+        // 进度用原子计数，结果收进并发队列后统一排序
+        val missing = Collections.synchronizedList(ArrayList<MissingRow>())
+        val sniffed = AtomicInteger(0)
+        val sem = Semaphore(SCAN_PARALLELISM)
+        coroutineScope {
+            for (row in rows) {
+                launch(Dispatchers.IO) {
+                    sem.withPermit {
+                        try {
+                            val header = readHeader(resolver, row.uri, SCAN_SNIFF_LIMIT) ?: return@withPermit
+                            // 非本工具产物（相机原始双文件等）不在修复范围，嗅探后跳过
+                            if (containsBytes(header, APP_OUTPUT_MARKER)) {
+                                missing.add(MissingRow(row.uri, row.name, row.dateTaken))
+                            }
+                        } catch (_: Exception) {
+                        } finally {
+                            onProgress(sniffed.incrementAndGet(), rows.size)
+                        }
+                    }
                 }
-            } catch (_: Exception) {}
+            }
         }
         onProgress(rows.size, rows.size)
-        return missing
+        return missing.sortedWith(
+            compareByDescending<MissingRow> { it.dateTaken }.thenByDescending { it.name })
     }
 
     /**
@@ -422,10 +459,11 @@ internal object LocationDisplayRepair {
 
     private fun readHeader(
         resolver: android.content.ContentResolver,
-        uri: Uri
+        uri: Uri,
+        limit: Int = SNIFF_LIMIT
     ): ByteArray? {
         return resolver.openInputStream(uri)?.use { ins ->
-            val buf = ByteArray(SNIFF_LIMIT)
+            val buf = ByteArray(limit)
             var n = 0
             while (n < buf.size) {
                 val r = ins.read(buf, n, buf.size - n)

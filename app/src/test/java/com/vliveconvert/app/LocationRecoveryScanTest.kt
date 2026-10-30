@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.vliveconvert.app.convert.LocationDisplayRepair
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -96,7 +97,7 @@ class LocationRecoveryScanTest {
         // 相机原始照片：不是本工具产物，不上报
         putImage("DCIM/Camera", "IMG_ORIG.jpg", cameraOriginal())
 
-        val found = LocationDisplayRepair.scanMissingLocation(app)
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
         assertEquals(
             "只报缺坐标的本工具产物",
             setOf("IMG_A.jpg", "IMG_B.jpg"), found.map { it.name }.toSet())
@@ -110,7 +111,7 @@ class LocationRecoveryScanTest {
         // 那条路径由 LocationDisplayRepairTest 的 recreateRow 用例覆盖）
         putImage("DCIM/Camera", "IMG_A.jpg", appOutputWithGps(22, 108))
         val b = putImage("DCIM/Camera", "IMG_B.jpg", appOutputWithGps(23, 109))
-        val found = LocationDisplayRepair.scanMissingLocation(app)
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
         val chosen = found.filter { it.name == "IMG_A.jpg" }
         val processed = mutableSetOf<String>()
 
@@ -127,7 +128,7 @@ class LocationRecoveryScanTest {
     fun rebuildSelectedPausesForSpaceAndKeepsRestListed() {
         putImage("DCIM/Camera", "IMG_A.jpg", appOutputNoCoords())
         putImage("DCIM/Camera", "IMG_B.jpg", appOutputNoCoords())
-        val found = LocationDisplayRepair.scanMissingLocation(app)
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
         val processed = mutableSetOf<String>()
 
         val stats = LocationDisplayRepair.rebuildSelected(
@@ -143,7 +144,7 @@ class LocationRecoveryScanTest {
     @Test
     fun rebuildSelectedSkipsAlreadyProcessed() {
         putImage("DCIM/Camera", "IMG_A.jpg", appOutputNoCoords())
-        val found = LocationDisplayRepair.scanMissingLocation(app)
+        val found = runBlocking { LocationDisplayRepair.scanMissingLocation(app) }
         val processed = mutableSetOf("IMG_A.jpg")
 
         val stats = LocationDisplayRepair.rebuildSelected(app, found, processed)
