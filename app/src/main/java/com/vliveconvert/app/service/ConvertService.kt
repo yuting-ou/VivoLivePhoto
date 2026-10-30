@@ -36,6 +36,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -173,10 +174,27 @@ class ConvertService : Service() {
             if (Runtime.getRuntime().maxMemory() >= 384L * 1024 * 1024) 2 else 1
         val sem = Semaphore(parallelism)
 
+        // 逐张位置守卫（彻底杜绝的最后一环）：批次开跑后用户仍可能在系统设置里
+        // 收回「位置」权限——剩余照片会静默脱敏转换。守卫在每张开转前复查，
+        // 一旦发现立即停批：已完成的保留成果，未转的留在队列待授权续转。
+        // 外部分享的缓存副本走文件直读（不经媒体库、不脱敏），不守卫
+        val locationGuardTripped = AtomicBoolean(false)
+        fun locationGuardOk(external: Boolean): Boolean {
+            if (locationGuardTripped.get()) return false
+            if (external) return true
+            val granted = try {
+                checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) { false }
+            if (!granted) locationGuardTripped.set(true)
+            return granted
+        }
+
         val jobs = targets.map { ci ->
             // 必须显式 IO：serviceScope 默认 Main 调度器，不指定会把转换跑在主线程（ANR）
             serviceScope.launch(Dispatchers.IO) {
                 sem.withPermit {
+                    if (!locationGuardOk(ci.externalSource)) return@withPermit
                     convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
                         firstOutUri, ok, fail, noGps)
                     val d = done.incrementAndGet()
@@ -218,8 +236,14 @@ class ConvertService : Service() {
             else -> ""
         }
         val batchTitle = if (reconvertBatch) "重新转换完成" else "转换完成"
+        // 逐张守卫触发：如实说明停批与剩余，队列里的未转项重新授权后续转
+        val guardNote = if (locationGuardTripped.get()) {
+            val skipped = total - done.get()
+            "；⚠「位置」权限在转换中被收回，已停止剩余 $skipped 张以保护位置信息" +
+                "（重新授权后点「开始转换」可继续）"
+        } else ""
         val finalStatus = "$batchTitle：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-            (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote
+            (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote + guardNote
         if (!finalizeInBar) {
             // 转换就是全部工作：立即宣告完成（进度条 100% + 完成节拍）
             withContext(Dispatchers.Main) {
