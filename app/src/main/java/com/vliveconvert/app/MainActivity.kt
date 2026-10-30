@@ -1959,6 +1959,9 @@ class MainActivity : ComponentActivity() {
                 ConvertCenter.items[i] = ci.copy(status = "待转换")
             }
         }
+        // 收尾（以原名移入相机相册）随取消中止：中转产物保留在输出目录，状态如实改写
+        ConvertCenter.rewriteDeferredPending(
+            applicationContext, "完成：产物保留在输出目录 $outputRelPath")
         ConvertCenter.isConverting = false
         ConvertCenter.progress = 0f
         ConvertCenter.progressDetail = ""

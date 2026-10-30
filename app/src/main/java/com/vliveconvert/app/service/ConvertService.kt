@@ -88,8 +88,8 @@ class ConvertService : Service() {
                 running = true
                 serviceScope.launch(Dispatchers.IO) { runBatch() }
             }
-            // 收尾窗口（删原图/移文件可达数十秒）里 isConverting 已复位、界面已可点
-            // 「开始转换」——此刻的新启动若直接丢弃，用户会永远停在「转换中」
+            // 收尾窗口（删原图/移文件可达数十秒；未并入进度条时 isConverting 已复位、
+            // 界面已可点「开始转换」）——此刻的新启动若直接丢弃，用户会永远停在「转换中」
             StartDecision.QUEUE -> pendingStart = true
             StartDecision.IGNORE -> {}
         }
@@ -144,6 +144,22 @@ class ConvertService : Service() {
         }
         val total = targets.size
         batchStartMs = System.currentTimeMillis()
+        // 「移到相机相册 + 转换后删除原图」同开时，这些项的产物先落中转目录，
+        // 收尾（删原图 → 以原名移入 DCIM/Camera）在批次末尾才执行。把这段收尾
+        // 并入总进度条（转换占 0~0.9、收尾占 0.9~1.0），否则进度条到 100% 后
+        // 还要干等收尾几十秒，用户不知道还剩什么没做完。
+        // 仅「服务内直接删」路径能实时推进收尾进度；未授权路径的收尾发生在
+        // Activity 的回收站确认弹窗之后，进度条管不到，维持原样。
+        val deferExpected = targets.count { ci ->
+            !ci.reconvert && moveToCamera && deleteOriginal && !ci.externalSource
+        }
+        // Robolectric 未 shadow 此 API（真调抛 ArrayIndexOutOfBoundsException，见
+        // ShadowExternalStorageAccess）：测试环境按未授权降级——收尾不并入进度条，
+        // 回到原行为；生产环境该调用与 handleDeleteOriginals 同源，正常工作
+        val allFilesAccess = try {
+            Environment.isExternalStorageManager()
+        } catch (_: Throwable) { false }
+        val finalizeInBar = finalizeMergesIntoBar(deferExpected, allFilesAccess)
         val done = AtomicInteger(0)
         val ok = AtomicInteger(0)
         val fail = AtomicInteger(0)
@@ -165,7 +181,9 @@ class ConvertService : Service() {
                         firstOutUri, ok, fail, noGps)
                     val d = done.incrementAndGet()
                     withContext(Dispatchers.Main) {
-                        ConvertCenter.progress = d.toFloat() / total
+                        // 收尾并入进度条时，转换段只占 0~0.9，剩余 0.1 留给收尾
+                        ConvertCenter.progress =
+                            convertProgressWeight(finalizeInBar) * d / total
                         ConvertCenter.progressDetail = "已处理 $d/$total"
                     }
                     persistQueueSnapshot()
@@ -202,22 +220,41 @@ class ConvertService : Service() {
         val batchTitle = if (reconvertBatch) "重新转换完成" else "转换完成"
         val finalStatus = "$batchTitle：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
             (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote
-        withContext(Dispatchers.Main) {
-            ConvertCenter.isConverting = false
-            // 收尾不要把进度清零：先停在 100% + 「已处理 N/N」，由「完成节拍」停留一会儿再清空。
-            // 否则单张转换时底栏刚从「转换中」切回来就立刻跳走，用户看不到任何结果反馈
-            ConvertCenter.progress = 1f
-            ConvertCenter.progressDetail =
-                "已处理 ${ok.get() + fail.get()}/${ok.get() + fail.get()}"
-            ConvertCenter.finishedBeat = true
-            ConvertCenter.statusText = finalStatus
+        if (!finalizeInBar) {
+            // 转换就是全部工作：立即宣告完成（进度条 100% + 完成节拍）
+            withContext(Dispatchers.Main) {
+                ConvertCenter.isConverting = false
+                // 收尾不要把进度清零：先停在 100% + 「已处理 N/N」，由「完成节拍」停留一会儿再清空。
+                // 否则单张转换时底栏刚从「转换中」切回来就立刻跳走，用户看不到任何结果反馈
+                ConvertCenter.progress = 1f
+                ConvertCenter.progressDetail =
+                    "已处理 ${ok.get() + fail.get()}/${ok.get() + fail.get()}"
+                ConvertCenter.finishedBeat = true
+                ConvertCenter.statusText = finalStatus
+            }
+            persistQueueSnapshot()
+            notifyDone(ok.get(), fail.get(), deleteOriginal)
         }
-        persistQueueSnapshot()
-        notifyDone(ok.get(), fail.get(), deleteOriginal)
+        // 收尾并入进度条时这里不宣告完成：isConverting 保持 true，进度停在 0.9，
+        // 由下方删原图 → 移入相机相册逐项推进到 1.0 后再走完成节拍
+        // （statusText 也由收尾分支给出含删除/移入结果的全量摘要，此处不覆盖）
 
         // 删除原图（已授权所有文件访问 → 服务内直接删；否则交由 Activity 弹系统确认）
-        val deleteOutcome = if (deleteOriginal) handleDeleteOriginals(finalStatus)
+        val deleteOutcome = if (deleteOriginal) handleDeleteOriginals(finalStatus, finalizeInBar)
         else DeleteOutcome(0, 0, false)
+
+        if (finalizeInBar) {
+            // 收尾已并入进度条并执行完毕：现在才宣告批次完成。
+            // statusText 不再覆盖——handleDeleteOriginals 的每个出口都已给出
+            // 含删除/移入结果的最终摘要，比 finalStatus 信息更全
+            withContext(Dispatchers.Main) {
+                ConvertCenter.isConverting = false
+                ConvertCenter.progress = 1f
+                ConvertCenter.finishedBeat = true
+            }
+            persistQueueSnapshot()
+            notifyDone(ok.get(), fail.get(), deleteOriginal)
+        }
 
         // 批次日志：清空列表的 10 秒撤销窗过后，这是唯一能回答「那批在哪、成没成功」的凭据。
         // 未确认路径 deleted=0 如实记录（等用户确认后原图才真正删）
@@ -330,7 +367,7 @@ class ConvertService : Service() {
                 isReconvert ->
                     // 重转在位置权限已授予的前提下执行：仍无 GPS = 源本身没位置
                     "完成：已重新转换（源文件本身不含 GPS 位置）"
-                deferToCamera -> "完成：待原图删除后以原名移入相机相册"
+                deferToCamera -> ConvertCenter.STATUS_DEFER_FINALIZE
                 moveToCamera -> "完成：已导出到 DCIM/Camera"
                 else -> "完成：已导出到 $outputRelPath"
             }
@@ -398,14 +435,20 @@ class ConvertService : Service() {
      * 已授权所有文件访问 → 直接删除，随后把中转的转换产物以原名移入 DCIM/Camera；
      * 未授权 → 把有效 URI 留在 ConvertCenter.pendingTrashUris，等 Activity 在前台时
      * 拉起系统回收站确认弹窗（确认删除后再落地原名）。
+     * @param finalizeInBar 收尾进度是否并入总进度条（true 时逐项推进 0.9 → 1.0）
      * @return 实际结果（批次日志据此如实记录；未确认路径 deleted=0 不是失败）
      */
-    private suspend fun handleDeleteOriginals(baseStatus: String): DeleteOutcome {
+    private suspend fun handleDeleteOriginals(baseStatus: String, finalizeInBar: Boolean): DeleteOutcome {
         val all = synchronized(ConvertCenter.pendingTrashUris) {
             ConvertCenter.pendingTrashUris.distinct().toList()
         }
         ConvertCenter.pendingTrashUris.clear()
-        if (all.isEmpty()) return DeleteOutcome(0, 0, false)
+        if (all.isEmpty()) {
+            // 全部转换失败（或无可删项）时也会走到这里：完成摘要必须有人写，
+            // 否则收尾并入进度条的批次结束时 statusText 停在半路的警告上
+            withContext(Dispatchers.Main) { ConvertCenter.statusText = baseStatus }
+            return DeleteOutcome(0, 0, false)
+        }
         // 过滤已失效条目
         val valid = all.filter { uri ->
             try {
@@ -423,13 +466,20 @@ class ConvertService : Service() {
         }
         if (Environment.isExternalStorageManager()) {
             var deleted = 0
+            if (finalizeInBar) {
+                // 收尾段开场：删原图是为「以原名移入」腾文件名，用户看到的收尾
+                // 名称用最终结果（移入相机相册），删除过程在这里如实说明
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.progressDetail = "正在删除原图，随后移入相机相册…"
+                }
+            }
             for (uri in valid) {
                 try {
                     if (contentResolver.delete(uri, null, null) > 0) deleted++
                 } catch (_: Exception) {}
             }
             // 原图已删 → 名字已腾空，中转产物立即以原名移入相机相册
-            val moved = finalizePendingMoves()
+            val moved = finalizePendingMoves(progressInBar = finalizeInBar)
             val msg = "$baseStatus；已直接删除 $deleted 个原文件" +
                 "（vivo 相册「第三方删除拦截」中可查看/恢复）" +
                 (if (moved > 0) "；$moved 个转换结果已以原名移入相机相册" else "")
@@ -452,17 +502,35 @@ class ConvertService : Service() {
      * 把中转目录中的转换产物以原名移入 DCIM/Camera（原名落地）：
      * 原图已删除时无同名冲突，文件保持原名、无序号；
      * 若仍有同名（真实冲突，如用户手动复制过），uniqueCameraName 兜底加序号。
+     * @param progressInBar 收尾进度并入总进度条：逐项推进 0.9 → 1.0 并同步通知栏
      * @return 成功移入的条数
      */
-    private suspend fun finalizePendingMoves(): Int {
+    private suspend fun finalizePendingMoves(progressInBar: Boolean): Int {
         val entries = synchronized(ConvertCenter.pendingFinalize) {
             ConvertCenter.pendingFinalize.toList()
         }
         ConvertCenter.pendingFinalize.clear()
+        if (entries.isEmpty()) return 0
+        if (progressInBar) {
+            withContext(Dispatchers.Main) {
+                ConvertCenter.progress = finalizeProgressValue(0, entries.size)
+                ConvertCenter.progressDetail = "移入相机相册 0/${entries.size}"
+            }
+            notifyFinalize(0, entries.size)
+        }
         var moved = 0
+        var finished = 0
         for (e in entries) {
             val okMove = MediaExport.moveUriToCamera(this, e.uri, e.originalName)
             if (okMove) moved++
+            finished++
+            if (progressInBar) {
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.progress = finalizeProgressValue(finished, entries.size)
+                    ConvertCenter.progressDetail = "移入相机相册 $finished/${entries.size}"
+                }
+                notifyFinalize(finished, entries.size)
+            }
             // 回写单项状态（无论成败都给用户明确结果）
             withContext(Dispatchers.Main) {
                 val idx = ConvertCenter.items.indexOfFirst { it.item.key == e.itemKey }
@@ -497,14 +565,15 @@ class ConvertService : Service() {
         done: Int,
         total: Int,
         indeterminate: Boolean,
-        subText: String? = null
+        subText: String? = null,
+        text: String? = null
     ): Notification {
         ensureChannel()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_convert)
             .setContentTitle(getString(R.string.app_display_name))
-            .setContentText(
-                if (total > 0) "正在转换实况照片 $done/$total" else "正在准备转换…")
+            .setContentText(text
+                ?: if (total > 0) "正在转换实况照片 $done/$total" else "正在准备转换…")
             .setProgress(total, done, indeterminate)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -533,6 +602,18 @@ class ConvertService : Service() {
     }
 
     /**
+     * 收尾段（以原名移入相机相册）的通知：转换已完成，无 ETA 可估（不是转换节奏），
+     * 只报收尾自身的逐项进度，让灭屏/切走的用户也知道批次还没结束
+     */
+    private fun notifyFinalize(done: Int, total: Int) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF_ID, buildProgressNotification(
+                done, total, false, text = "正在以原名移入相机相册 $done/$total"))
+        } catch (_: Exception) {}
+    }
+
+    /**
      * 通知栏「取消」入口：与主界面取消按钮同一语义（进行中的条目复位为待转换，
      * 已完成的保留结果）。服务侧就地复位后停服务；批内协程由 onDestroy 的
      * scope.cancel 收割，正在跑的单张会在下一个 ensureActive 检查点自然终止。
@@ -545,6 +626,12 @@ class ConvertService : Service() {
                 ConvertCenter.items[i] = ci.copy(status = "待转换")
             }
         }
+        // 已转换但还没落地的条目（「待原图删除后以原名移入相机相册」）：
+        // 收尾随取消中止，产物保留在输出目录，状态如实改写
+        val outputRelPath = getSharedPreferences("vliveconvert", MODE_PRIVATE)
+            .getString("output_rel_path", "Pictures/VLiveConvert") ?: "Pictures/VLiveConvert"
+        ConvertCenter.rewriteDeferredPending(
+            applicationContext, "完成：产物保留在输出目录 $outputRelPath")
         ConvertCenter.isConverting = false
         ConvertCenter.progress = 0f
         ConvertCenter.progressDetail = ""
@@ -586,6 +673,8 @@ class ConvertService : Service() {
         private const val CHANNEL_ID = "convert"
         private const val NOTIF_ID = 100
         private const val NOTIF_DONE_ID = 101
+        /** 收尾（移入相机相册）在总进度条里的起点：转换占 0~0.9，收尾占 0.9~1.0 */
+        const val FINALIZE_PROGRESS_START = 0.9f
     }
 }
 
@@ -601,3 +690,20 @@ internal fun onStartIntent(action: String?, running: Boolean): StartDecision = w
     running -> StartDecision.QUEUE
     else -> StartDecision.RUN_NOW
 }
+
+/**
+ * 收尾（删原图 → 以原名移入相机相册）是否并入总进度条：
+ * 有延迟落地项、且收尾会在服务内直接执行（已授权所有文件访问）。
+ * 未授权路径的收尾发生在 Activity 回收站确认之后，进度条管不到。
+ */
+internal fun finalizeMergesIntoBar(deferredCount: Int, allFilesAccess: Boolean): Boolean =
+    deferredCount > 0 && allFilesAccess
+
+/** 转换段在总进度条里的权重：收尾并入时只占 0~0.9，剩余留给收尾段 */
+internal fun convertProgressWeight(finalizeInBar: Boolean): Float =
+    if (finalizeInBar) ConvertService.FINALIZE_PROGRESS_START else 1f
+
+/** 收尾段第 finished 项完成时的总进度值：0.9 起步、逐项推进到 1.0 */
+internal fun finalizeProgressValue(finished: Int, total: Int): Float =
+    ConvertService.FINALIZE_PROGRESS_START +
+        (1f - ConvertService.FINALIZE_PROGRESS_START) * finished / total

@@ -77,6 +77,27 @@ object ConvertCenter {
     val pendingFinalize: MutableList<FinalizeEntry> =
         Collections.synchronizedList(mutableListOf())
 
+    /** convertOne 给延迟落地条目写的行内状态（取消批次时按此识别改写） */
+    const val STATUS_DEFER_FINALIZE = "完成：待原图删除后以原名移入相机相册"
+
+    /**
+     * 批次/收尾被取消：延迟落地条目的「待原图删除后以原名移入相机相册」已不会发生
+     * （pendingFinalize 一并清空，不再等后续批次兑现），中转产物保留在输出目录，
+     * 状态如实改写，别让列表挂着一条假承诺。（主线程调用）
+     */
+    fun rewriteDeferredPending(context: Context, message: String) {
+        var rewritten = 0
+        for (i in items.indices) {
+            val ci = items[i]
+            if (ci.status == STATUS_DEFER_FINALIZE) {
+                items[i] = ci.copy(status = message)
+                rewritten++
+            }
+        }
+        synchronized(pendingFinalize) { pendingFinalize.clear() }
+        if (rewritten > 0) persistQueue(context, itemsSnapshot())
+    }
+
     private const val QUEUE_FILE = "convert_queue.json"
 
     /** 主线程调用：队列的不可变快照（IO 线程的遍历/持久化只能用它） */
