@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
-import androidx.exifinterface.media.ExifInterface
 import com.vliveconvert.app.core.JpegUtil
 import com.vliveconvert.app.service.ConvertedStore
 import kotlinx.coroutines.Dispatchers
@@ -375,7 +374,8 @@ internal object LocationDisplayRepair {
                 ?: return RecreateResult.NO_COORDS
             if (exifCoords == null) {
                 // 从视频段恢复出的坐标写回 EXIF（切 JPEG/拼尾部，视频逐字节保留）
-                bytes = injectGpsExif(context, bytes, coords) ?: return RecreateResult.FAILED
+                bytes = GpsRecovery.injectGpsExif(context, bytes, coords)
+                    ?: return RecreateResult.FAILED
             }
         } catch (_: Exception) {
             return RecreateResult.FAILED
@@ -441,44 +441,6 @@ internal object LocationDisplayRepair {
             // 新行写失败：删除半成品，原内容仍在回收站可恢复
             newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
             RecreateResult.FAILED
-        }
-    }
-
-    /**
-     * 把坐标写进合并产物的 EXIF：**必须先切出 JPEG 部分（SOI..EOI）单独交给
-     * ExifInterface**——它重写文件时会截掉 EOI 之后的全部数据，直接喂合并文件
-     * 会毁掉嵌入的视频。改写后的 JPEG 与原样尾部重新拼接；自检失败返回 null。
-     */
-    private fun injectGpsExif(
-        context: Context,
-        data: ByteArray,
-        coords: Pair<Double, Double>
-    ): ByteArray? {
-        return try {
-            var sosPayloadEnd: Int? = null
-            for (seg in JpegUtil.iterateSegments(data)) {
-                if (seg.marker == 0xDA.toByte()) {
-                    sosPayloadEnd = seg.payloadStart + seg.payloadLen
-                    break
-                }
-            }
-            val eoiEnd = sosPayloadEnd?.let { JpegUtil.findEoiEnd(data, it) } ?: return null
-            val tail = data.copyOfRange(eoiEnd, data.size)
-            val tmp = File.createTempFile("gpsfix", ".jpg", context.cacheDir)
-            try {
-                tmp.writeBytes(data.copyOfRange(0, eoiEnd))
-                ExifInterface(tmp.path).apply {
-                    setLatLong(coords.first, coords.second)
-                    saveAttributes()
-                }
-                val newJpeg = tmp.readBytes()
-                if (JpegUtil.gpsCoordinates(newJpeg) == null) return null
-                newJpeg + tail
-            } finally {
-                tmp.delete()
-            }
-        } catch (_: Exception) {
-            null
         }
     }
 

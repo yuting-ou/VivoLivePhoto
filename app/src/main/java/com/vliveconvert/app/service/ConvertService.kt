@@ -19,8 +19,11 @@ import com.vliveconvert.app.MainActivity
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.Converter
 import com.vliveconvert.app.convert.MediaExport
+import com.vliveconvert.app.core.JpegUtil
+import com.vliveconvert.app.convert.GpsRecovery
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.VivoDual
+import com.vliveconvert.app.core.XmpTemplate
 import com.vliveconvert.app.ui.ConvertItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -244,6 +247,7 @@ class ConvertService : Service() {
             if (locationStats.video > 0) parts.add("视频段 ${locationStats.video}")
             if (locationStats.none > 0) parts.add("无位置 ${locationStats.none}")
             var note = "；位置溯源：${parts.joinToString("/")}"
+            if (locationStats.injected > 0) note += "，预注入 ${locationStats.injected} 张"
             if (locationStats.rowHealed > 0) note += "，自愈 ${locationStats.rowHealed} 行"
             if (locationStats.rowFailed > 0) note += "，无法对齐 ${locationStats.rowFailed} 行"
             note
@@ -352,9 +356,79 @@ class ConvertService : Service() {
         }
         var staged: String? = null
         currentFileName = ci.item.name
+        // ── 转换前位置预注入（零星丢位置根因的治本修复）──
+        // 部分 vivo 机型把位置写进 XMP/伴生 mp4 而非 EXIF；而 vivo 相册的媒体扫描
+        // 按文件 EXIF 重算行的坐标列——文件无 EXIF GPS 时，坐标即使写进列也会被抹掉
+        // （「找回位置」的行重建 200+ 次全存活，正因它先写回 EXIF）。
+        // 故：源 EXIF 无 GPS 但 XMP / 伴生 mp4 ©xyz 有坐标时，先把 GPS 注入**源副本**
+        // 的 EXIF 再转换——产物天生带 EXIF GPS，媒体库/交付校验/扫描全链一致。
+        // 原始源文件绝不改动；副本放在 cache 并配同名 mp4 符号链接（VivoDual 按相邻
+        // 路径解析伴生视频），用完即删。
+        var convertPath = ci.item.path
+        var injectedDir: File? = null
+        run {
+            val sibling = VivoDual.siblingMp4(ci.item.path) ?: return@run
+            val head = try {
+                File(ci.item.path).inputStream().use { ins ->
+                    val buf = ByteArray(1024 * 1024)
+                    var n = 0
+                    while (n < buf.size) {
+                        val r = ins.read(buf, n, buf.size - n)
+                        if (r < 0) break
+                        n += r
+                    }
+                    if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (head != null && !JpegUtil.hasGpsExif(head)) {
+                val coords = try {
+                    XmpTemplate.gpsCoordsFromXmp(
+                        JpegUtil.findXmpSegment(head)?.xmpText)
+                } catch (_: Exception) {
+                    null
+                } ?: GpsRecovery.recoverFromMp4File(sibling)
+                if (coords != null) {
+                    val injected = try {
+                        GpsRecovery.injectGpsExif(
+                            app, File(ci.item.path).readBytes(), coords)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (injected != null) {
+                        val dir = File(app.cacheDir,
+                            "conv_src/${java.util.UUID.randomUUID()}").apply { mkdirs() }
+                        val stem = File(ci.item.path).nameWithoutExtension
+                        val jpg = File(dir, "$stem.jpg")
+                        jpg.writeBytes(injected)
+                        val mp4 = File(dir, "$stem.mp4")
+                        val linked = try {
+                            java.nio.file.Files.createSymbolicLink(
+                                mp4.toPath(), java.nio.file.Path.of(sibling))
+                            true
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (!linked) {
+                            // 符号链接被拒（个别 ROM）：整份复制，正确性优先于开销
+                            try {
+                                File(sibling).copyTo(mp4, overwrite = true)
+                            } catch (_: Exception) {
+                                dir.deleteRecursively()
+                                return@run
+                            }
+                        }
+                        convertPath = jpg.path
+                        injectedDir = dir
+                        synchronized(locationStats) { locationStats.injected++ }
+                    }
+                }
+            }
+        }
         try {
             val result = Converter.convertToVivoSingle(
-                path = ci.item.path,
+                path = convertPath,
                 outDir = tempDir.absolutePath,
                 log = { level, msg, _ ->
                     if (level == "warning") {
@@ -438,8 +512,9 @@ class ConvertService : Service() {
             }
         } finally {
             currentFileName = null
-            // 清理本地暂存产物（已导出 / 失败均清理）
+            // 清理本地暂存产物（已导出 / 失败均清理）与预注入的源副本
             staged?.let { p -> try { File(p).delete() } catch (_: Exception) {} }
+            injectedDir?.let { d -> try { d.deleteRecursively() } catch (_: Exception) {} }
         }
     }
 

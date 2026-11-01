@@ -167,6 +167,7 @@ internal object MediaExport {
         var xmp = 0       // 坐标来自产物 XMP（部分机型把位置写进 XMP 而非 EXIF）
         var video = 0     // 坐标来自嵌入视频段（mp4 udta/©xyz）
         var none = 0      // 三处都没有（源本身无位置）
+        var injected = 0  // 转换前预注入 EXIF 的张数（源 EXIF 无 GPS 但 XMP/mp4 有坐标）
         var rowHealed = 0 // 行坐标与文件不一致，经 UPDATE/重建拉齐
         var rowFailed = 0 // 行坐标无法拉齐（本张按失败交付）
         val totalCoords: Int get() = exif + xmp + video

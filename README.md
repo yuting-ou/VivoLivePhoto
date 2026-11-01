@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test24) ——
-> 点开 `VivoLivePhoto-v2.6.0-test24.apk` 即可直接安装（**测试版**：位置写入后不变式——
-> 每张导出都自查自愈坐标，拉不齐就判失败，待真机验收后转正式）。
-> 亦可从仓库根目录 [`VivoLivePhoto-v2.6.0-test24.apk`](./VivoLivePhoto-v2.6.0-test24.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test25) ——
+> 点开 `VivoLivePhoto-v2.6.0-test25.apk` 即可直接安装（**测试版**：转换前把 GPS 注入
+> 源 EXIF——治本「文件无 EXIF GPS 坐标被扫描抹掉」，待真机验收后转正式）。
+> 亦可从仓库根目录 [`VivoLivePhoto-v2.6.0-test25.apk`](./VivoLivePhoto-v2.6.0-test25.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,24 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test25（转换前 GPS 注入源 EXIF——治本 · 测试版）
+
+**转换核心字节管线零改动（转换输入的 EXIF 元数据预注入）。**
+
+- **真机反馈闭环**：test24 的写入后不变式在真机上判出「媒体库坐标与文件不一致且
+  无法拉齐」——由此实锤最后一环 vivo 行为：**媒体扫描按文件 EXIF 重算行的坐标列，
+  文件无 EXIF GPS 时，写进列的坐标（含 UPDATE 和重建后重扫）会被抹掉**。
+  铁证：「找回位置」的行重建 200+ 次全存活，正因它先把坐标写回文件 EXIF
+- **治本修复（转换前预注入）**：转换前检测源照片——EXIF 无 GPS 但源 XMP 或
+  伴生 mp4 的 ©xyz 有坐标时，先把 GPS 注入**源副本**的 EXIF 再转换
+  （源副本 = cache 内注入副本 + 同名 mp4 符号链接指回原件，原始源文件绝不改动，
+  用完即删）。产物天生带 EXIF GPS：媒体库显示、交付校验、媒体扫描全链一致
+- 交付校验随之收紧：预注入后 sourceHasGps 为真，产物坐标缺失即判失败
+- **位置溯源统计更新**：摘要新增「预注入 x 张」——这批照片就是「EXIF 无位置
+  但 XMP/视频段有」的机型变体，正是零星丢位置的人群画像
+- 验证：新增 4 条用例（注入保尾部/可验证/mp4 扫描/无坐标 null）；
+  327 条 JVM 用例全绿（4 条平台跳过）
 
 ### v2.6.0-test24（位置写入后不变式 + 坐标三级兜底链 · 测试版）
 
