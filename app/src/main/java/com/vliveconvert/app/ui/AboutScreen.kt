@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -110,7 +111,7 @@ fun AboutScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = DesignTokens.ScreenHMargin)
                 .navigationBarsPadding()
         ) {
             Spacer(Modifier.height(10.dp))

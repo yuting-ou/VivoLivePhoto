@@ -127,6 +127,7 @@ import com.vliveconvert.app.ui.glassWallpaper
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import com.vliveconvert.app.ui.rememberPressScale
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.clickableNoRipple
 import com.vliveconvert.app.ui.dateKey
@@ -397,7 +398,7 @@ fun PickerScreen(
                         isConverted = convertedChecker,
                         isAdded = { it.id in addedIds },
                         contentPadding = PaddingValues(
-                            start = 16.dp, end = 16.dp,
+                            start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin,
                             top = headerHeight + 12.dp, bottom = 120.dp)
                     )
                 }
@@ -895,7 +896,7 @@ private fun DateSectionHeader(
         Column(Modifier.weight(1f)) {
             Text(
                 label,
-                fontSize = 16.sp,
+                fontSize = DesignTokens.SectionTitle,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -979,10 +980,10 @@ private fun GridCell(
     val transition = updateTransition(selected, label = "cell")
 
     // 选中时以几何中心为定点缩小
-    val scale by transition.animateFloat(label = "scale") { if (it) 0.86f else 1f }
+    val scale by transition.animateFloat(label = "scale") { if (it) DesignTokens.CellScaleSelected else 1f }
     // 圆角：未选 6dp、选中 16dp；以 0..1 分数动画映射 Dp
     val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
-    val cornerRadius = lerp(12.dp, 16.dp, cornerFraction)
+    val cornerRadius = lerp(DesignTokens.CellRadius, DesignTokens.CellRadiusSelected, cornerFraction)
 
     // 徽章背景色：透明→primary（颜色平滑过渡）
     val badgeBg by animateColorAsState(
@@ -1017,7 +1018,7 @@ private fun GridCell(
                 }
                 .clip(RoundedCornerShape(cornerRadius))
                 .border(
-                    width = if (selected) 2.dp else 0.dp,
+                    width = if (selected) DesignTokens.CellBorderSelected else 0.dp,
                     color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                     shape = RoundedCornerShape(cornerRadius)
                 )

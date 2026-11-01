@@ -321,7 +321,7 @@ fun LocationRecoveryScreen(
                         .clickable(enabled = !scanning && okRows.isNotEmpty()) {
                             showOk = !showOk
                         }
-                        .padding(vertical = 4.dp)
+                        .padding(vertical = 8.dp)
                 )
                 if (!scanning && selectable.isNotEmpty()) {
                     Text(
@@ -473,7 +473,7 @@ fun LocationRecoveryScreen(
                                                 .weight(1f)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .clickable { showUnknown = !showUnknown }
-                                                .padding(vertical = 6.dp)
+                                                .padding(vertical = 8.dp)
                                         )
                                         if (showUnknown) {
                                             val keys = unknown.map { it.uri.toString() }.toSet()

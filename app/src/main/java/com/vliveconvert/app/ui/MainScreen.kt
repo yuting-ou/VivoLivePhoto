@@ -111,6 +111,7 @@ import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
 import com.vliveconvert.app.ui.theme.statusColors
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 
 /**
  * 主界面：待转换列表 + 开始转换。
@@ -179,7 +180,7 @@ fun MainScreen(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
+                .padding(start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
@@ -221,8 +222,8 @@ fun MainScreen(
         }
         if (notices.isNotEmpty()) {
             GlassCard(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-                radius = 24.dp
+                modifier = Modifier.fillMaxWidth().padding(horizontal = DesignTokens.ScreenHMargin, vertical = 6.dp),
+                radius = DesignTokens.CardRadius
             ) {
                 notices.forEachIndexed { index, notice ->
                     if (index > 0) GlassDivider(startInset = 58.dp)
@@ -283,7 +284,7 @@ fun MainScreen(
                         // 整行可点：最小尺寸与 clickable 同链，保证命中区高度 ≥48dp
                         .minimumInteractiveComponentSize()
                         .clickableNoRipple(onShowStatusDetail, statusInteraction)
-                        .padding(horizontal = 20.dp),
+                        .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -311,7 +312,7 @@ fun MainScreen(
                     .fillMaxWidth()
                     // end 6dp：「清空」在 48dp 触摸区内居中，自身留白约 10dp，6+10=16dp
                     // 落到全页右基线（与左缘 16dp 对称）
-                    .padding(start = 20.dp, end = 12.dp, bottom = 6.dp),
+                    .padding(start = 16.dp, end = 12.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -362,7 +363,7 @@ fun MainScreen(
                     // 大半个屏幕会是一块空白白板（转换中尤其刺眼）
                     BoxWithConstraints(
                         Modifier.fillMaxSize()
-                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                            .padding(horizontal = DesignTokens.ScreenHMargin, vertical = 6.dp)
                             .onGloballyPositioned {
                                 listBottomPx = it.positionInRoot().y + it.size.height
                             }

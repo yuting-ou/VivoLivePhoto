@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.R
 import com.vliveconvert.app.ui.EaseOutStrong
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 
 /**
  * 权限引导界面（未授予媒体权限时显示）。
@@ -67,7 +68,7 @@ fun PermissionScreen(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = viewportHeight)
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                    .padding(horizontal = DesignTokens.ScreenHMargin, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
             ) {

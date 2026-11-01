@@ -75,6 +75,7 @@ import com.vliveconvert.app.picker.AlbumInfo
 import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.SingleLiveScanner
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import java.io.File
@@ -182,8 +183,8 @@ fun FixTimeScreen(
             Column(Modifier.weight(1f)) {
                 Text(
                     "修复文件时间",
-                    style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp,
+                    style = TextStyle(fontSize = DesignTokens.TitleSubpage, fontWeight = FontWeight.Bold,
+                        letterSpacing = DesignTokens.TitleSubpageTracking,
                         color = MaterialTheme.colorScheme.onBackground)
                 )
                 Text("按文件名中的拍摄时间修正「修改时间」", style = glassSubtitleStyle())
@@ -207,13 +208,13 @@ fun FixTimeScreen(
         }
         AnimatedVisibility(visible = scanning) {
             GlassIndeterminateBar(
-                Modifier.padding(horizontal = 20.dp, vertical = 6.dp).height(3.dp)
+                Modifier.padding(horizontal = DesignTokens.ScreenHMargin, vertical = 6.dp).height(3.dp)
             )
         }
 
         // ── 工具行 ──
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(horizontal = DesignTokens.ScreenHMargin, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -249,7 +250,7 @@ fun FixTimeScreen(
                 statusText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
             )
         }
 

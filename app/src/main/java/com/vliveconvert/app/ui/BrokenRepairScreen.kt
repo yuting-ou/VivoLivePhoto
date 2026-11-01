@@ -2,6 +2,7 @@ package com.vliveconvert.app.ui
 
 import androidx.activity.compose.BackHandler
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.ui.theme.DesignTokens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -205,8 +206,8 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
             Spacer(Modifier.width(12.dp))
             Text(
                 "修复破损实况",
-                style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp, color = MaterialTheme.colorScheme.onBackground)
+                style = TextStyle(fontSize = DesignTokens.TitleSubpage, fontWeight = FontWeight.Bold,
+                    letterSpacing = DesignTokens.TitleSubpageTracking, color = MaterialTheme.colorScheme.onBackground)
             )
         }
 
@@ -215,11 +216,11 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 .fillMaxWidth()
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = DesignTokens.ScreenHMargin)
                 .padding(bottom = 100.dp)
         ) {
             Spacer(Modifier.height(10.dp))
-            GlassCard(radius = 24.dp, contentPadding = PaddingValues(16.dp)) {
+            GlassCard(radius = DesignTokens.CardRadius, contentPadding = PaddingValues(16.dp)) {
                 Text(
                     "拍摄时连拍或立刻息屏，vivo 来不及做算法优化，会留下「糊 JPG + 同名 MP4」。" +
                         "修复会把 MP4 合并成单文件实况（相册可播放）；封面仍是糊图，分辨率无法放大；" +

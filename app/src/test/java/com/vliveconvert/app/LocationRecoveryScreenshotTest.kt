@@ -9,6 +9,8 @@ import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.core.app.ApplicationProvider
@@ -146,4 +148,27 @@ class LocationRecoveryScreenshotTest {
 
     @Test
     fun shotRecoveryDark() = screenShot("recovery_dark", dark = true)
+
+    /** 无障碍大字号（1.5×）：验证工具行/分段头/Dock 不撑破、不裁切 */
+    @Test
+    fun shotRecoveryLargeFont() {
+        seedFixtures()
+        compose.setContent {
+            VLiveConvertTheme(darkTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalReduceMotion provides true,
+                    LocalDensity provides Density(density = 3f, fontScale = 1.5f)
+                ) {
+                    LocationRecoveryScreen(
+                        locationGranted = true,
+                        onGrantLocation = {},
+                        onBack = {},
+                        hazeState = rememberGlassHazeState()
+                    )
+                }
+            }
+        }
+        waitScanned()
+        shot("recovery_largefont")
+    }
 }
