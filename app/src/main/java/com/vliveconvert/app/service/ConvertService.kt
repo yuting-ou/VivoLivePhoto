@@ -248,8 +248,7 @@ class ConvertService : Service() {
             if (locationStats.none > 0) parts.add("无位置 ${locationStats.none}")
             var note = "；位置溯源：${parts.joinToString("/")}"
             if (locationStats.injected > 0) note += "，预注入 ${locationStats.injected} 张"
-            if (locationStats.rowHealed > 0) note += "，自愈 ${locationStats.rowHealed} 行"
-            if (locationStats.rowFailed > 0) note += "，无法对齐 ${locationStats.rowFailed} 行"
+            if (locationStats.rowRebuilt > 0) note += "，重建 ${locationStats.rowRebuilt} 行"
             note
         }
         val batchTitle = if (reconvertBatch) "重新转换完成" else "转换完成"

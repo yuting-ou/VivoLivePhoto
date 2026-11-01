@@ -8,6 +8,7 @@ import com.vliveconvert.app.core.OutputVerifier
 import com.vliveconvert.app.core.SegmentDigest
 import com.vliveconvert.app.core.SingleWriteResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,13 +18,10 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * 写入后不变式（「数量多起来必丢位置」的通用自愈）：
- * **入库行坐标必须等于文件坐标**——批量插入时坐标列偶发被丢（ROM 侧行为，真机存在、
- * Robolectric 无法复现）→ ensureRowCoords 当场发现，UPDATE 拉齐；UPDATE 不生效的
- * ROM（vivo）走行重建。拉不齐 = 本张失败，绝不静默交付。
- *
- * Robolectric 的 UPDATE 会生效，因此这里钉住「UPDATE 生效即拉齐」分支与统计口径；
- * 「UPDATE 被忽略 → 重建」分支由 OverwriteLocationRebuildTest 的直接重建用例钉住。
+ * 导出落库的坐标回归（不依赖坐标列查询做失败判定——真机实测该查询读不回坐标列，
+ * test24 曾据此误判并回滚全部导出）：
+ * - 新建插入：行坐标来自插入值（真机验证过「出生带坐标可显示」）
+ * - 覆盖路径：一律行重建（删行重插、出生带坐标）——真机验证过的原语
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -38,7 +36,7 @@ class RowCoordsInvariantTest {
         ExportLocationColumnsTest().jpegWithGps(latDeg, lonDeg)
 
     private fun makeResult(bytes: ByteArray, stem: String): SingleWriteResult {
-        val dir = Files.createTempDirectory("vlc_invariant").toFile()
+        val dir = Files.createTempDirectory("vlc_reg").toFile()
         val f = File(dir, "$stem.jpg").apply { writeBytes(bytes) }
         return SingleWriteResult(
             f.path,
@@ -55,48 +53,54 @@ class RowCoordsInvariantTest {
         throw AssertionError("行查询失败")
     }
 
-    /** 行出生无坐标（批量插入被丢）→ ensureRowCoords 用 UPDATE 拉齐并计数 */
-    @Test
-    fun healsCoordlessRowToMatchFile() {
-        val bytes = jpegWithGps(22, 108)
-        // 行出生时故意不带坐标列（模拟 ROM 批量插入丢失）
+    private fun putOldProduct(name: String, bytes: ByteArray): android.net.Uri {
         val uri = resolver.insert(images, ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "IMG_HEAL.jpg")
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
             put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.MediaColumns.DATE_TAKEN, 1_700_000_000_000L)
         })!!
         resolver.openOutputStream(uri, "w")?.use { it.write(bytes) }
-        val src = File(makeResult(bytes, "IMG_HEAL").path)
-        val stats = MediaExport.LocationStats()
-
-        val healed = MediaExport.ensureRowCoords(
-            resolver, uri, src, 1_700_000_000_000L, 22.0 to 108.0, stats)
-
-        assertEquals(uri, healed)
-        val (lat, _) = coordsOf(uri)
-        assertEquals("行坐标应与文件一致", 22.0, lat!!, 1e-9)
-        assertEquals("自愈计数应记 1", 1, stats.rowHealed)
-        assertEquals(0, stats.rowFailed)
+        return uri
     }
 
-    /** 行坐标与文件一致 → 原样返回（不重建不换行） */
+    /** 新建插入带坐标（真机验证过的显示路径，回归钉住） */
     @Test
-    fun matchingRowIsReturnedAsIs() {
-        val bytes = jpegWithGps(31, 121)
-        val src = File(makeResult(bytes, "IMG_MATCH").path)
-        val exportStats = MediaExport.LocationStats()
+    fun freshInsertCarriesRowCoords() {
+        val stats = MediaExport.LocationStats()
         val uri = MediaExport.exportAndVerify(
-            app, makeResult(bytes, "IMG_MATCH"), timestamp = 1_700_000_000_000L,
-            relPath = "DCIM/Camera", useCameraDir = true, stats = exportStats)
-        assertEquals("EXIF 来源应计入统计", 1, exportStats.exif)
+            app, makeResult(jpegWithGps(22, 108), "IMG_FRESH"), timestamp = 1_700_000_000_000L,
+            relPath = "DCIM/Camera", useCameraDir = true, stats = stats)
+        val (lat, lon) = coordsOf(uri)
+        assertEquals(22.0, lat!!, 1e-9)
+        assertEquals(108.0, lon!!, 1e-9)
+        assertEquals("EXIF 来源计入统计", 1, stats.exif)
+        assertEquals(0, stats.rowRebuilt)
+    }
+
+    /** 覆盖路径：旧行（无坐标）→ 一律行重建，新行出生带坐标、旧行消失、字节一致 */
+    @Test
+    fun overwriteRebuildsRowBornWithCoords() {
+        val bytes = jpegWithGps(22, 108)
+        val old = putOldProduct("IMG_OVR.jpg", byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
         val stats = MediaExport.LocationStats()
 
-        val out = MediaExport.ensureRowCoords(
-            resolver, uri, src, 1_700_000_000_000L, 31.0 to 121.0, stats)
+        val uri = MediaExport.exportAndVerify(
+            app, makeResult(bytes, "IMG_OVR"), timestamp = 1_700_000_000_000L,
+            relPath = "DCIM/Camera", useCameraDir = true,
+            oldUriString = old.toString(), stats = stats)
 
-        assertEquals(uri, out)
-        assertEquals("一致时不应记自愈", 0, stats.rowHealed)
-        val (lat, _) = coordsOf(uri)
-        assertEquals(31.0, lat!!, 1e-9)
+        assertTrue("覆盖应走行重建并返回新行", uri != old)
+        assertEquals("重建计数", 1, stats.rowRebuilt)
+        val (lat, lon) = coordsOf(uri)
+        assertEquals(22.0, lat!!, 1e-9)
+        assertEquals(108.0, lon!!, 1e-9)
+        assertEquals("字节逐字节一致", bytes.toList(),
+            resolver.openInputStream(uri)!!.use { it.readBytes() }.toList())
+        val dateTaken = resolver.query(uri,
+            arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null)!!.use { c ->
+            c.moveToFirst(); c.getLong(0)
+        }
+        assertEquals("拍摄时间保留", 1_700_000_000_000L, dateTaken)
     }
 }

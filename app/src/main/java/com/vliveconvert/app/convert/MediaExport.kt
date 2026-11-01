@@ -92,7 +92,8 @@ internal object MediaExport {
         old: Uri,
         src: File,
         timestamp: Long,
-        coords: Pair<Double, Double>?
+        coords: Pair<Double, Double>?,
+        stats: LocationStats? = null
     ): Uri? {
         var name: String
         var relPath: String
@@ -154,6 +155,7 @@ internal object MediaExport {
             } catch (_: Exception) {}
             fixTimestamps(resolver, newUri, timestamp)
             fixPhysicalMtime(resolver, newUri, timestamp)
+            if (stats != null) synchronized(stats) { stats.rowRebuilt++ }
             newUri
         } catch (_: Exception) {
             newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
@@ -168,42 +170,8 @@ internal object MediaExport {
         var video = 0     // 坐标来自嵌入视频段（mp4 udta/©xyz）
         var none = 0      // 三处都没有（源本身无位置）
         var injected = 0  // 转换前预注入 EXIF 的张数（源 EXIF 无 GPS 但 XMP/mp4 有坐标）
-        var rowHealed = 0 // 行坐标与文件不一致，经 UPDATE/重建拉齐
-        var rowFailed = 0 // 行坐标无法拉齐（本张按失败交付）
+        var rowRebuilt = 0 // 覆盖路径行重建的张数（出生带坐标的确定性修复）
         val totalCoords: Int get() = exif + xmp + video
-    }
-
-    /**
-     * 写入后不变式：**行坐标必须等于文件坐标**——不一致先 UPDATE，仍不一致走行
-     * 重建，重建后还不一致 → 返回 null（调用方按失败处理，绝不静默交付）。
-     * 这是「数量多起来必丢位置」的通用自愈机制：无论哪个环节（ROM 忽略 UPDATE、
-     * 批量插入时坐标列被丢、媒体扫描回写）把坐标弄丢，这里都会当场发现并拉齐。
-     */
-    internal fun ensureRowCoords(
-        resolver: android.content.ContentResolver,
-        uri: Uri,
-        src: File,
-        timestamp: Long,
-        coords: Pair<Double, Double>?,
-        stats: LocationStats?
-    ): Uri? {
-        val before = queryLocationColumns(resolver, uri)
-        if (coordsMatch(coords, before)) return uri
-        updateLocationColumns(resolver, uri, coords)
-        var after = queryLocationColumns(resolver, uri)
-        if (!coordsMatch(coords, after)) {
-            // UPDATE 没生效（vivo 静默忽略既有行坐标列）：删行重插，出生带坐标
-            val rebuilt = rebuildRowWithCoords(resolver, uri, src, timestamp, coords)
-            if (rebuilt != null) after = queryLocationColumns(resolver, rebuilt)
-            if (rebuilt == null || !coordsMatch(coords, after)) {
-                stats?.rowFailed++
-                return null
-            }
-            stats?.rowHealed++
-            return rebuilt
-        }
-        stats?.rowHealed++
-        return uri
     }
 
     /**
@@ -299,8 +267,7 @@ internal object MediaExport {
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
-            // overwriteExisting 的 verified 分支内部已跑 ensureRowCoords（不变式）：
-            // 返回 null = 行坐标拉不齐 → 落到新建路径再试一次（仍不行由新建路径抛出）
+            // 覆盖失败（旧记录失效/重建未成）→ 落到下面的新建路径兜底
             overwriteExisting(resolver, previous, src, result, timestamp, coords, stats)?.let {
                 return it
             }
@@ -364,13 +331,7 @@ internal object MediaExport {
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             throw IOException("输出自检失败（导出文件与转换结果不一致，已回滚本次导出）")
         }
-        // 写入后不变式：行坐标必须等于文件坐标（批量插入时坐标列偶发丢失的通用自愈）
-        return ensureRowCoords(resolver, uri, src, timestamp, coords, stats)
-            ?: run {
-                try { resolver.delete(uri, null, null) } catch (_: Exception) {}
-                throw IOException(
-                    "位置校验失败：媒体库坐标与文件不一致且无法拉齐（已回滚本张导出，原图未删）")
-            }
+        return uri
     }
 
     /**
@@ -423,11 +384,17 @@ internal object MediaExport {
             } catch (_: Exception) { false }
             if (verified) {
                 // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）。
-                // ⚠ 不能只靠 UPDATE：vivo 对既有记录的坐标列 UPDATE **静默忽略**
-                // （2026-10 真机结论）——旧行出生时没坐标，覆盖后 UPDATE 无效，
-                // 文件里有 GPS 相册却不显示（批量重转零星几张丢位置的根因）。
-                // 交给 ensureRowCoords：UPDATE → 复查 → 行重建 → 复查，拉不齐由调用方落新建
-                return ensureRowCoords(resolver, old, src, timestamp, coords, stats)
+                // ⚠ 不能用 UPDATE：vivo 对既有行的坐标列 UPDATE **静默忽略**（2026-10
+                // 真机结论），旧行出生没坐标时覆盖后永远不显示（零星丢位置根因）。
+                // 也⚠不能用「查询坐标列」来核对——真机实测该查询读不回坐标列，
+                // test24 曾据此误判并回滚全部导出（应用内从未查询过此列，读不可信）。
+                // 因此覆盖路径**一律行重建**（删行重插、出生带坐标）——「找回位置」
+                // 200+ 次真机验证的原语，确定性行为，不依赖任何查询。
+                rebuildRowWithCoords(resolver, old, src, timestamp, coords, stats)?.let {
+                    return it
+                }
+                // 重建失败（极少）：旧行可能已删/仍在，落到调用方的新建路径兜底
+                return null
             }
             // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
             try { resolver.delete(old, null, null) } catch (_: Exception) {}

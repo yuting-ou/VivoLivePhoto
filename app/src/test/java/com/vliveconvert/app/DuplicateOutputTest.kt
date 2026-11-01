@@ -90,7 +90,10 @@ class DuplicateOutputTest {
     }
 
     /**
-     * 核心场景：同一源照片再次转换时，应**原地覆盖**上次产物，而不是新增 `IMG_TEST(1).jpg`。
+     * 核心场景：同一源照片再次转换时，应**替换**上次产物，而不是新增 `IMG_TEST(1).jpg`。
+     * 契约变更（v2.6.0-test26）：替换以「行重建」实现（删旧行重插、出生带坐标）——
+     * vivo 对既有行坐标列的 UPDATE 静默忽略，覆盖只能靠重建保证坐标正确；
+     * 因此返回的是新行 URI，旧行进相册回收站（可恢复）。相册里始终只有一份。
      */
     @Test
     fun repeatedConversionOverwritesPreviousOutputInsteadOfAccumulating() {
@@ -108,8 +111,9 @@ class DuplicateOutputTest {
             relPath = rel, useCameraDir = false
         )
 
-        assertEquals("应原地覆盖，而不是新增记录", 1, countIn(rel))
-        assertEquals("应返回同一 URI（未新建文件）", firstUri, returned)
+        assertEquals("应替换旧产物，而不是新增记录", 1, countIn(rel))
+        assertTrue("旧行应已删除（行重建）", returned != firstUri)
+        assertEquals("新行内容应为本次转换产物", second.toList(), readBack(returned).toList())
         assertTrue("文件内容应已替换为本次产物",
             readBack(returned).contentEquals(second))
     }
@@ -200,8 +204,8 @@ class DuplicateOutputTest {
             relPath = rel, useCameraDir = false
         )
 
-        assertEquals("应原地覆盖，不新增记录", 1, countIn(rel))
-        assertEquals("应返回同一 URI", firstUri, returned)
+        assertEquals("应替换旧产物，不新增记录", 1, countIn(rel))
+        assertTrue("行重建返回新行", returned != firstUri)
         assertTrue("内容应已替换", readBack(returned).contentEquals(second))
     }
 
@@ -231,7 +235,8 @@ class DuplicateOutputTest {
             app, makeResult(second, "IMG_CASEOUT"), timestamp = 1_700_000_000_000L,
             relPath = "DCIM/Camera", useCameraDir = true
         )
-        assertEquals("大小写不同的既往产物也应被识别覆盖", firstUri, returned)
+        assertTrue("大小写不同的既往产物也应被识别替换（行重建返回新行）",
+            returned != firstUri)
         assertTrue(readBack(returned).contentEquals(second))
     }
 }

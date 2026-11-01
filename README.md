@@ -7,10 +7,10 @@
 > 是 [brovast/VLiveConvert](https://github.com/brovast/VLiveConvert) 的改进版（v2.0.0），
 > 基于 GPL-3.0 协议继续开源，改进内容见文末「改进版变更记录」。
 >
-> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test25) ——
-> 点开 `VivoLivePhoto-v2.6.0-test25.apk` 即可直接安装（**测试版**：转换前把 GPS 注入
-> 源 EXIF——治本「文件无 EXIF GPS 坐标被扫描抹掉」，待真机验收后转正式）。
-> 亦可从仓库根目录 [`VivoLivePhoto-v2.6.0-test25.apk`](./VivoLivePhoto-v2.6.0-test25.apk) 下载，内容一致。
+> **下载 APK**：[Releases 页面](https://github.com/yuting-ou/VivoLivePhoto/releases/tag/v2.6.0-test26) ——
+> 点开 `VivoLivePhoto-v2.6.0-test26.apk` 即可直接安装（**测试版**：修复 test24/25 的
+> 坐标查询误判导致全部转换失败的问题，转换恢复正常，待真机验收后转正式）。
+> 亦可从仓库根目录 [`VivoLivePhoto-v2.6.0-test26.apk`](./VivoLivePhoto-v2.6.0-test26.apk) 下载，内容一致。
 >
 > **v2.2.0 起界面整体重构为液态玻璃**（Backdrop 实时折射 + Haze 模糊），已经 vivo X200
 > 系列真机九轮迭代验证；转换核心与数据逻辑零改动。有问题可回退
@@ -144,6 +144,23 @@ app/src/main/java/com/vliveconvert/app/
 ```
 
 ## 改进版变更记录
+
+### v2.6.0-test26（修复 test24/25 误判导致的转换全失败 · 测试版）
+
+**转换核心字节管线零改动。**
+
+- **修真机「全部转换失败：位置校验失败」**：test24 的写入后校验用「查询媒体库
+  坐标列」核对写入结果——但真机实测**该查询读不回坐标列**（应用此前从未查询过
+  此列，显示验证靠相册、写入验证靠插入值），于是每张都被误判「坐标丢失」→
+  重建 → 仍「读不到」→ 判失败回滚，用户一张都转不出来。本版删除该不可靠校验：
+  **插入带坐标这件事本身已是真机验证过的显示保证**，不再让一个读不到的检查
+  否决它
+- **覆盖路径改为确定性重建**：不再「UPDATE → 查询核对」，直接行重建
+  （删行重插、出生带坐标）——「找回位置」200+ 次真机验证的原语，行为确定，
+  不依赖任何查询。旧行进相册回收站可恢复
+- 保留全部真机验证过的防护：位置门禁、转前普查、逐张守卫、坐标三级兜底链
+  （EXIF→XMP→视频段）、转换前 EXIF 预注入、源侧交付校验（基于文件解析，可靠）
+- 验证：327 条 JVM 用例全绿（4 条平台跳过）；覆盖契约用例更新为「行重建」语义
 
 ### v2.6.0-test25（转换前 GPS 注入源 EXIF——治本 · 测试版）
 

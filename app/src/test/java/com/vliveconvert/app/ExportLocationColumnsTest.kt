@@ -11,6 +11,7 @@ import com.vliveconvert.app.core.SegmentDigest
 import com.vliveconvert.app.core.SingleWriteResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -155,9 +156,9 @@ class ExportLocationColumnsTest {
             app, makeResult(newBytes, "IMG_OLD"), timestamp = 1_700_000_000_000L,
             relPath = rel, useCameraDir = false
         )
-        assertEquals("应走原地覆盖", oldUri, returned)
-        val (lat, lon) = readColumns(oldUri)
-        assertEquals("覆盖后坐标应刷新", 30.0, lat!!, 1e-9)
+        assertTrue("覆盖以行重建实现（出生带坐标），返回新行", returned != oldUri)
+        val (lat, lon) = readColumns(returned)
+        assertEquals("重建新行坐标应来自文件 EXIF", 30.0, lat!!, 1e-9)
         assertEquals(120.0, lon!!, 1e-9)
     }
 }
