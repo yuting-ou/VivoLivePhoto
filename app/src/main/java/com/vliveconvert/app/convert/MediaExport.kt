@@ -298,9 +298,10 @@ internal object MediaExport {
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
+            // overwriteExisting 的 verified 分支内部已跑 ensureRowCoords（不变式）：
+            // 返回 null = 行坐标拉不齐 → 落到新建路径再试一次（仍不行由新建路径抛出）
             overwriteExisting(resolver, previous, src, result, timestamp, coords, stats)?.let {
-                return ensureRowCoords(resolver, it, src, timestamp, coords, stats)
-                    ?: throw IOException("位置校验失败：入库行坐标与文件不一致且无法拉齐（已回滚，原图未删）")
+                return it
             }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
         }
