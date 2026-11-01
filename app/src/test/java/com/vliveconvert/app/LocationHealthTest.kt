@@ -194,8 +194,9 @@ class LocationHealthTest {
     @Test
     fun reportRendersPerPhotoEvidence() {
         val report = LocationHealth.buildReport(
-            appVersion = "2.6.0-test27 (115)",
+            appVersion = "2.6.0-test28 (116)",
             device = "vivo V2405A / Android 15",
+            calibration = "READABLE（直接读回 22.0,108.0（正探针出生带坐标））",
             rows = listOf(
                 LocationHealth.ReportLine("IMG_A.jpg", "有位置", "EXIF=22.83890,108.17800"),
                 LocationHealth.ReportLine("IMG_B.jpg", "EXIF 缺失", "EXIF=无，XMP=无，视频段=22.83890,108.17800",
@@ -206,6 +207,7 @@ class LocationHealthTest {
         assertTrue(report.contains("IMG_A.jpg"))
         assertTrue(report.contains("EXIF=22.83890,108.17800"))
         assertTrue(report.contains("注入EXIF+行重建（读回验证通过）"))
-        assertTrue(report.contains("2.6.0-test27 (115)"))
+        assertTrue(report.contains("2.6.0-test28 (116)"))
+        assertTrue(report.contains("READABLE"))
     }
 }

@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -60,37 +59,42 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 找回位置（v2.6.0-test27 重做：位置体检 + 证据可见 + 诊断报告）。
+ * 找回位置（v2.6.0-test28：检测重做——「需要修复」= 相册里不显示位置）。
  *
- * 判定**全部基于产物文件字节**（EXIF/XMP/视频段），不再查询媒体库坐标列
- * （test24~26 已证其在 vivo 上读不回）。每张产物一行：判定结论 + 判定依据
- * （每个来源解析到了什么），用户能直接看出「哪些有位置、哪些缺、哪些读不动」。
+ * 判定 = 矩阵（文件字节 EXIF/XMP/视频段 × 行坐标，行坐标可读性每次扫描现场校准）。
+ * 列表策略：默认只列「需修复」（可修）与「无位置」（源无坐标、修不了，如实告知）；
+ * 「待确认」（列不可读时文件有坐标的那批）折叠展示并说明原因；「已正常」只计数、
+ * 点计数可展开核对。不再全量罗列——那是把信号的不确定性甩给用户。
  *
- * 修复（[LocationHealth.repairProduct]）：EXIF 缺失的先写回文件 EXIF，再行重建
- * （字节逐字节一致、旧记录进回收站可恢复、收藏随迁），每张修复后**读回验证**。
- * 「导出诊断报告」把逐张判定与修复路径/结果整成文本分享出来——真机回传它，
- * 不用再靠猜定位问题。
+ * 修复（[LocationHealth.repairProduct]）：EXIF 缺的先写回文件，再行重建（字节逐字节
+ * 一致、旧记录进回收站可恢复、收藏随迁），每张修复后读回验证。
+ * 「导出诊断报告」含校准环境与逐张信号原始读数，真机回传即可定位。
  */
 @Composable
 fun LocationRecoveryScreen(
-    /** 「位置」权限：读文件坐标仍被它管辖，扫描前必须拿到（未授予只显示引导卡） */
+    /** 「位置」权限：文件坐标与行坐标的读取都被它管辖，扫描前必须拿到 */
     locationGranted: Boolean,
     onGrantLocation: () -> Unit,
     onBack: () -> Unit,
     hazeState: HazeState = rememberGlassHazeState()
 ) {
     val context = LocalContext.current
-    val resolver = context.contentResolver
     val scope = rememberCoroutineScope()
     val view = LocalView.current
 
     var scanning by remember { mutableStateOf(true) }
     // (已处理, 总数, 已发现产物数)
     var scanProgress by remember { mutableStateOf(Triple(0, 0, 0)) }
-    var rows by remember { mutableStateOf<List<LocationDisplayRepair.HealthRow>>(emptyList()) }
+    var outcome by remember {
+        mutableStateOf<LocationDisplayRepair.ScanOutcome?>(null)
+    }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var confirm by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
+    // 「待确认」默认折叠（列不可读时的诚实态，不与「需修复」混排）
+    var showUnknown by remember { mutableStateOf(false) }
+    // 「已正常」默认隐藏（只计数；点计数可展开核对）
+    var showOk by remember { mutableStateOf(false) }
     // 最近一次修复的逐张明细（诊断报告用）
     var lastRecords by remember { mutableStateOf<List<LocationHealth.ReportLine>>(emptyList()) }
     // 重建进度来自 LocationRepairService 的共享状态（后台跑，离开页面不中断）
@@ -98,29 +102,26 @@ fun LocationRecoveryScreen(
     val repairProgress = ConvertCenter.repairProgress
     val repairCurrent = ConvertCenter.repairCurrent
 
-    // 可修复的判定（EXIF 缺：注入+重建；EXIF 在：可强制重建让行坐标就位）
-    fun LocationHealth.Verdict.repairable(): Boolean = this in setOf(
-        LocationHealth.Verdict.XMP_ONLY, LocationHealth.Verdict.VIDEO_ONLY,
-        LocationHealth.Verdict.HAS_EXIF)
-
     val startScan: () -> Unit = {
         if (!ConvertCenter.isLocationRepairing) {
             scanning = true
             scanProgress = Triple(0, 0, 0)
-            rows = emptyList()
+            outcome = null
             selected = emptySet()
+            showUnknown = false
+            showOk = false
             scope.launch(Dispatchers.IO) {
-                val found = LocationDisplayRepair.scanProducts(context) { done, total, foundN ->
-                    scanProgress = Triple(done, total, foundN)
-                }
+                val found = LocationDisplayRepair.scanProducts(
+                    context,
+                    onProgress = { done, total, foundN ->
+                        scanProgress = Triple(done, total, foundN)
+                    })
                 withContext(Dispatchers.Main) {
-                    rows = found
-                    // 默认选中「EXIF 缺失」的（它们是真要修的）；EXIF 在的留手动
-                    selected = found.filter {
-                        it.probe.verdict in setOf(
-                            LocationHealth.Verdict.XMP_ONLY,
-                            LocationHealth.Verdict.VIDEO_ONLY)
-                    }.map { it.uri.toString() }.toSet()
+                    outcome = found
+                    // 默认只勾选「需修复」——它们才是用户要修的那几张
+                    selected = found.rows
+                        .filter { it.classification == LocationHealth.Classification.REPAIR_NEEDED }
+                        .map { it.uri.toString() }.toSet()
                     scanning = false
                 }
             }
@@ -128,7 +129,7 @@ fun LocationRecoveryScreen(
     }
 
     val startRebuild: () -> Unit = {
-        val targets = rows.filter { it.uri.toString() in selected }
+        val targets = (outcome?.rows ?: emptyList()).filter { it.uri.toString() in selected }
             .map { LocationDisplayRepair.RepairTarget(it.uri, it.name) }
         if (targets.isNotEmpty() && !ConvertCenter.isLocationRepairing) {
             // 后台服务执行重建：离开页面/切后台不中断，进度走共享状态 + 通知栏
@@ -150,7 +151,8 @@ fun LocationRecoveryScreen(
 
     // 重建完成回到本页时刷新列表：重建过的行已换新 URI、EXIF 已写回
     LaunchedEffect(repairing) {
-        if (!repairing && !scanning && ConvertCenter.repairResult == null && rows.isNotEmpty()) {
+        if (!repairing && !scanning && ConvertCenter.repairResult == null &&
+            outcome?.rows?.isNotEmpty() == true) {
             startScan()
         }
     }
@@ -160,24 +162,40 @@ fun LocationRecoveryScreen(
     }
     BackHandler(enabled = !repairing) { onBack() }
 
-    // 计数与分组
-    val counts = remember(rows) {
-        LocationHealth.Verdict.entries.associateWith { v -> rows.count { it.probe.verdict == v } }
+    // ── 分类分组（判定矩阵输出）──
+    val rows = outcome?.rows ?: emptyList()
+    val repairNeeded = remember(rows) {
+        rows.filter { it.classification == LocationHealth.Classification.REPAIR_NEEDED }
     }
-    val selectable = remember(rows) { rows.filter { it.probe.verdict.repairable() } }
+    val noLocation = remember(rows) {
+        rows.filter { it.classification == LocationHealth.Classification.NO_LOCATION }
+    }
+    val unknown = remember(rows) {
+        rows.filter { it.classification == LocationHealth.Classification.UNKNOWN }
+    }
+    val okRows = remember(rows) {
+        rows.filter { it.classification == LocationHealth.Classification.OK }
+    }
+    val unreadable = remember(rows) {
+        rows.filter { it.classification == LocationHealth.Classification.UNREADABLE }
+    }
+    // 可勾选的 = 需修复 + （展开后的）待确认；无位置/读取失败不可选
+    val selectable = remember(rows, showUnknown) {
+        repairNeeded + if (showUnknown) unknown else emptyList()
+    }
     val allSelected = selectable.isNotEmpty() && selected.size == selectable.size
-    val sections = remember(rows) {
-        rows.groupBy { r -> if (r.dateTaken > 0) dateLabel(r.dateTaken) else "时间未知" }
-            .map { (label, list) -> label to list }
-    }
 
     val exportReport: () -> Unit = {
         val lines = rows.map { r ->
             val record = lastRecords.firstOrNull { it.name == r.name }
             LocationHealth.ReportLine(
                 name = r.name,
-                verdict = r.probe.verdictLabel,
-                evidence = r.probe.evidence(),
+                verdict = r.classification.label +
+                    (r.rowCoordsPresent?.let { if (it) "（行坐标在位）" else "（行坐标缺失）" }
+                        ?: "（行坐标不可观测）"),
+                evidence = r.probe.evidence() + "；" + r.reason +
+                    (r.rowCoordsRaw?.let { "；行列原始读数=${"%.5f,%.5f".format(it.first, it.second)}" }
+                        ?: ""),
                 repair = record?.repair?.let { "${record.verdict}：$it" })
         } + lastRecords.filter { rec -> rows.none { it.name == rec.name } }
         // 版本信息走 PackageManager（不依赖 BuildConfig 生成开关）
@@ -187,16 +205,14 @@ fun LocationRecoveryScreen(
         } catch (_: Exception) {
             "unknown" to 0L
         }
+        val calib = outcome
         val report = LocationHealth.buildReport(
             appVersion = "$verName ($verCode)",
             device = "${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            calibration = calib?.let { "${it.calibration}（${it.calibDetail}）" } ?: "未扫描",
             rows = lines,
-            summary = "共 ${rows.size} 张产物：" +
-                "有位置 ${counts[LocationHealth.Verdict.HAS_EXIF] ?: 0}，" +
-                "EXIF 缺失 ${(counts[LocationHealth.Verdict.XMP_ONLY] ?: 0) +
-                    (counts[LocationHealth.Verdict.VIDEO_ONLY] ?: 0)}，" +
-                "无坐标 ${counts[LocationHealth.Verdict.NONE] ?: 0}，" +
-                "读失败 ${counts[LocationHealth.Verdict.UNREADABLE] ?: 0}"
+            summary = "共 ${rows.size} 张产物：需修复 ${repairNeeded.size}，待确认 ${unknown.size}，" +
+                "无位置 ${noLocation.size}，已正常 ${okRows.size}，读取失败 ${unreadable.size}"
         )
         try {
             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -280,14 +296,20 @@ fun LocationRecoveryScreen(
                         scanning -> "体检中 ${scanProgress.first}/${scanProgress.second}"
                         repairing -> "重建中 ${repairProgress.first}/${repairProgress.second}"
                         rows.isEmpty() -> "没有发现本工具产物"
-                        else -> "共 ${rows.size} 张：有位置 ${counts[LocationHealth.Verdict.HAS_EXIF] ?: 0}" +
-                            " · EXIF 缺失 ${(counts[LocationHealth.Verdict.XMP_ONLY] ?: 0) +
-                                (counts[LocationHealth.Verdict.VIDEO_ONLY] ?: 0)}" +
-                            " · 无坐标 ${counts[LocationHealth.Verdict.NONE] ?: 0}" +
-                            (if ((counts[LocationHealth.Verdict.UNREADABLE] ?: 0) > 0)
-                                " · 读失败 ${counts[LocationHealth.Verdict.UNREADABLE]}" else "")
+                        else -> "需修复 ${repairNeeded.size}" +
+                            (if (unknown.isNotEmpty()) " · 待确认 ${unknown.size}" else "") +
+                            (if (noLocation.isNotEmpty()) " · 无位置 ${noLocation.size}" else "") +
+                            (if (unreadable.isNotEmpty()) " · 读失败 ${unreadable.size}" else "") +
+                            " · 已正常 ${okRows.size}（点击显示）"
                     },
-                    style = glassSubtitleStyle(), modifier = Modifier.weight(1f)
+                    style = glassSubtitleStyle(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = !scanning && okRows.isNotEmpty()) {
+                            showOk = !showOk
+                        }
+                        .padding(vertical = 4.dp)
                 )
                 if (!scanning && selectable.isNotEmpty()) {
                     Text(
@@ -327,75 +349,174 @@ fun LocationRecoveryScreen(
                             GlassIndeterminateBar(Modifier.width(120.dp).height(3.dp))
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                "正在逐张读取产物文件做体检，已发现 ${scanProgress.third} 张",
+                                "正在逐张体检（文件坐标 + 媒体库行坐标），已发现 ${scanProgress.third} 张",
                                 style = TextStyle(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                    rows.isEmpty() -> Box(
+                    repairNeeded.isEmpty() && noLocation.isEmpty() && unknown.isEmpty() &&
+                        unreadable.isEmpty() -> Box(
                         Modifier.fillMaxSize(), contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "没有发现本工具产物\n\n体检范围：转换产物（EXIF/XMP/视频段逐张判定），\n" +
-                                "判定与修复都不依赖媒体库坐标列",
-                            style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        val calib = outcome
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                if (okRows.isEmpty()) "没有发现本工具产物"
+                                else "全部 ${okRows.size} 张产物的位置都正常\n\n" +
+                                    "「需修复」= 相册里不显示位置的照片；判定基于文件坐标" +
+                                    (if (calib?.calibration?.isUsable == true) "与媒体库行坐标"
+                                    else "（本机媒体库坐标列读不出，行坐标未能核对）"),
+                                style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (okRows.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    if (showOk) "收起已正常列表" else "查看已正常列表",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showOk = !showOk }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
                     }
                     else -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 4.dp, end = 4.dp, top = 4.dp, bottom = 116.dp)
                     ) {
-                        sections.forEach { (label, group) ->
-                            item(key = "hdr_$label") {
-                                val groupKeys = group
-                                    .filter { it.probe.verdict.repairable() }
-                                    .map { it.uri.toString() }.toSet()
-                                val groupAll = groupKeys.isNotEmpty() && groupKeys.all { it in selected }
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .padding(start = 12.dp, top = 14.dp, bottom = 6.dp, end = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            label,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            "${group.size} 张",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                        if (repairNeeded.isNotEmpty()) {
+                            item(key = "hdr_repair") {
+                                SectionHeader(
+                                    title = "需修复（${repairNeeded.size}）",
+                                    subtitle = "相册里不显示位置，勾选后可修复",
+                                    group = repairNeeded,
+                                    selected = selected,
+                                    onToggleGroup = { keys, select ->
+                                        selected = if (select) selected + keys else selected - keys
                                     }
-                                    if (groupKeys.isNotEmpty()) {
-                                        CircleTriCheckbox(
-                                            state = if (groupAll) ToggleableState.On
-                                            else ToggleableState.Off,
-                                            onClick = {
-                                                selected = if (groupAll) selected - groupKeys
-                                                else selected + groupKeys
-                                            },
-                                            contentDescription = "全选 $label 的可修复照片"
-                                        )
-                                    }
-                                }
+                                )
                             }
-                            items(group, key = { it.uri.toString() }) { row ->
+                            items(repairNeeded, key = { it.uri.toString() }) { row ->
                                 HealthRowCell(
                                     row = row,
                                     selected = row.uri.toString() in selected,
-                                    selectable = row.probe.verdict.repairable(),
+                                    selectable = true,
                                     onToggle = {
                                         val key = row.uri.toString()
                                         selected = if (key in selected) selected - key
                                         else selected + key
                                     }
                                 )
+                            }
+                        }
+                        if (noLocation.isNotEmpty()) {
+                            item(key = "hdr_noloc") {
+                                SectionHeader(
+                                    title = "无位置（${noLocation.size}）",
+                                    subtitle = "源照片拍摄时未记录坐标，相册不显示且无法恢复",
+                                    group = emptyList(),
+                                    selected = selected,
+                                    onToggleGroup = { _, _ -> }
+                                )
+                            }
+                            items(noLocation, key = { it.uri.toString() }) { row ->
+                                HealthRowCell(row = row, selected = false, selectable = false,
+                                    onToggle = {})
+                            }
+                        }
+                        if (unreadable.isNotEmpty()) {
+                            item(key = "hdr_unreadable") {
+                                SectionHeader(
+                                    title = "读取失败（${unreadable.size}）",
+                                    subtitle = "产物文件读取异常（故障，不是无坐标）",
+                                    group = emptyList(),
+                                    selected = selected,
+                                    onToggleGroup = { _, _ -> }
+                                )
+                            }
+                            items(unreadable, key = { it.uri.toString() }) { row ->
+                                HealthRowCell(row = row, selected = false, selectable = false,
+                                    onToggle = {})
+                            }
+                        }
+                        if (unknown.isNotEmpty()) {
+                            item(key = "hdr_unknown") {
+                                // 待确认：折叠态说明「为什么不能确定」；展开后可勾选修复
+                                Column(Modifier.fillMaxWidth().padding(
+                                    start = 12.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "待确认（${unknown.size}）" +
+                                                if (showUnknown) " · 收起" else " · 展开",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { showUnknown = !showUnknown }
+                                                .padding(vertical = 6.dp)
+                                        )
+                                        if (showUnknown) {
+                                            val keys = unknown.map { it.uri.toString() }.toSet()
+                                            val groupAll = keys.all { it in selected }
+                                            CircleTriCheckbox(
+                                                state = if (groupAll) ToggleableState.On
+                                                else ToggleableState.Off,
+                                                onClick = {
+                                                    selected = if (groupAll) selected - keys
+                                                    else selected + keys
+                                                },
+                                                contentDescription = "全选待确认照片"
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "这些照片文件已带坐标、大概率正常显示；" +
+                                            (if (outcome?.calibration?.isUsable == true)
+                                                "但个别行坐标读取失败，无法确认"
+                                            else
+                                                "本机媒体库坐标列读不出，无法确认行坐标是否在位") +
+                                            "。如发现某张在相册里没位置，展开勾选即可修复",
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (showUnknown) {
+                                items(unknown, key = { it.uri.toString() }) { row ->
+                                    HealthRowCell(
+                                        row = row,
+                                        selected = row.uri.toString() in selected,
+                                        selectable = true,
+                                        onToggle = {
+                                            val key = row.uri.toString()
+                                            selected = if (key in selected) selected - key
+                                            else selected + key
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        if (showOk && okRows.isNotEmpty()) {
+                            item(key = "hdr_ok") {
+                                SectionHeader(
+                                    title = "已正常（${okRows.size}）",
+                                    subtitle = "文件与媒体库行均带坐标",
+                                    group = emptyList(),
+                                    selected = selected,
+                                    onToggleGroup = { _, _ -> }
+                                )
+                            }
+                            items(okRows, key = { it.uri.toString() }) { row ->
+                                HealthRowCell(row = row, selected = false, selectable = false,
+                                    onToggle = {})
                             }
                         }
                     }
@@ -503,7 +624,45 @@ fun LocationRecoveryScreen(
     }
 }
 
-/** 体检行：缩略图 + 文件名 + 判定结论徽章 + 判定依据（每个来源解析到了什么）+ 勾选圈。 */
+/** 分组头：标题 + 说明 + 可选的组全选圈（group 为空时不显示圈） */
+@Composable
+private fun SectionHeader(
+    title: String,
+    subtitle: String,
+    group: List<LocationDisplayRepair.HealthRow>,
+    selected: Set<String>,
+    onToggleGroup: (Set<String>, Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 12.dp, top = 14.dp, bottom = 6.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                subtitle,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (group.isNotEmpty()) {
+            val keys = group.map { it.uri.toString() }.toSet()
+            val groupAll = keys.all { it in selected }
+            CircleTriCheckbox(
+                state = if (groupAll) ToggleableState.On else ToggleableState.Off,
+                onClick = { onToggleGroup(keys, !groupAll) },
+                contentDescription = "全选$title"
+            )
+        }
+    }
+}
+
+/** 体检行：缩略图 + 文件名 + 分类徽章 + 判定依据（信号原始读数）+ 勾选圈。 */
 @Composable
 private fun HealthRowCell(
     row: LocationDisplayRepair.HealthRow,
@@ -512,16 +671,20 @@ private fun HealthRowCell(
     onToggle: () -> Unit
 ) {
     val resolver = LocalContext.current.contentResolver
-    val verdict = row.probe.verdict
-    val (chipColor, chipBg) = when (verdict) {
-        LocationHealth.Verdict.HAS_EXIF -> statusColors.success to
-            statusColors.success.copy(alpha = 0.12f)
-        LocationHealth.Verdict.XMP_ONLY, LocationHealth.Verdict.VIDEO_ONLY ->
+    val classification = row.classification
+    val (chipColor, chipBg) = when (classification) {
+        LocationHealth.Classification.REPAIR_NEEDED ->
             statusColors.warning to statusColors.warning.copy(alpha = 0.14f)
-        LocationHealth.Verdict.NONE -> MaterialTheme.colorScheme.onSurfaceVariant to
+        LocationHealth.Classification.OK ->
+            statusColors.success to statusColors.success.copy(alpha = 0.12f)
+        LocationHealth.Classification.UNKNOWN ->
+            MaterialTheme.colorScheme.onSurfaceVariant to
             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.10f)
-        LocationHealth.Verdict.UNREADABLE -> MaterialTheme.colorScheme.error to
-            MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+        LocationHealth.Classification.NO_LOCATION ->
+            MaterialTheme.colorScheme.onSurfaceVariant to
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.10f)
+        LocationHealth.Classification.UNREADABLE ->
+            MaterialTheme.colorScheme.error to MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
     }
     Row(
         Modifier
@@ -562,8 +725,7 @@ private fun HealthRowCell(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        row.probe.verdictLabel +
-                            if (verdict == LocationHealth.Verdict.VIDEO_ONLY) "（坐标在视频段）" else "",
+                        classification.label,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
                         color = chipColor
@@ -572,13 +734,7 @@ private fun HealthRowCell(
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                row.probe.evidence() + when {
-                    verdict == LocationHealth.Verdict.HAS_EXIF ->
-                        "（相册不显示位置时也可勾选强制重建）"
-                    verdict == LocationHealth.Verdict.NONE -> "（三处都没有，无可修复）"
-                    verdict == LocationHealth.Verdict.UNREADABLE -> "（文件读失败，无法判定）"
-                    else -> ""
-                },
+                row.reason,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

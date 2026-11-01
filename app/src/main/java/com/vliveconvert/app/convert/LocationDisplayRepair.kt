@@ -1,6 +1,7 @@
 package com.vliveconvert.app.convert
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
@@ -15,20 +16,23 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 「找回位置 / 位置体检」（v2.6.0-test27 重做）：
+ * 「找回位置 / 位置体检」（v2.6.0-test28 重做检测）：
  *
- * 旧版扫描靠**媒体库坐标列查询**判定「谁缺位置」——test24~26 已证该列在 vivo 上
- * 读不回，以此为判据会把好照片误判、把坏照片漏掉。现在**判定全部基于产物文件
- * 字节**（EXIF/XMP/视频段，见 [LocationHealth]），媒体库只读列（名称/时间）仅作
- * 元数据，坐标列既不读也不信。
+ * 「需要修复」的定义 = **vivo 相册里该照片不显示位置**（用户可观察的最终事实），
+ * 不是「文件无 EXIF」也不是「坐标列为空」。检测 = 判定矩阵
+ * （[LocationHealth.classify]）：文件字节信号（EXIF/XMP/视频段）× 行坐标信号
+ * （媒体库坐标列，**每次扫描先现场校准其可读性**——正反两条 IS_PENDING 探针行
+ * 对照，不信任何历史结论）。
  *
- * 修复机制：缺 EXIF 的先把坐标写回文件 EXIF（媒体扫描重算坐标列的唯一长效依据），
- * 再走行重建（[MediaExport.rebuildRowWithCoords]：临时名先建新行、读回校验、
- * 旧行后删、IS_FAVORITE 随迁）；每张修复后**读回验证**，失败显式记录原因。
- * 逐张结果可导出诊断报告（判定依据 + 修复路径 + 失败原因），真机回传即可定位。
+ * 旧版（test27）的问题：扫描返回**全部产物**（100 张全列出），而文件信号对
+ * 「相册显示与否」没有区分力——文件有 EXIF 的 95 张（大概率正常）把真正不显示
+ * 的 5 张淹没了。现在默认只列「需修复」与「无位置」，「待确认」（列不可读时
+ * 文件有坐标的那批）折叠展示并说明原因，「已正常」只计数不列出。
  *
- * 分批与空间守卫：重建会在回收站留下副本（约等于产物总体积），可用空间低于
- * [MIN_FREE_BYTES] 自动暂停；已处理文件名持久化，可中断续跑。
+ * 修复机制不变：缺 EXIF 的先写回文件 EXIF，再行重建
+ * （[MediaExport.rebuildRowWithCoords]：临时名先建新行、读回校验、旧行后删、
+ * IS_FAVORITE 随迁）；每张修复后**读回验证**，失败显式记录原因。
+ * 逐张信号与修复结果可导出诊断报告，真机回传即可定位。
  */
 internal object LocationDisplayRepair {
 
@@ -89,38 +93,174 @@ internal object LocationDisplayRepair {
         try { File(context.filesDir, PROGRESS_FILE).delete() } catch (_: Exception) {}
     }
 
-    /** 体检结果行：产物 + 文件事实判定（含每个坐标来源解析到了什么） */
+    /** 体检结果行：产物 + 全部信号 + 判定矩阵输出（含人可读的判定依据） */
     data class HealthRow(
         val uri: Uri,
         val name: String,
         val dateTaken: Long,
-        val probe: LocationHealth.Probe
+        val probe: LocationHealth.Probe,
+        /** 直接 projection 读到的行坐标原始值（脱敏/缺失/不可读时为 null；诊断报告用） */
+        val rowCoordsRaw: Pair<Double, Double>?,
+        /** 行坐标是否在位（null = 不可观测：列不可读且无 escalate 证据） */
+        val rowCoordsPresent: Boolean?,
+        /** 判定矩阵输出 */
+        val classification: LocationHealth.Classification,
+        /** 判定依据（人可读） */
+        val reason: String
     )
 
     /** 修复目标（后台服务只需要 URI 与名字；修复时重新探针） */
     data class RepairTarget(val uri: Uri, val name: String)
 
+    /** 列读信号：校准结论 + 两种读法（生产由 [calibrateColumns] 构建，测试可注入） */
+    internal class ColumnSignal(
+        val calibration: LocationHealth.ColumnCalibration,
+        val detail: String,
+        /** 直接 projection 读行坐标；读不到值返回 null */
+        val readDirect: (Uri) -> Pair<Double, Double>?,
+        /** selection oracle 读「行坐标是否在位」；该方法不可用时返回 null */
+        val readPresenceViaSelection: (Uri) -> Boolean?
+    )
+
+    /** 扫描结果：校准环境 + 全部产物行（已分类） */
+    data class ScanOutcome(
+        val calibration: LocationHealth.ColumnCalibration,
+        val calibDetail: String,
+        val rows: List<HealthRow>
+    )
+
     /**
-     * 扫描本工具全部转换产物并逐张做位置体检（**不读媒体库坐标列**）。
+     * 坐标列可读性校准（每次扫描现场执行，毫秒级）：
+     * 正探针 = IS_PENDING 行**出生带坐标**；负探针 = 同型行**出生不带坐标**。
+     * ① 直接 projection 读正探针 → 有值 = READABLE；
+     * ② 否则 selection oracle（`latitude IS NOT NULL AND _ID=?`）：正命中 + 负不命中
+     *    = READABLE_VIA_SELECTION（projection 被脱敏但 selection 判定仍用真值）；
+     *    正负都命中 = selection 被忽略，不可用；
+     * ③ 都不行 = OPAQUE；过程异常 = FAILED（detail 带原因）。
+     * 探针行对相册不可见（pending），finally 里必删。
+     */
+    fun calibrateColumns(resolver: android.content.ContentResolver): ColumnSignal {
+        val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        var pos: Uri? = null
+        var neg: Uri? = null
+        var outcome: LocationHealth.ColumnCalibration
+        var detail: String
+        try {
+            pos = resolver.insert(images, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "vlc_calib_pos.jpg")
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/VLiveConvert")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                put("latitude", 22.0)
+                put("longitude", 108.0)
+            })
+            neg = resolver.insert(images, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "vlc_calib_neg.jpg")
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/VLiveConvert")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            })
+            if (pos == null || neg == null) {
+                outcome = LocationHealth.ColumnCalibration.FAILED
+                detail = "探针行插入失败（pos=${pos != null}, neg=${neg != null}）"
+            } else {
+                // 写最小内容：个别 Provider 对空文件行为不定
+                val head = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+                runCatching { resolver.openOutputStream(pos, "w")?.use { it.write(head) } }
+                runCatching { resolver.openOutputStream(neg, "w")?.use { it.write(head) } }
+                val direct = readCoordsDirect(resolver, pos)
+                if (direct != null) {
+                    outcome = LocationHealth.ColumnCalibration.READABLE
+                    detail = "直接读回 ${direct.first},${direct.second}（正探针出生带坐标）"
+                } else {
+                    val posHit = presenceViaSelection(resolver, pos)
+                    val negHit = presenceViaSelection(resolver, neg)
+                    when {
+                        posHit == true && negHit == false -> {
+                            outcome = LocationHealth.ColumnCalibration.READABLE_VIA_SELECTION
+                            detail = "projection 读不出值；selection 可区分在位与否"
+                        }
+                        posHit == true && negHit == true -> {
+                            outcome = LocationHealth.ColumnCalibration.OPAQUE
+                            detail = "selection 不区分（正负探针都命中）"
+                        }
+                        else -> {
+                            outcome = LocationHealth.ColumnCalibration.OPAQUE
+                            detail = "projection 与 selection 都读不出正探针的坐标"
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            outcome = LocationHealth.ColumnCalibration.FAILED
+            detail = "校准异常：${e.javaClass.simpleName}: ${e.message}"
+        } finally {
+            pos?.let { runCatching { resolver.delete(it, null, null) } }
+            neg?.let { runCatching { resolver.delete(it, null, null) } }
+        }
+        return ColumnSignal(
+            calibration = outcome,
+            detail = detail,
+            readDirect = { uri -> readCoordsDirect(resolver, uri) },
+            readPresenceViaSelection = { uri ->
+                if (outcome == LocationHealth.ColumnCalibration.READABLE_VIA_SELECTION)
+                    presenceViaSelection(resolver, uri) else null
+            }
+        )
+    }
+
+    /** 直接 projection 读行坐标（item URI）；读不到值返回 null */
+    private fun readCoordsDirect(
+        resolver: android.content.ContentResolver,
+        uri: Uri
+    ): Pair<Double, Double>? = try {
+        resolver.query(uri, arrayOf("latitude", "longitude"), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1))
+                c.getDouble(0) to c.getDouble(1) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** selection oracle：行坐标是否在位（`latitude IS NOT NULL`）；异常返回 null */
+    private fun presenceViaSelection(
+        resolver: android.content.ContentResolver,
+        uri: Uri
+    ): Boolean? = try {
+        val id = ContentUris.parseId(uri)
+        resolver.query(
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            arrayOf(MediaStore.MediaColumns._ID),
+            "latitude IS NOT NULL AND ${MediaStore.MediaColumns._ID}=?",
+            arrayOf(id.toString()), null
+        )?.use { it.count > 0 }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * 扫描本工具全部转换产物，逐张做位置体检并按判定矩阵分类。
      *
-     * 两阶段：
+     * 两阶段收集（同旧版）：
      * - **索引直查**：ConvertedStore（源路径→产物 URI）命中的行直接体检，免嗅探
      * - **全相册嗅探兜底**：DCIM/Camera 与输出目录的行按头部 XMP 产物标记识别，
      *   非产物记入已处理名单（下次跳过）
      *
-     * 体检（[probeUri]）：先读头 256KB 查 EXIF/XMP；都没有再全量读查嵌入视频段。
-     * 返回**全部产物**（不止缺位置的）——用户要能看出「哪些有、哪些缺、哪些读不动」。
+     * 体检信号：文件字节（[probeUri]：头 256KB 查 EXIF/XMP，都没有再全量读查视频段）
+     * + 行坐标（[ColumnSignal]；每行都做直接读——列不可读时该读数仍进诊断报告，
+     * 且若任一行意外读到值，说明列实际可读，整体升级为可读（escalate））。
      */
     suspend fun scanProducts(
         context: Context,
         /** (已处理, 总数, 已发现产物数) */
-        onProgress: (Int, Int, Int) -> Unit = { _, _, _ -> }
-    ): List<HealthRow> {
+        onProgress: (Int, Int, Int) -> Unit = { _, _, _ -> },
+        /** 测试注入的列读信号；null = 现场校准 */
+        columnSignal: ColumnSignal? = null
+    ): ScanOutcome {
         val resolver = context.contentResolver
+        val signal = columnSignal ?: calibrateColumns(resolver)
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val processed = loadProcessed(context)
-        val results = Collections.synchronizedList(ArrayList<HealthRow>())
-        val knownProductUris = Collections.synchronizedSet(HashSet<Uri>())
 
         // ── 阶段 A：索引直查（ConvertedStore：源路径 → 产物 URI）──
         val pairs = try { ConvertedStore.load(context).toList() } catch (_: Exception) { emptyList() }
@@ -138,13 +278,14 @@ internal object LocationDisplayRepair {
                     if (!c.moveToFirst()) return@use // 行已失效（删除/移动）：交嗅探兜底
                     val name = c.getString(0) ?: File(srcPath).name
                     val dateTaken = if (c.isNull(1)) 0L else c.getLong(1)
-                    knownProductUris.add(uri)
                     indexedRows.add(Triple(uri, name, dateTaken))
                 }
             } catch (_: Exception) {}
         }
 
         // ── 阶段 B：全相册嗅探（排除索引已报与已处理名单）──
+        val indexedKeys = HashSet<Uri>()
+        for ((uri, _, _) in indexedRows) indexedKeys.add(uri)
         data class Row(val uri: Uri, val name: String, val dateTaken: Long)
         val rows = ArrayList<Row>()
         try {
@@ -164,7 +305,7 @@ internal object LocationDisplayRepair {
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val uri = ContentUris.withAppendedId(images, id)
-                    if (uri in knownProductUris) continue
+                    if (uri in indexedKeys) continue // 阶段 A 索引已报，免重复
                     val name = c.getString(1) ?: continue
                     if (name in processed) continue
                     val dateTaken = if (c.isNull(2)) 0L else c.getLong(2)
@@ -173,22 +314,35 @@ internal object LocationDisplayRepair {
             }
         } catch (_: Exception) {}
 
-        // 嗅探产物标记 + 体检：IO 密集，4 路并行；进度用原子计数
+        // 并行体检：文件探针 + 行坐标直接读 +（selection 模式下的）在位判定
+        data class RawRow(
+            val uri: Uri, val name: String, val dateTaken: Long,
+            val probe: LocationHealth.Probe,
+            val rowCoordsRaw: Pair<Double, Double>?,
+            val presenceViaSel: Boolean?
+        )
+        val raws = Collections.synchronizedList(ArrayList<RawRow>())
         val total = indexedRows.size + rows.size
         val done = AtomicInteger(0)
         val sem = Semaphore(SCAN_PARALLELISM)
+        suspend fun probeAll(uri: Uri, name: String, dateTaken: Long) {
+            sem.withPermit {
+                try {
+                    raws.add(RawRow(
+                        uri, name, dateTaken,
+                        probeUri(resolver, uri),
+                        signal.readDirect(uri),
+                        if (signal.calibration == LocationHealth.ColumnCalibration.READABLE_VIA_SELECTION)
+                            signal.readPresenceViaSelection(uri) else null))
+                } catch (_: Exception) {
+                } finally {
+                    onProgress(done.incrementAndGet(), total, raws.size)
+                }
+            }
+        }
         coroutineScope {
             for ((uri, name, dateTaken) in indexedRows) {
-                launch(Dispatchers.IO) {
-                    sem.withPermit {
-                        try {
-                            results.add(HealthRow(uri, name, dateTaken, probeUri(resolver, uri)))
-                        } catch (_: Exception) {
-                        } finally {
-                            onProgress(done.incrementAndGet(), total, results.size)
-                        }
-                    }
-                }
+                launch(Dispatchers.IO) { probeAll(uri, name, dateTaken) }
             }
             for (row in rows) {
                 launch(Dispatchers.IO) {
@@ -197,23 +351,53 @@ internal object LocationDisplayRepair {
                             val header = readHeader(resolver, row.uri, SCAN_SNIFF_LIMIT)
                                 ?: return@withPermit
                             if (containsBytes(header, APP_OUTPUT_MARKER)) {
-                                results.add(HealthRow(
-                                    row.uri, row.name, row.dateTaken, probeUri(resolver, row.uri)))
+                                raws.add(RawRow(
+                                    row.uri, row.name, row.dateTaken,
+                                    probeUri(resolver, row.uri),
+                                    signal.readDirect(row.uri),
+                                    if (signal.calibration == LocationHealth.ColumnCalibration.READABLE_VIA_SELECTION)
+                                        signal.readPresenceViaSelection(row.uri) else null))
                             } else {
                                 synchronized(processed) { processed.add(row.name) }
                             }
                         } catch (_: Exception) {
                         } finally {
-                            onProgress(done.incrementAndGet(), total, results.size)
+                            onProgress(done.incrementAndGet(), total, raws.size)
                         }
                     }
                 }
             }
         }
         saveProcessed(context, processed)
-        onProgress(total, total, results.size)
-        return results.sortedWith(
+        onProgress(total, total, raws.size)
+
+        // ── 分类（判定矩阵）：escalate = 列名义不可读，但有任一行读到值 → 实际可读 ──
+        val escalated = raws.any { it.rowCoordsRaw != null }
+        val columnsReadable = signal.calibration.isUsable || escalated
+        val classified = raws.map { r ->
+            val presence: Boolean? = when (signal.calibration) {
+                LocationHealth.ColumnCalibration.READABLE_VIA_SELECTION -> r.presenceViaSel
+                LocationHealth.ColumnCalibration.READABLE -> r.rowCoordsRaw != null
+                LocationHealth.ColumnCalibration.OPAQUE,
+                LocationHealth.ColumnCalibration.FAILED ->
+                    if (escalated) r.rowCoordsRaw != null else null
+            }
+            val fileUnreadable = r.probe.unreadable
+            val fileHasExif = r.probe.exif != null
+            val hasFallback = r.probe.xmp != null || r.probe.video != null
+            val c = LocationHealth.classify(
+                fileUnreadable, fileHasExif, hasFallback, columnsReadable, presence)
+            HealthRow(
+                uri = r.uri, name = r.name, dateTaken = r.dateTaken,
+                probe = r.probe,
+                rowCoordsRaw = r.rowCoordsRaw,
+                rowCoordsPresent = presence,
+                classification = c,
+                reason = LocationHealth.classificationReason(
+                    c, fileHasExif, hasFallback, columnsReadable, presence))
+        }.sortedWith(
             compareByDescending<HealthRow> { it.dateTaken }.thenByDescending { it.name })
+        return ScanOutcome(signal.calibration, signal.detail, classified)
     }
 
     /** 只重建传入的记录（选中式修复）：逐张走 [LocationHealth.repairProduct]，
@@ -420,15 +604,21 @@ internal object LocationDisplayRepair {
         uri: Uri,
         limit: Int = PROBE_HEAD_LIMIT
     ): ByteArray? {
-        return resolver.openInputStream(uri)?.use { ins ->
-            val buf = ByteArray(limit)
-            var n = 0
-            while (n < buf.size) {
-                val r = ins.read(buf, n, buf.size - n)
-                if (r < 0) break
-                n += r
+        // 异常安全：行失效/文件缺失时 openInputStream 抛异常——返回 null 让上层
+        // 把它归入 UNREADABLE（读取失败），而不是异常上抛被吞、该行凭空消失
+        return try {
+            resolver.openInputStream(uri)?.use { ins ->
+                val buf = ByteArray(limit)
+                var n = 0
+                while (n < buf.size) {
+                    val r = ins.read(buf, n, buf.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
             }
-            if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
+        } catch (_: Exception) {
+            null
         }
     }
 

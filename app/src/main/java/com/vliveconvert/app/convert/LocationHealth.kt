@@ -79,6 +79,109 @@ internal object LocationHealth {
             "%.5f,%.5f".format(c.first, c.second)
     }
 
+    // ── 媒体库坐标列校准（「相册是否显示位置」的直接信号是否可用）──
+
+    /**
+     * 列读校准结论。校准方法：用「出生带坐标 / 出生不带坐标」的两条 IS_PENDING
+     * 探针行做正反对照（pending 行对相册不可见、用完即删）：
+     * - 直接 projection 读（item URI）
+     * - selection oracle（`latitude IS NOT NULL`——脱敏若只改写结果集不改判定，
+     *   这条仍能区分在位与否；负探针防「selection 被忽略」的假阳性）
+     *
+     * 校准结论决定行坐标信号是否可用，**而不是靠相信任何一次历史结论**——
+     * test24 的「读不回」是在特定路径下得出的，本机制在每次扫描时现场重测。
+     */
+    enum class ColumnCalibration {
+        /** 直接 projection 读得出值 → 行坐标在位与否可直接观测 */
+        READABLE,
+        /** projection 读不出，但 selection 能区分在位与否（正探针命中、负探针不命中） */
+        READABLE_VIA_SELECTION,
+        /** 两条路都读不出（坐标列对本应用脱敏/不落库）→ 行坐标不可观测 */
+        OPAQUE,
+        /** 校准过程异常（插入/查询失败）→ 按不可读处理，detail 带原因 */
+        FAILED;
+
+        val isUsable: Boolean
+            get() = this == READABLE || this == READABLE_VIA_SELECTION
+    }
+
+    /**
+     * 用户可见的最终分类（判定矩阵 [classify] 的输出）。
+     * 定义基准：「需要修复」= **vivo 相册里不显示位置**——不是「文件无 EXIF」，
+     * 不是「坐标列为空」，也不是「产物结构看起来不对」。
+     */
+    enum class Classification(val label: String) {
+        /** 相册不显示位置，且本工具能修（注入 EXIF + 行重建） */
+        REPAIR_NEEDED("需修复"),
+        /** 相册显示位置（默认不列出，只计数） */
+        OK("已正常"),
+        /** 有限信号下无法判定（文件有坐标、大概率正常，但行坐标不可观测） */
+        UNKNOWN("待确认"),
+        /** 源照片本无坐标：相册也不显示，但无数据可修 */
+        NO_LOCATION("无位置"),
+        /** 产物文件读取失败（故障，不是无坐标） */
+        UNREADABLE("读取失败")
+    }
+
+    /**
+     * 判定矩阵（纯函数，全组合可单测）：
+     *
+     * | 文件读失败 | 文件EXIF | 备用坐标 | 列可读 | 行坐标 | → 分类 |
+     * |---|---|---|---|---|---|
+     * | ✓ | - | - | - | - | UNREADABLE（读失败≠无坐标） |
+     * | ✗ | 有 | - | ✓ | 有 | OK（行坐标在位→相册显示） |
+     * | ✗ | 有 | - | ✓ | 无 | REPAIR_NEEDED（文件有坐标但行缺→相册不显示） |
+     * | ✗ | 有 | - | ✓ | 读不出 | UNKNOWN（单行读取失败） |
+     * | ✗ | 有 | - | ✗ | - | UNKNOWN（大概率正常，行不可观测） |
+     * | ✗ | 无 | 有 | 任意 | 任意 | REPAIR_NEEDED（无EXIF→扫描抹行坐标；可注入+重建） |
+     * | ✗ | 无 | 无 | 任意 | 任意 | NO_LOCATION（源无坐标，修不了） |
+     *
+     * 依据：①「相册显示只认行坐标列」与②「媒体扫描按文件 EXIF 重算行坐标」
+     * 均为项目 2026-10 真机结论；行坐标是否可观测由每次扫描的现场校准决定。
+     */
+    fun classify(
+        fileUnreadable: Boolean,
+        fileHasExifGps: Boolean,
+        hasFallbackCoords: Boolean,
+        columnsReadable: Boolean,
+        rowHasCoords: Boolean?
+    ): Classification = when {
+        fileUnreadable -> Classification.UNREADABLE
+        !fileHasExifGps ->
+            if (hasFallbackCoords) Classification.REPAIR_NEEDED else Classification.NO_LOCATION
+        columnsReadable -> when (rowHasCoords) {
+            true -> Classification.OK
+            false -> Classification.REPAIR_NEEDED
+            null -> Classification.UNKNOWN
+        }
+        else -> Classification.UNKNOWN
+    }
+
+    /** 分类的判定依据（UI 展示与诊断报告用；与 [classify] 的分支一一对应） */
+    fun classificationReason(
+        classification: Classification,
+        fileHasExifGps: Boolean,
+        hasFallbackCoords: Boolean,
+        columnsReadable: Boolean,
+        rowHasCoords: Boolean?
+    ): String = when (classification) {
+        Classification.UNREADABLE -> "产物文件读取失败，无法判定（故障，不是无坐标）"
+        Classification.OK -> "文件与媒体库行均带坐标（相册应显示位置）"
+        Classification.REPAIR_NEEDED ->
+            if (!fileHasExifGps)
+                "文件无 EXIF 坐标（可从 XMP/视频段恢复）——媒体扫描会抹掉行坐标，相册不显示"
+            else if (rowHasCoords == false)
+                "文件有坐标，但媒体库行坐标缺失——相册不显示"
+            else "文件有坐标但行坐标读不出"
+        Classification.UNKNOWN ->
+            if (columnsReadable) "该行坐标读取失败，无法判定"
+            else "文件有坐标、大概率正常；本机媒体库坐标列读不出，无法确认行坐标是否在位"
+        Classification.NO_LOCATION ->
+            if (rowHasCoords == true)
+                "源照片无坐标（相册当前显示位置，但文件无 EXIF，媒体重扫后可能丢失，无法预防）"
+            else "源照片无坐标（拍摄时未记录位置），相册不显示且无法恢复"
+    }
+
     /** 头部快查（EXIF/XMP 都在文件头部）：扫描热路径用，不读全量 */
     fun probeHead(head: ByteArray): Probe {
         val exif = try { JpegUtil.gpsCoordinates(head) } catch (_: Exception) { null }
@@ -197,10 +300,11 @@ internal object LocationHealth {
         }
     }
 
-    /** 生成可回传的诊断报告（每张产物的判定依据 + 修复路径与结果） */
+    /** 生成可回传的诊断报告（每张产物的判定依据 + 修复路径与结果 + 校准环境） */
     fun buildReport(
         appVersion: String,
         device: String,
+        calibration: String,
         rows: List<ReportLine>,
         summary: String
     ): String = buildString {
@@ -208,7 +312,8 @@ internal object LocationHealth {
         appendLine("版本：$appVersion")
         appendLine("设备：$device")
         appendLine("时间：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
-        appendLine("说明：判定全部基于产物文件字节（EXIF/XMP/视频段），不依赖媒体库坐标列")
+        appendLine("坐标列校准：$calibration")
+        appendLine("判定：文件字节（EXIF/XMP/视频段）× 行坐标（校准可用时）→ 判定矩阵")
         appendLine("————")
         rows.forEach { appendLine(it.render()) }
         appendLine("————")
