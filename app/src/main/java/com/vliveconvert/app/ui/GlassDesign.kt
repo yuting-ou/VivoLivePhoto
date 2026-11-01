@@ -982,7 +982,10 @@ fun GlassOutlineButton(
             .clickable(interactionSource = interaction, indication = LocalIndication.current) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Text(text, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium, color = color))
+        // 单行约束：胶囊按钮高度固定 48dp，文本换行会把按钮撑破 Dock（真机截图
+        // 实锤过「修复所选（3）」换行溢出）——超长由调用方缩短文案解决，组件兜底不换行
+        Text(text, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            color = color), maxLines = 1)
     }
 }
 
