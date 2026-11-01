@@ -105,10 +105,9 @@ class OverwriteLocationRebuildTest {
     fun rebuildGivesNewRowBornWithCoords() {
         val bytes = jpegWithGps(22, 108)
         val old = putCoordlessRow("IMG_REBUILD.jpg", byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
-        val src = File(makeResult(bytes, "IMG_REBUILD").path)
 
         val newUri = MediaExport.rebuildRowWithCoords(
-            resolver, old, src, 1_700_000_000_000L, 22.0 to 108.0)
+            resolver, old, bytes, 1_700_000_000_000L, 22.0 to 108.0)
 
         assertNotNull("重建应产出新行", newUri)
         assertTrue("旧行应已删除（文件名空出，无 (1) 序号）", newUri != old)

@@ -79,12 +79,14 @@ internal object VivoSingle {
         if (sourceXmpGps.isNotEmpty()) {
             log("info", "源 XMP 含 GPS 字段（${sourceXmpGps.size} 项），已合并保留位置信息", "vivo")
         }
-        // 源指纹：源 JPEG 的 SHA-256 前 16 位 hex。写入输出 XMP（vlp:sourceFingerprint），
-        // 供「异源同名不覆盖」判定——重装应用后旁路记录会丢，指纹在产物里不会丢
-        val sourceFingerprint = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(asset.primaryJpeg)
-            .joinToString("") { "%02x".format(it) }
-            .take(16)
+        // 源指纹：对**原始主图**（任何管线内改动之前）的 SHA-256 前 16 位 hex。
+        // Converter 在转换开始时算好放进 extras（保证注入 GPS 后指纹仍与既往产物一致，
+        // 重转才能原地覆盖）；直接调用本函数的测试路径回退为现场计算
+        val sourceFingerprint = (asset.extras["source_fingerprint"] as? String)
+            ?: java.security.MessageDigest.getInstance("SHA-256")
+                .digest(asset.primaryJpeg)
+                .joinToString("") { "%02x".format(it) }
+                .take(16)
         val xmp = XmpTemplate.buildVivoSingleXmp(
             pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps,
             sourceFingerprint)
@@ -138,7 +140,12 @@ internal object VivoSingle {
             outPath, segments,
             sourceHasGps = asset.extras["source_has_gps"] == true,
             sourceFingerprint = sourceFingerprint,
-            sourceFormat = asset.sourceFormat)
+            sourceFormat = asset.sourceFormat,
+            sourceHasLocation = asset.extras["source_has_location"] == true,
+            gpsInjected = asset.extras["gps_injected"] == true,
+            gpsInjectFailed = asset.extras["gps_inject_failed"] as? String,
+            // 产物 EXIF 是否带 GPS：对**最终写出的主图**判定（注入后的字节）
+            outputHasExifGps = JpegUtil.hasGpsExif(primary))
     }
 
     /**

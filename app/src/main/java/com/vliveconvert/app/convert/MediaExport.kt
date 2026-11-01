@@ -32,42 +32,6 @@ internal object MediaExport {
         values.put(GPS_LONGITUDE_COLUMN, coords.second)
     }
 
-    /** 把坐标写入既有行；coords=null 时清列（行应如实描述当前文件）。失败不致命。 */
-    private fun updateLocationColumns(
-        resolver: android.content.ContentResolver,
-        uri: Uri,
-        coords: Pair<Double, Double>?
-    ) {
-        try {
-            resolver.update(uri, ContentValues().apply {
-                if (coords != null) {
-                    put(GPS_LATITUDE_COLUMN, coords.first)
-                    put(GPS_LONGITUDE_COLUMN, coords.second)
-                } else {
-                    putNull(GPS_LATITUDE_COLUMN)
-                    putNull(GPS_LONGITUDE_COLUMN)
-                }
-            }, null, null)
-        } catch (_: Exception) {}
-    }
-
-    /** 读既有行的坐标列（两者皆有才返回；与 vivo 相册「位置」显示同源） */
-    private fun queryLocationColumns(
-        resolver: android.content.ContentResolver,
-        uri: Uri
-    ): Pair<Double, Double>? {
-        return try {
-            resolver.query(uri, arrayOf(GPS_LATITUDE_COLUMN, GPS_LONGITUDE_COLUMN),
-                null, null, null)?.use { c ->
-                if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1))
-                    c.getDouble(0) to c.getDouble(1)
-                else null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     /**
      * 坐标一致性（EXIF 解析值 vs 媒体库列值）：EXIF 有理数与十进制度互转存在
      * 低位精度差，1e-6（约 0.1 米）内视为相同，避免重建被数值毛刺反复触发。
@@ -81,16 +45,60 @@ internal object MediaExport {
             kotlin.math.abs(a.second - b.second) < 1e-6
     }
 
+    /** 坐标三级兜底链的解析结果（含来源溯源，供批次摘要与复用方区分） */
+    internal class CoordResolution(
+        val coords: Pair<Double, Double>?,
+        val fromExif: Boolean,
+        val fromXmp: Boolean,
+        val fromVideo: Boolean
+    )
+
     /**
-     * 行重建（覆盖路径专用）：vivo 对既有行的坐标列 UPDATE 静默忽略，坐标不一致时
-     * 只能「删行重插」让新行出生带坐标。文件名/目录/时间戳逐项保留（recreateRow 同款
-     * 纪律：DATE_ADDED 决定微信等按加入时间的分组，必须沿用）；字节来自 [src]
-     * （已通过 MD5 自检的产物）。失败时清理半成品并返回 null（调用方落到新建路径）。
+     * 从**文件字节**解析坐标（EXIF → XMP → 嵌入视频段）。
+     * 这是「位置体检/移动回退/导出」共用的唯一取证入口：**全部基于文件内容**，
+     * 不依赖媒体库坐标列（test24-26 已证该列在 vivo 上读不回，不能当判据）。
+     */
+    internal fun resolveCoords(
+        bytes: ByteArray,
+        xmpText: String? = try {
+            JpegUtil.findXmpSegment(bytes)?.xmpText
+        } catch (_: Exception) {
+            null
+        }
+    ): CoordResolution {
+        var coords = try {
+            JpegUtil.gpsCoordinates(bytes)
+        } catch (_: Exception) {
+            null
+        }
+        if (coords != null) return CoordResolution(coords, fromExif = true, fromXmp = false, fromVideo = false)
+        coords = try { XmpTemplate.gpsCoordsFromXmp(xmpText) } catch (_: Exception) { null }
+        if (coords != null) return CoordResolution(coords, fromExif = false, fromXmp = true, fromVideo = false)
+        coords = try {
+            GpsRecovery.recoverFromVideoSegment(bytes)
+        } catch (_: Exception) {
+            null
+        }
+        if (coords != null) return CoordResolution(coords, fromExif = false, fromXmp = false, fromVideo = true)
+        return CoordResolution(null, fromExif = false, fromXmp = false, fromVideo = false)
+    }
+
+    /**
+     * 行重建（覆盖路径专用）：vivo 对既有行的坐标列 UPDATE 静默忽略，坐标要刷新只能
+     * 「删行重插」让新行出生带坐标。
+     *
+     * v2.6.0-test27 安全化（消除「删完插入失败导致产物消失」与「重建丢收藏」）：
+     * 1. 先读旧行**全部可搬列**（含 IS_FAVORITE——重转不再静默取消收藏）
+     * 2. 以**临时名 + IS_PENDING** 插入新行 → 写入全部字节 → **读回逐字节校验**
+     * 3. 新行落地**之后**才删旧行（旧文件进 vivo 回收站）→ 新行改回原名
+     * 任何一步失败：删除临时新行，旧行原样保留——旧产物绝不在「删除成功、
+     * 新建失败」的窗口里消失。时间戳逐项保留（DATE_ADDED 依旧尽量沿用；
+     * 该列在 vivo 上被系统强制改写属平台限制，见 README 已知说明）。
      */
     internal fun rebuildRowWithCoords(
         resolver: android.content.ContentResolver,
         old: Uri,
-        src: File,
+        content: ByteArray,
         timestamp: Long,
         coords: Pair<Double, Double>?,
         stats: LocationStats? = null
@@ -100,13 +108,15 @@ internal object MediaExport {
         var dateTaken: Long
         var dateModified: Long
         var dateAdded: Long
+        var favorite = 0
         try {
             resolver.query(old, arrayOf(
                 MediaStore.MediaColumns.DISPLAY_NAME,
                 MediaStore.MediaColumns.RELATIVE_PATH,
                 MediaStore.MediaColumns.DATE_TAKEN,
                 MediaStore.MediaColumns.DATE_MODIFIED,
-                MediaStore.MediaColumns.DATE_ADDED
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.IS_FAVORITE
             ), null, null, null)?.use { c ->
                 if (!c.moveToFirst()) return null
                 name = c.getString(0) ?: return null
@@ -114,6 +124,7 @@ internal object MediaExport {
                 dateTaken = if (c.isNull(2)) timestamp else c.getLong(2)
                 dateModified = if (c.isNull(3)) timestamp / 1000 else c.getLong(3)
                 dateAdded = if (c.isNull(4)) 0L else c.getLong(4)
+                favorite = if (c.isNull(5)) 0 else c.getInt(5)
             } ?: return null
         } catch (_: Exception) {
             return null
@@ -122,54 +133,77 @@ internal object MediaExport {
         if (dateModified <= 0L) dateModified = timestamp / 1000
         if (dateAdded <= 0L) dateAdded = dateTaken / 1000
 
-        val deleted = try {
-            resolver.delete(old, null, null)
-        } catch (_: Exception) {
-            return null
-        }
-        if (deleted <= 0) return null
-
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        // 临时名：与旧行同目录但不撞名（旧行还占着原名）；IS_PENDING 挡住媒体扫描，
+        // 避免「空文件被扫描」的竞态（此前直接 0 放行再写，扫描能看到半截文件）
+        val tempName = "${name.substringBeforeLast('.')}.vlc_rebuild.jpg"
         var newUri: Uri? = null
-        return try {
+        val newReady = try {
             newUri = resolver.insert(collection, ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, tempName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
                 put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
                 put(MediaStore.MediaColumns.DATE_ADDED, dateAdded)
+                if (favorite != 0) put(MediaStore.MediaColumns.IS_FAVORITE, favorite)
                 if (coords != null) {
                     put(GPS_LATITUDE_COLUMN, coords.first)
                     put(GPS_LONGITUDE_COLUMN, coords.second)
                 }
             }) ?: return null
-            resolver.openOutputStream(newUri, "w")?.use { out ->
-                src.inputStream().use { it.copyTo(out) }
-            } ?: return null
-            try {
-                resolver.update(newUri, ContentValues().apply {
-                    put(MediaStore.MediaColumns.SIZE, src.length())
-                }, null, null)
-            } catch (_: Exception) {}
-            fixTimestamps(resolver, newUri, timestamp)
-            fixPhysicalMtime(resolver, newUri, timestamp)
-            if (stats != null) synchronized(stats) { stats.rowRebuilt++ }
-            newUri
+            resolver.openOutputStream(newUri, "w")?.use { it.write(content) } ?: return null
+            // 读回逐字节校验：新行内容必须与本地一致（防写半截/写串行）
+            val verified = resolver.openInputStream(newUri)?.use {
+                it.readBytes().contentEquals(content)
+            } == true
+            if (!verified) return null
+            resolver.update(newUri, ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+                put(MediaStore.MediaColumns.SIZE, content.size.toLong())
+            }, null, null)
+            true
         } catch (_: Exception) {
-            newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
-            null
+            false
         }
+        if (!newReady) {
+            // 新行没落地：删掉临时半成品，旧行原样（旧产物不丢）
+            newUri?.let { u -> try { resolver.delete(u, null, null) } catch (_: Exception) {} }
+            return null
+        }
+        val finalUri = newUri ?: return null
+
+        // 新行已落地：删旧行（旧文件进 vivo「第三方删除拦截」回收站，可恢复），
+        // 再把新行改回原名；改名失败只影响显示名，产物本身已安全
+        try { resolver.delete(old, null, null) } catch (_: Exception) {}
+        try {
+            resolver.update(finalUri, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            }, null, null)
+        } catch (_: Exception) {}
+        // 时间列固化用**旧行保留值**（不是参数时间戳——那只是 dateTaken 缺失时的兜底；
+        // 用错会把保留的拍摄时间覆盖成重建当下，recreateRow 回归用例正是抓这个）
+        try {
+            resolver.update(finalUri, ContentValues().apply {
+                put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken)
+                put(MediaStore.MediaColumns.DATE_MODIFIED, dateModified)
+            }, null, null)
+        } catch (_: Exception) {}
+        fixPhysicalMtime(resolver, finalUri, dateTaken)
+        if (stats != null) synchronized(stats) { stats.rowRebuilt++ }
+        return finalUri
     }
 
     /** 单张导出的位置溯源统计（批次摘要据此输出，供真机研究「哪批照片坐标从哪来」） */
     internal class LocationStats {
-        var exif = 0      // 坐标来自产物 EXIF
-        var xmp = 0       // 坐标来自产物 XMP（部分机型把位置写进 XMP 而非 EXIF）
-        var video = 0     // 坐标来自嵌入视频段（mp4 udta/©xyz）
-        var none = 0      // 三处都没有（源本身无位置）
-        var injected = 0  // 转换前预注入 EXIF 的张数（源 EXIF 无 GPS 但 XMP/mp4 有坐标）
+        var exif = 0       // 坐标来自产物 EXIF
+        var xmp = 0        // 坐标来自产物 XMP（部分机型把位置写进 XMP 而非 EXIF）
+        var video = 0      // 坐标来自嵌入视频段（mp4 udta/©xyz）
+        var none = 0       // 三处都没有（源本身无位置）
+        var injected = 0   // 管线内注入 EXIF 的张数（源 EXIF 无 GPS 但 XMP/视频有坐标）
+        var injectFailed = 0 // 注入失败的张数（**显式失败**，绝不算进「源无 GPS」）
+        var unsaved = 0    // 源有位置但产物没能带上 EXIF GPS 的张数（可见、可重试）
         var rowRebuilt = 0 // 覆盖路径行重建的张数（出生带坐标的确定性修复）
         val totalCoords: Int get() = exif + xmp + video
     }
@@ -216,7 +250,6 @@ internal object MediaExport {
         // ① EXIF（常规：源 EXIF 的 GPS 随主图字节进入产物）
         // ② XMP（部分机型把位置写进 XMP 而非 EXIF，管线已合并进产物 XMP）
         // ③ 嵌入视频段（vivo 相机在 mp4 udta/©xyz 写 ISO 6709 串，EXIF/XMP 都没有时仍在）
-        // 字节不动（MD5 自检链保持）；EXIF 回写留给「找回位置」的行重建
         val xmpText = try {
             JpegUtil.findXmpSegment(outBytes)?.xmpText
         } catch (_: Exception) {
@@ -227,32 +260,14 @@ internal object MediaExport {
         } catch (_: Exception) {
             null
         }
-        var coords = try {
-            JpegUtil.gpsCoordinates(outBytes)
-        } catch (_: Exception) {
-            null
-        }
-        val fromExif = coords != null
-        var fromXmp = false
-        var fromVideo = false
-        if (!fromExif) {
-            coords = try { XmpTemplate.gpsCoordsFromXmp(xmpText) } catch (_: Exception) { null }
-            fromXmp = coords != null
-        }
-        if (coords == null) {
-            coords = try {
-                GpsRecovery.recoverFromVideoSegment(outBytes)
-            } catch (_: Exception) {
-                null
-            }
-            fromVideo = coords != null
-        }
+        val resolved = resolveCoords(outBytes, xmpText)
+        val coords = resolved.coords
         // 双路并发下计数需互斥（读方在批次 joinAll 之后，无并发读）
         if (stats != null) synchronized(stats) {
             when {
-                fromExif -> stats.exif++
-                fromXmp -> stats.xmp++
-                fromVideo -> stats.video++
+                resolved.fromExif -> stats.exif++
+                resolved.fromXmp -> stats.xmp++
+                resolved.fromVideo -> stats.video++
                 else -> stats.none++
             }
         }
@@ -268,7 +283,7 @@ internal object MediaExport {
             ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
             // 覆盖失败（旧记录失效/重建未成）→ 落到下面的新建路径兜底
-            overwriteExisting(resolver, previous, src, result, timestamp, coords, stats)?.let {
+            overwriteExisting(resolver, previous, outBytes, timestamp, coords, stats)?.let {
                 return it
             }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
@@ -335,16 +350,20 @@ internal object MediaExport {
     }
 
     /**
-     * 原地覆盖既有产物：成功且自检通过返回其 URI；不可行返回 null（调用方转新建路径）。
+     * 覆盖既有产物 = **一律行重建**（删旧行重插、新行出生带坐标带内容）。
      *
-     * 安全语义：一旦按写模式打开，旧内容即被截断，此后任何失败都必须删除该记录
-     * （否则留下半损文件）；若连输出流都没打开成功，旧文件仍完好，必须保留。
+     * v2.6.0-test27 简化（顺带消掉一个隐患）：
+     * - 旧实现先把新内容写进旧行、再删旧行重建——同一份字节写两遍，且「写开旧行
+     *   即截断」让旧产物在重建失败时已毁。现在**直接重建**：新行先落地（含读回校验），
+     *   旧行后删，任何失败都留下完好的旧产物
+     * - 不依赖坐标列 UPDATE（vivo 静默忽略）与坐标列查询（读不回），行为确定
+     *
+     * 返回新行 URI；旧行失效或重建未成返回 null（调用方落到新建路径兜底）。
      */
     private fun overwriteExisting(
         resolver: android.content.ContentResolver,
         old: Uri,
-        src: File,
-        result: SingleWriteResult,
+        content: ByteArray,
         timestamp: Long,
         coords: Pair<Double, Double>?,
         stats: LocationStats?
@@ -355,57 +374,7 @@ internal object MediaExport {
                 null, null, null)?.use { it.moveToFirst() } == true
         } catch (_: Exception) { false }
         if (!valid) return null
-
-        var truncated = false
-        return try {
-            resolver.openOutputStream(old, "w")?.use { out ->
-                truncated = true
-                src.inputStream().use { input -> input.copyTo(out) }
-            } ?: throw IOException("旧产物输出流不可用")
-            fixTimestamps(resolver, old, timestamp)
-            // 物理 mtime 与媒体库列同为拍摄时间（漏设会让时间漂移成写入时刻）
-            fixPhysicalMtime(resolver, old, timestamp)
-            // SIZE 必须同步：原地覆盖没有走 IS_PENDING 流程，媒体库里的旧 SIZE 会与
-            // 实际文件不符——媒体库记录应准确描述刚写入的文件，否则部分相册/读取方
-            // 可能按旧长度读取
-            try {
-                resolver.update(
-                    old,
-                    ContentValues().apply {
-                        put(MediaStore.MediaColumns.SIZE, src.length())
-                    },
-                    null, null
-                )
-            } catch (_: Exception) {}
-            val verified = try {
-                resolver.openInputStream(old)?.use {
-                    OutputVerifier.verify(it, result.segments)
-                } == true
-            } catch (_: Exception) { false }
-            if (verified) {
-                // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）。
-                // ⚠ 不能用 UPDATE：vivo 对既有行的坐标列 UPDATE **静默忽略**（2026-10
-                // 真机结论），旧行出生没坐标时覆盖后永远不显示（零星丢位置根因）。
-                // 也⚠不能用「查询坐标列」来核对——真机实测该查询读不回坐标列，
-                // test24 曾据此误判并回滚全部导出（应用内从未查询过此列，读不可信）。
-                // 因此覆盖路径**一律行重建**（删行重插、出生带坐标）——「找回位置」
-                // 200+ 次真机验证的原语，确定性行为，不依赖任何查询。
-                rebuildRowWithCoords(resolver, old, src, timestamp, coords, stats)?.let {
-                    return it
-                }
-                // 重建失败（极少）：旧行可能已删/仍在，落到调用方的新建路径兜底
-                return null
-            }
-            // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
-            try { resolver.delete(old, null, null) } catch (_: Exception) {}
-            null
-        } catch (_: Exception) {
-            // 仅在旧内容确实已被截断时才删除
-            if (truncated) {
-                try { resolver.delete(old, null, null) } catch (_: Exception) {}
-            }
-            null
-        }
+        return rebuildRowWithCoords(resolver, old, content, timestamp, coords, stats)
     }
 
     /** 判断既有产物是否为单文件实况（XMP 含 MotionPhoto/MicroVideo 标记）时读取的头部长度 */
@@ -614,13 +583,12 @@ internal object MediaExport {
         } catch (_: Exception) {}
         var newUri: Uri? = null
         return try {
-            // 回退复制会新建行：旧行的坐标列必须随迁（新行不带坐标，相册就显示不出位置）
+            // 回退复制会新建行：坐标从**文件字节**直接解析（EXIF→XMP→视频段）。
+            // 不查媒体库坐标列——test24-26 已证该查询在 vivo 上读不回（曾因此
+            // carried=null，新行丢坐标，相册不显示位置）
             val carried = try {
-                resolver.query(uri, arrayOf(GPS_LATITUDE_COLUMN, GPS_LONGITUDE_COLUMN),
-                    null, null, null)?.use { c ->
-                    if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1))
-                        c.getDouble(0) to c.getDouble(1)
-                    else null
+                resolver.openInputStream(uri)?.use { ins ->
+                    resolveCoords(ins.readBytes()).coords
                 }
             } catch (_: Exception) { null }
             // 目标名查询与移动之间无并发写入（应用内串行），此处仍以唯一名兜底

@@ -6,8 +6,10 @@ import kotlin.math.round
  * 一张动态照片的规范化表示（所有字节均为无损透传）。
  */
 internal class LivePhotoAsset(
-    /** 主 JPEG（SOI 到 EOI，含全部 APPn 段） */
-    val primaryJpeg: ByteArray,
+    /** 主 JPEG（SOI 到 EOI，含全部 APPn 段）。
+     * var：转换管线可在写出前把 GPS 注入主图 EXIF（v2.6.0-test27 位置保障），
+     * 除此之外不允许任何修改（字节级无损语义） */
+    var primaryJpeg: ByteArray,
     /** GainMap JPEG（Ultra HDR，无则 null） */
     val gainmapJpeg: ByteArray?,
     /** 纯 MP4 流（不含厂商附加数据/footer） */

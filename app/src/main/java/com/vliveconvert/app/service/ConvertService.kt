@@ -19,11 +19,8 @@ import com.vliveconvert.app.MainActivity
 import com.vliveconvert.app.R
 import com.vliveconvert.app.convert.Converter
 import com.vliveconvert.app.convert.MediaExport
-import com.vliveconvert.app.core.JpegUtil
-import com.vliveconvert.app.convert.GpsRecovery
 import com.vliveconvert.app.core.PhotoTime
 import com.vliveconvert.app.core.VivoDual
-import com.vliveconvert.app.core.XmpTemplate
 import com.vliveconvert.app.ui.ConvertItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -240,14 +237,20 @@ class ConvertService : Service() {
                 "；$noGpsCount 张照片源文件本身不含 GPS 位置"
             else -> ""
         }
-        // 位置溯源摘要：研究「批量必丢位置」的观测数据（坐标来源分布 + 被自愈/失败的张数）
+        // 位置溯源摘要：研究「批量必丢位置」的观测数据（坐标来源分布 + 注入/失败/未保住张数）。
+        // 「源无 GPS」与「注入失败」「位置未保住」分开计数——后者是可见缺陷（可重试），
+        // 绝不允许混进「源本身没位置」里蒙混
         val locNote = synchronized(locationStats) {
             val parts = mutableListOf("EXIF ${locationStats.exif}")
             if (locationStats.xmp > 0) parts.add("XMP ${locationStats.xmp}")
             if (locationStats.video > 0) parts.add("视频段 ${locationStats.video}")
             if (locationStats.none > 0) parts.add("无位置 ${locationStats.none}")
             var note = "；位置溯源：${parts.joinToString("/")}"
-            if (locationStats.injected > 0) note += "，预注入 ${locationStats.injected} 张"
+            if (locationStats.injected > 0) note += "，注入 ${locationStats.injected} 张"
+            if (locationStats.injectFailed > 0) note +=
+                "，⚠注入失败 ${locationStats.injectFailed} 张"
+            if (locationStats.unsaved > 0) note +=
+                "，⚠位置未保住 ${locationStats.unsaved} 张（原图已保留，可重转找回）"
             if (locationStats.rowRebuilt > 0) note += "，重建 ${locationStats.rowRebuilt} 行"
             note
         }
@@ -355,79 +358,12 @@ class ConvertService : Service() {
         }
         var staged: String? = null
         currentFileName = ci.item.name
-        // ── 转换前位置预注入（零星丢位置根因的治本修复）──
-        // 部分 vivo 机型把位置写进 XMP/伴生 mp4 而非 EXIF；而 vivo 相册的媒体扫描
-        // 按文件 EXIF 重算行的坐标列——文件无 EXIF GPS 时，坐标即使写进列也会被抹掉
-        // （「找回位置」的行重建 200+ 次全存活，正因它先写回 EXIF）。
-        // 故：源 EXIF 无 GPS 但 XMP / 伴生 mp4 ©xyz 有坐标时，先把 GPS 注入**源副本**
-        // 的 EXIF 再转换——产物天生带 EXIF GPS，媒体库/交付校验/扫描全链一致。
-        // 原始源文件绝不改动；副本放在 cache 并配同名 mp4 符号链接（VivoDual 按相邻
-        // 路径解析伴生视频），用完即删。
-        var convertPath = ci.item.path
-        var injectedDir: File? = null
-        run {
-            val sibling = VivoDual.siblingMp4(ci.item.path) ?: return@run
-            val head = try {
-                File(ci.item.path).inputStream().use { ins ->
-                    val buf = ByteArray(1024 * 1024)
-                    var n = 0
-                    while (n < buf.size) {
-                        val r = ins.read(buf, n, buf.size - n)
-                        if (r < 0) break
-                        n += r
-                    }
-                    if (n <= 0) null else if (n < buf.size) buf.copyOf(n) else buf
-                }
-            } catch (_: Exception) {
-                null
-            }
-            if (head != null && !JpegUtil.hasGpsExif(head)) {
-                val coords = try {
-                    XmpTemplate.gpsCoordsFromXmp(
-                        JpegUtil.findXmpSegment(head)?.xmpText)
-                } catch (_: Exception) {
-                    null
-                } ?: GpsRecovery.recoverFromMp4File(sibling)
-                if (coords != null) {
-                    val injected = try {
-                        GpsRecovery.injectGpsExif(
-                            app, File(ci.item.path).readBytes(), coords)
-                    } catch (_: Exception) {
-                        null
-                    }
-                    if (injected != null) {
-                        val dir = File(app.cacheDir,
-                            "conv_src/${java.util.UUID.randomUUID()}").apply { mkdirs() }
-                        val stem = File(ci.item.path).nameWithoutExtension
-                        val jpg = File(dir, "$stem.jpg")
-                        jpg.writeBytes(injected)
-                        val mp4 = File(dir, "$stem.mp4")
-                        val linked = try {
-                            java.nio.file.Files.createSymbolicLink(
-                                mp4.toPath(), java.nio.file.Path.of(sibling))
-                            true
-                        } catch (_: Exception) {
-                            false
-                        }
-                        if (!linked) {
-                            // 符号链接被拒（个别 ROM）：整份复制，正确性优先于开销
-                            try {
-                                File(sibling).copyTo(mp4, overwrite = true)
-                            } catch (_: Exception) {
-                                dir.deleteRecursively()
-                                return@run
-                            }
-                        }
-                        convertPath = jpg.path
-                        injectedDir = dir
-                        synchronized(locationStats) { locationStats.injected++ }
-                    }
-                }
-            }
-        }
+        // 位置保障已全部收进转换管线（Converter.ensureExifGps）：对内存中的主图
+        // 判定/注入，不再有 test25 的 cache 副本 + 符号链接路径（其失败点全部静默）。
+        // 本层只消费 SingleWriteResult 的位置明细并**显式**记账/标记
         try {
             val result = Converter.convertToVivoSingle(
-                path = convertPath,
+                path = ci.item.path,
                 outDir = tempDir.absolutePath,
                 log = { level, msg, _ ->
                     if (level == "warning") {
@@ -456,31 +392,47 @@ class ConvertService : Service() {
                 app, result, ts, outputRelPath,
                 useCameraDir = moveToCamera && !deferToCamera,
                 oldUriString = if (isReconvert) ci.outUri else null,
-                // 位置交付校验：源读到 GPS（未脱敏）时产物必须仍带坐标，否则本张判失败
-                requireGps = result.sourceHasGps,
+                // 位置交付校验：源（EXIF/XMP/视频任一处）有位置时，产物必须带坐标来源，
+                // 否则本张判失败、原图不动
+                requireGps = result.sourceHasLocation,
                 stats = locationStats)
+            // ── 位置明细显式记账（全部来自转换管线的事实，不再是本层的猜测）──
+            if (result.gpsInjected) synchronized(locationStats) { locationStats.injected++ }
+            if (result.gpsInjectFailed != null) {
+                synchronized(locationStats) { locationStats.injectFailed++ }
+            }
+            // 产物自检（不查媒体库坐标列，直接看文件事实）：源有位置但产物没能带上
+            // EXIF GPS = 「位置未保住」——可见缺陷，标记可重转、保留原图、单独计数，
+            // 绝不允许静默交付后让用户在相册里才发现
+            val unsavedLocation = result.sourceHasLocation && !result.outputHasExifGps
+            if (unsavedLocation) synchronized(locationStats) { locationStats.unsaved++ }
             // 精确「已转」索引：源路径 → 产物 URI（选择器据此标记/筛选，不依赖名称猜测）
             ConvertedStore.record(app, ci.item.path, exportUri.toString())
             firstOutUri.compareAndSet(null, exportUri.toString())
             ok.incrementAndGet()
-            // 源图读到的字节无 GPS（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
-            if (!result.sourceHasGps) noGps.incrementAndGet()
-            if (!isReconvert && deferToCamera) {
+            // 源三处都无位置（拍摄无位置，或读取层被系统脱敏）→ 单项标注 + 计数
+            if (!result.sourceHasLocation) noGps.incrementAndGet()
+            if (!isReconvert && deferToCamera && !unsavedLocation) {
                 // 中转条目：删除原图确认完成后由 finalize 以原名移入相机相册
                 ConvertCenter.pendingFinalize.add(
                     ConvertCenter.FinalizeEntry(exportUri, ci.item.name, ci.item.key))
             }
-            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除
-            // （重转不收集；外部分享的缓存副本更不收集——那不是相册里的原文件）
-            if (!isReconvert && deleteOriginal && !ci.externalSource) {
+            // 开关开启：收集本项原图（jpg + 伴生 mp4），批次结束统一删除。
+            // 「位置未保住」的项**不删原图**——原图是重转找回位置的唯一依据，
+            // 删了就是不可逆损失（重转不收集；外部分享的缓存副本更不收集）
+            if (!isReconvert && deleteOriginal && !ci.externalSource && !unsavedLocation) {
                 collectOriginalUris(ci)
             }
             val statusText = when {
-                isReconvert && result.sourceHasGps ->
+                isReconvert && result.outputHasExifGps ->
                     "完成：已重新转换，位置信息已保留"
+                isReconvert && result.sourceHasLocation ->
+                    "完成：已重新转换，但位置未能写入（${result.gpsInjectFailed ?: "坐标来源解析失败"}）"
                 isReconvert ->
                     // 重转在位置权限已授予的前提下执行：仍无 GPS = 源本身没位置
                     "完成：已重新转换（源文件本身不含 GPS 位置）"
+                unsavedLocation ->
+                    "完成：已导出，但位置未保住（原图已保留，可重转找回）"
                 deferToCamera -> ConvertCenter.STATUS_DEFER_FINALIZE
                 moveToCamera -> "完成：已导出到 DCIM/Camera"
                 else -> "完成：已导出到 $outputRelPath"
@@ -494,8 +446,9 @@ class ConvertService : Service() {
             withContext(NonCancellable + Dispatchers.Main) {
                 ConvertCenter.replaceItem(ci, ci.copy(
                     status = statusText, done = true,
-                    // 重转已获权限，结果即最终结论：找到位置或源本身无位置，均不再标记丢失
-                    lostGps = !isReconvert && !result.sourceHasGps,
+                    // 「位置未保住」与「源无位置」都驱动重转入口（琥珀「!」徽标）；
+                    // 前者重转是真能找回（管线修复后），后者如实展示
+                    lostGps = !isReconvert && (unsavedLocation || !result.sourceHasLocation),
                     outUri = exportUri.toString(),
                     reconvert = false))
             }
@@ -511,9 +464,8 @@ class ConvertService : Service() {
             }
         } finally {
             currentFileName = null
-            // 清理本地暂存产物（已导出 / 失败均清理）与预注入的源副本
+            // 清理本地暂存产物（已导出 / 失败均清理）
             staged?.let { p -> try { File(p).delete() } catch (_: Exception) {} }
-            injectedDir?.let { d -> try { d.deleteRecursively() } catch (_: Exception) {} }
         }
     }
 

@@ -65,10 +65,9 @@ class LocationRepairService : Service() {
 
     private suspend fun runRepair(uris: List<String>, names: List<String>) {
         val rows = uris.mapIndexed { i, u ->
-            LocationDisplayRepair.MissingRow(
+            LocationDisplayRepair.RepairTarget(
                 uri = Uri.parse(u),
-                name = names.getOrNull(i) ?: "IMG_$i.jpg",
-                dateTaken = 0L)
+                name = names.getOrNull(i) ?: "IMG_$i.jpg")
         }
         val processed = LocationDisplayRepair.loadProcessed(applicationContext)
         val stats = LocationDisplayRepair.rebuildSelected(
@@ -105,6 +104,7 @@ class LocationRepairService : Service() {
         }
         ConvertCenter.isLocationRepairing = false
         ConvertCenter.repairResult = msg
+        ConvertCenter.repairReport = stats?.records
         try {
             getSystemService(NotificationManager::class.java)?.apply {
                 cancel(NOTIF_ID)
@@ -190,7 +190,7 @@ class LocationRepairService : Service() {
         const val EXTRA_NAMES = "names"
 
         /** 主线程调用：打包选中项并拉起后台重建服务 */
-        internal fun start(context: android.content.Context, rows: List<LocationDisplayRepair.MissingRow>): Boolean {
+        internal fun start(context: android.content.Context, rows: List<LocationDisplayRepair.RepairTarget>): Boolean {
             if (rows.isEmpty() || ConvertCenter.isLocationRepairing) return false
             val intent = Intent(context, LocationRepairService::class.java)
                 .setAction(ACTION_START)

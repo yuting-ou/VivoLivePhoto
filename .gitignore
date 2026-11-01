@@ -18,5 +18,8 @@ local.properties
 # 根目录 APK 不自动入库（发布新版时 git add -f 显式加入，供手机直接下载）
 /*.apk
 
+# 本地构建交付物（test 包的 APK 输出目录，不入库）
+/build-outputs/
+
 # 视觉设计伴侣的临时产物（草图/会话状态）
 .superpowers/

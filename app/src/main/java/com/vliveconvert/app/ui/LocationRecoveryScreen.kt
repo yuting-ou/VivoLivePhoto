@@ -1,17 +1,8 @@
 package com.vliveconvert.app.ui
 
+import android.content.Intent
+import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,7 +12,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,17 +20,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -55,15 +42,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.convert.LocationDisplayRepair
+import com.vliveconvert.app.convert.LocationHealth
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.LocationRepairService
 import com.vliveconvert.app.ui.theme.statusColors
@@ -73,22 +60,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 找回位置（选中式「重建位置显示」，独立入口）：
+ * 找回位置（v2.6.0-test27 重做：位置体检 + 证据可见 + 诊断报告）。
  *
- * 全量重建曾是一次跑完整个相机相册（数千张、分批数小时），用户只想修那几张
- * 「昨天转完才发现相册里没位置」的照片，却要陪着全库重建、还连带把全部照片的
- * 「加入相册时间」重置掉。本页先把缺坐标的本工具产物**检测**出来，用户**勾选**
- * 后只重建选中的几张。
+ * 判定**全部基于产物文件字节**（EXIF/XMP/视频段），不再查询媒体库坐标列
+ * （test24~26 已证其在 vivo 上读不回）。每张产物一行：判定结论 + 判定依据
+ * （每个来源解析到了什么），用户能直接看出「哪些有位置、哪些缺、哪些读不动」。
  *
- * 交互对齐「选择照片转换」：3 列网格 + 日期分段（段头组全选）+ 工具行（张数/已选/全选）
- * + 底部玻璃 Dock（重建进度 = 转换进度的同款表达）。修复机制与全量扫同源
- * （[LocationDisplayRepair.recreateRow] 行重建）：字节逐字节不变、坐标写回媒体库；
- * 产物文件本身无坐标时从嵌入视频段恢复；「加入相册时间」会被系统重置为重建当天
- * （确认弹窗明示）。重建结果写入「转换与修复记录」（BatchLog.appendRepair）。
+ * 修复（[LocationHealth.repairProduct]）：EXIF 缺失的先写回文件 EXIF，再行重建
+ * （字节逐字节一致、旧记录进回收站可恢复、收藏随迁），每张修复后**读回验证**。
+ * 「导出诊断报告」把逐张判定与修复路径/结果整成文本分享出来——真机回传它，
+ * 不用再靠猜定位问题。
  */
 @Composable
 fun LocationRecoveryScreen(
-    /** 「位置」权限：坐标列的读取被它管辖，扫描前必须拿到（未授予只显示引导卡） */
+    /** 「位置」权限：读文件坐标仍被它管辖，扫描前必须拿到（未授予只显示引导卡） */
     locationGranted: Boolean,
     onGrantLocation: () -> Unit,
     onBack: () -> Unit,
@@ -98,19 +83,25 @@ fun LocationRecoveryScreen(
     val resolver = context.contentResolver
     val scope = rememberCoroutineScope()
     val view = LocalView.current
-    val gridState = rememberLazyGridState()
 
     var scanning by remember { mutableStateOf(true) }
-    // (已嗅探, 待嗅探总数, 已发现缺坐标产物数)
+    // (已处理, 总数, 已发现产物数)
     var scanProgress by remember { mutableStateOf(Triple(0, 0, 0)) }
-    var rows by remember { mutableStateOf<List<LocationDisplayRepair.MissingRow>>(emptyList()) }
+    var rows by remember { mutableStateOf<List<LocationDisplayRepair.HealthRow>>(emptyList()) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var confirm by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
+    // 最近一次修复的逐张明细（诊断报告用）
+    var lastRecords by remember { mutableStateOf<List<LocationHealth.ReportLine>>(emptyList()) }
     // 重建进度来自 LocationRepairService 的共享状态（后台跑，离开页面不中断）
     val repairing = ConvertCenter.isLocationRepairing
     val repairProgress = ConvertCenter.repairProgress
     val repairCurrent = ConvertCenter.repairCurrent
+
+    // 可修复的判定（EXIF 缺：注入+重建；EXIF 在：可强制重建让行坐标就位）
+    fun LocationHealth.Verdict.repairable(): Boolean = this in setOf(
+        LocationHealth.Verdict.XMP_ONLY, LocationHealth.Verdict.VIDEO_ONLY,
+        LocationHealth.Verdict.HAS_EXIF)
 
     val startScan: () -> Unit = {
         if (!ConvertCenter.isLocationRepairing) {
@@ -119,14 +110,17 @@ fun LocationRecoveryScreen(
             rows = emptyList()
             selected = emptySet()
             scope.launch(Dispatchers.IO) {
-                val found = LocationDisplayRepair.scanMissingLocation(context) { done, total, foundN ->
+                val found = LocationDisplayRepair.scanProducts(context) { done, total, foundN ->
                     scanProgress = Triple(done, total, foundN)
                 }
                 withContext(Dispatchers.Main) {
                     rows = found
-                    // 缺坐标的产物默认全选：用户的诉求就是「把没位置的修回来」，
-                    // 逐个手点反而是负担；不想修的自行取消勾选
-                    selected = found.map { it.uri.toString() }.toSet()
+                    // 默认选中「EXIF 缺失」的（它们是真要修的）；EXIF 在的留手动
+                    selected = found.filter {
+                        it.probe.verdict in setOf(
+                            LocationHealth.Verdict.XMP_ONLY,
+                            LocationHealth.Verdict.VIDEO_ONLY)
+                    }.map { it.uri.toString() }.toSet()
                     scanning = false
                 }
             }
@@ -135,42 +129,84 @@ fun LocationRecoveryScreen(
 
     val startRebuild: () -> Unit = {
         val targets = rows.filter { it.uri.toString() in selected }
+            .map { LocationDisplayRepair.RepairTarget(it.uri, it.name) }
         if (targets.isNotEmpty() && !ConvertCenter.isLocationRepairing) {
             // 后台服务执行重建：离开页面/切后台不中断，进度走共享状态 + 通知栏
             LocationRepairService.start(context, targets)
         }
     }
 
-    // 服务完成/中止 → 结果摘要（服务写 repairResult；消费后置回 null 并重扫）。
-    // 完成节拍触感与转换底栏的完成态同一语义
+    // 服务完成/中止 → 结果摘要 + 逐张明细（服务写 repairResult/repairReport；消费后置回）
     LaunchedEffect(ConvertCenter.repairResult) {
         val result = ConvertCenter.repairResult
         if (result != null) {
             ConvertCenter.repairResult = null
+            lastRecords = ConvertCenter.repairReport.orEmpty()
+            ConvertCenter.repairReport = null
             summary = result
             view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
         }
     }
 
-    // 扫描/重建完成回到本页时刷新列表：重建过的行已换新 URI、坐标已就位，
-    // 停留旧结果会误导用户。空闲且无结果待展示时自动重扫
+    // 重建完成回到本页时刷新列表：重建过的行已换新 URI、EXIF 已写回
     LaunchedEffect(repairing) {
         if (!repairing && !scanning && ConvertCenter.repairResult == null && rows.isNotEmpty()) {
             startScan()
         }
     }
 
-    // 日期分段：扫描结果已按拍摄时间倒序，分组保持相遇顺序（新的段在前）
-    val sections = remember(rows) {
-        rows.groupBy { r -> if (r.dateTaken > 0) dateLabel(r.dateTaken) else "时间未知" }
-            .map { (label, list) -> label to list }
-    }
-    val allSelected = rows.isNotEmpty() && selected.size == rows.size
-
     LaunchedEffect(locationGranted) {
         if (locationGranted && !ConvertCenter.isLocationRepairing) startScan()
     }
     BackHandler(enabled = !repairing) { onBack() }
+
+    // 计数与分组
+    val counts = remember(rows) {
+        LocationHealth.Verdict.entries.associateWith { v -> rows.count { it.probe.verdict == v } }
+    }
+    val selectable = remember(rows) { rows.filter { it.probe.verdict.repairable() } }
+    val allSelected = selectable.isNotEmpty() && selected.size == selectable.size
+    val sections = remember(rows) {
+        rows.groupBy { r -> if (r.dateTaken > 0) dateLabel(r.dateTaken) else "时间未知" }
+            .map { (label, list) -> label to list }
+    }
+
+    val exportReport: () -> Unit = {
+        val lines = rows.map { r ->
+            val record = lastRecords.firstOrNull { it.name == r.name }
+            LocationHealth.ReportLine(
+                name = r.name,
+                verdict = r.probe.verdictLabel,
+                evidence = r.probe.evidence(),
+                repair = record?.repair?.let { "${record.verdict}：$it" })
+        } + lastRecords.filter { rec -> rows.none { it.name == rec.name } }
+        // 版本信息走 PackageManager（不依赖 BuildConfig 生成开关）
+        val (verName, verCode) = try {
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            pi.versionName to pi.longVersionCode
+        } catch (_: Exception) {
+            "unknown" to 0L
+        }
+        val report = LocationHealth.buildReport(
+            appVersion = "$verName ($verCode)",
+            device = "${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            rows = lines,
+            summary = "共 ${rows.size} 张产物：" +
+                "有位置 ${counts[LocationHealth.Verdict.HAS_EXIF] ?: 0}，" +
+                "EXIF 缺失 ${(counts[LocationHealth.Verdict.XMP_ONLY] ?: 0) +
+                    (counts[LocationHealth.Verdict.VIDEO_ONLY] ?: 0)}，" +
+                "无坐标 ${counts[LocationHealth.Verdict.NONE] ?: 0}，" +
+                "读失败 ${counts[LocationHealth.Verdict.UNREADABLE] ?: 0}"
+        )
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "影中影 位置诊断报告")
+                putExtra(Intent.EXTRA_TEXT, report)
+            }
+            context.startActivity(Intent.createChooser(intent, "导出诊断报告"))
+        } catch (_: Exception) {}
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -223,7 +259,7 @@ fun LocationRecoveryScreen(
                             tint = statusColors.warning, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "未授予「位置」权限，系统会抹掉坐标列，无法检测哪些照片缺位置。",
+                            "未授予「位置」权限，系统会在读取层抹掉照片坐标，无法做位置体检。",
                             style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
@@ -234,21 +270,26 @@ fun LocationRecoveryScreen(
                 }
             }
         } else {
-            // ── 工具行：张数（左） + 已选 + 全选（右），对齐选择器 ──
+            // ── 工具行：计数摘要（左） + 全选（右）──
             Row(
                 Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     when {
-                        scanning -> "扫描中 ${scanProgress.first}/${scanProgress.second} · " +
-                            "已发现 ${scanProgress.third} 张"
+                        scanning -> "体检中 ${scanProgress.first}/${scanProgress.second}"
                         repairing -> "重建中 ${repairProgress.first}/${repairProgress.second}"
-                        else -> "发现 ${rows.size} 张没有位置"
+                        rows.isEmpty() -> "没有发现本工具产物"
+                        else -> "共 ${rows.size} 张：有位置 ${counts[LocationHealth.Verdict.HAS_EXIF] ?: 0}" +
+                            " · EXIF 缺失 ${(counts[LocationHealth.Verdict.XMP_ONLY] ?: 0) +
+                                (counts[LocationHealth.Verdict.VIDEO_ONLY] ?: 0)}" +
+                            " · 无坐标 ${counts[LocationHealth.Verdict.NONE] ?: 0}" +
+                            (if ((counts[LocationHealth.Verdict.UNREADABLE] ?: 0) > 0)
+                                " · 读失败 ${counts[LocationHealth.Verdict.UNREADABLE]}" else "")
                     },
                     style = glassSubtitleStyle(), modifier = Modifier.weight(1f)
                 )
-                if (!scanning && rows.isNotEmpty()) {
+                if (!scanning && selectable.isNotEmpty()) {
                     Text(
                         "已选 ${selected.size}",
                         style = TextStyle(fontSize = 12.sp),
@@ -263,7 +304,7 @@ fun LocationRecoveryScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 selected = if (allSelected) emptySet()
-                                else rows.map { it.uri.toString() }.toSet()
+                                else selectable.map { it.uri.toString() }.toSet()
                             }
                             .padding(horizontal = 8.dp, vertical = 8.dp)
                     )
@@ -286,7 +327,7 @@ fun LocationRecoveryScreen(
                             GlassIndeterminateBar(Modifier.width(120.dp).height(3.dp))
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                "正在逐张识别本工具产物，已发现 ${scanProgress.third} 张",
+                                "正在逐张读取产物文件做体检，已发现 ${scanProgress.third} 张",
                                 style = TextStyle(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -296,33 +337,26 @@ fun LocationRecoveryScreen(
                         Modifier.fillMaxSize(), contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "没有发现缺位置的产物\n\n只有「相册里不显示拍摄位置」的本工具产物" +
-                                "会出现在这里；刚转换完的照片稍等片刻再扫描",
+                            "没有发现本工具产物\n\n体检范围：转换产物（EXIF/XMP/视频段逐张判定），\n" +
+                                "判定与修复都不依赖媒体库坐标列",
                             style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    else -> LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Fixed(3),
+                    else -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = 12.dp, end = 12.dp, top = 4.dp, bottom = 116.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                            start = 4.dp, end = 4.dp, top = 4.dp, bottom = 116.dp)
                     ) {
                         sections.forEach { (label, group) ->
-                            item(
-                                key = "hdr_$label",
-                                span = { GridItemSpan(3) },
-                                contentType = "header"
-                            ) {
-                                val groupKeys = group.map { it.uri.toString() }.toSet()
-                                val groupAll = groupKeys.all { it in selected }
-                                // 段头：日期 + 张数 + 组全选圈（与选择器同款交互）
+                            item(key = "hdr_$label") {
+                                val groupKeys = group
+                                    .filter { it.probe.verdict.repairable() }
+                                    .map { it.uri.toString() }.toSet()
+                                val groupAll = groupKeys.isNotEmpty() && groupKeys.all { it in selected }
                                 Row(
                                     Modifier.fillMaxWidth()
-                                        .padding(start = 8.dp, top = 14.dp, bottom = 8.dp),
+                                        .padding(start = 12.dp, top = 14.dp, bottom = 6.dp, end = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(Modifier.weight(1f)) {
@@ -338,26 +372,24 @@ fun LocationRecoveryScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    CircleTriCheckbox(
-                                        state = if (groupAll)
-                                            androidx.compose.ui.state.ToggleableState.On
-                                        else androidx.compose.ui.state.ToggleableState.Off,
-                                        onClick = {
-                                            selected = if (groupAll) selected - groupKeys
-                                            else selected + groupKeys
-                                        },
-                                        contentDescription = "全选 $label 的照片"
-                                    )
+                                    if (groupKeys.isNotEmpty()) {
+                                        CircleTriCheckbox(
+                                            state = if (groupAll) ToggleableState.On
+                                            else ToggleableState.Off,
+                                            onClick = {
+                                                selected = if (groupAll) selected - groupKeys
+                                                else selected + groupKeys
+                                            },
+                                            contentDescription = "全选 $label 的可修复照片"
+                                        )
+                                    }
                                 }
                             }
-                            items(
-                                group,
-                                key = { it.uri.toString() },
-                                contentType = { "photo" }
-                            ) { row ->
-                                RecoveryCell(
-                                    uri = row.uri,
+                            items(group, key = { it.uri.toString() }) { row ->
+                                HealthRowCell(
+                                    row = row,
                                     selected = row.uri.toString() in selected,
+                                    selectable = row.probe.verdict.repairable(),
                                     onToggle = {
                                         val key = row.uri.toString()
                                         selected = if (key in selected) selected - key
@@ -372,7 +404,7 @@ fun LocationRecoveryScreen(
         }
         }
 
-        // ── 底部玻璃 Dock：空闲（两按钮）/ 重建中（进度条），对齐转换底栏 ──
+        // ── 底部玻璃 Dock：空闲（三按钮）/ 重建中（进度条）──
         if (locationGranted) {
             HazeGlassCard(
                 hazeState = hazeState,
@@ -402,20 +434,26 @@ fun LocationRecoveryScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         GlassOutlineButton(
                             text = "重新扫描",
-                            color = if (!scanning && !repairing) MaterialTheme.colorScheme.primary
+                            color = if (!scanning) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.weight(1f),
-                            onClick = { if (!scanning && !repairing) startScan() }
+                            onClick = { if (!scanning) startScan() }
                         )
                         GlassOutlineButton(
-                            text = "重建所选（${selected.size}）",
-                            color = if (selected.isNotEmpty() && !scanning && !repairing)
+                            text = "导出报告",
+                            color = if (!scanning && rows.isNotEmpty())
                                 MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.weight(1f),
-                            onClick = {
-                                if (selected.isNotEmpty() && !scanning && !repairing) confirm = true
-                            }
+                            onClick = { if (!scanning && rows.isNotEmpty()) exportReport() }
+                        )
+                        GlassOutlineButton(
+                            text = "修复所选（${selected.size}）",
+                            color = if (selected.isNotEmpty() && !scanning)
+                                MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.weight(1f),
+                            onClick = { if (selected.isNotEmpty() && !scanning) confirm = true }
                         )
                     }
                 }
@@ -427,8 +465,8 @@ fun LocationRecoveryScreen(
         GlassDialog(
             hazeState = hazeState,
             onDismissRequest = { confirm = false },
-            title = "重建所选（${selected.size}）",
-            confirmLabel = "开始重建",
+            title = "修复所选（${selected.size}）",
+            confirmLabel = "开始修复",
             onConfirm = {
                 confirm = false
                 startRebuild()
@@ -437,10 +475,11 @@ fun LocationRecoveryScreen(
             onDismissAction = { confirm = false }
         ) {
             Text(
-                "逐张重建媒体库记录让相册显示位置：照片内容与文件名不变，字节逐字节一致；" +
-                    "旧记录进相册「最近删除 / 第三方删除拦截」（可恢复）。\n\n" +
-                    "⚠ 重建过的照片「加入相册时间」会重置为操作当天（微信等按加入时间分组的" +
-                    "应用会把它们归入「今天」），拍摄时间与相册时间线不受影响。\n\n" +
+                "逐张修复让相册显示位置：EXIF 缺失的先把坐标写回文件（照片内容与文件名" +
+                    "不变，字节逐字节一致），再重建媒体库记录——旧记录进相册" +
+                    "「最近删除 / 第三方删除拦截」（可恢复），收藏状态保留，每张修复后读回验证。\n\n" +
+                    "⚠ 修复过的照片「加入相册时间」可能被系统重置为操作当天" +
+                    "（平台限制；拍摄时间与相册时间线不受影响）。\n\n" +
                     "存储空间不足时自动暂停。确认开始？"
             )
         }
@@ -452,113 +491,107 @@ fun LocationRecoveryScreen(
                 summary = null
                 startScan()
             },
-            title = "重建结果",
+            title = "修复结果",
             confirmLabel = "知道了",
             onConfirm = {
                 summary = null
                 startScan()
             }
         ) {
-            Text(msg)
+            Text(msg + "\n\n可点底部「导出报告」把逐张判定与修复明细回传，便于定位问题。")
         }
     }
 }
 
-/**
- * 网格单元：对齐选择器 GridCell 的选中语言（中心缩放 + 圆角增大 + 右上角勾选徽章），
- * 省去序号/「已转」角标——这里所有格子都是待修的产物，没有额外状态要表达。
- */
+/** 体检行：缩略图 + 文件名 + 判定结论徽章 + 判定依据（每个来源解析到了什么）+ 勾选圈。 */
 @Composable
-private fun RecoveryCell(uri: android.net.Uri, selected: Boolean, onToggle: () -> Unit) {
+private fun HealthRowCell(
+    row: LocationDisplayRepair.HealthRow,
+    selected: Boolean,
+    selectable: Boolean,
+    onToggle: () -> Unit
+) {
     val resolver = LocalContext.current.contentResolver
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 0.86f else 1f,
-        animationSpec = tween(200), label = "scale"
-    )
-    val badgeBg by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(200), label = "badgeBg"
-    )
-    val badgeScale by animateFloatAsState(
-        targetValue = if (selected) 1f else 0.85f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "badgeScale"
-    )
-
-    Box(
+    val verdict = row.probe.verdict
+    val (chipColor, chipBg) = when (verdict) {
+        LocationHealth.Verdict.HAS_EXIF -> statusColors.success to
+            statusColors.success.copy(alpha = 0.12f)
+        LocationHealth.Verdict.XMP_ONLY, LocationHealth.Verdict.VIDEO_ONLY ->
+            statusColors.warning to statusColors.warning.copy(alpha = 0.14f)
+        LocationHealth.Verdict.NONE -> MaterialTheme.colorScheme.onSurfaceVariant to
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.10f)
+        LocationHealth.Verdict.UNREADABLE -> MaterialTheme.colorScheme.error to
+            MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+    }
+    Row(
         Modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onToggle)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = selectable, onClick = onToggle)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             Modifier
-                .align(Alignment.Center)
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                }
-                .clip(RoundedCornerShape(if (selected) 16.dp else 12.dp))
+                .size(52.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .border(
-                    width = if (selected) 2.dp else 0.dp,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(if (selected) 16.dp else 12.dp)
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    RoundedCornerShape(10.dp)
                 )
         ) {
-            MediaThumbnail(uri, resolver, Modifier.fillMaxSize())
+            MediaThumbnail(row.uri, resolver, Modifier.fillMaxSize())
         }
-        // 实况标记（左下角小圆点）：这些都是单文件实况
-        Box(
-            Modifier
-                .align(Alignment.BottomStart)
-                .padding(6.dp)
-                .size(8.dp)
-                .background(Color.White.copy(alpha = 0.9f), CircleShape)
-        )
-        // 勾选徽章（右上角）：选中 primary 圆底 + 白勾，未选中空心圈
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 6.dp, end = 6.dp)
-                .size(22.dp)
-                .graphicsLayer {
-                    scaleX = badgeScale
-                    scaleY = badgeScale
-                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                }
-                .background(badgeBg, CircleShape)
-                .border(1.dp, Color.White.copy(alpha = 0.55f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            AnimatedContent(
-                targetState = selected,
-                transitionSpec = {
-                    (scaleIn(
-                        initialScale = 0.5f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        )
-                    ) + fadeIn(tween(200))) togetherWith
-                        (scaleOut(targetScale = 0.5f, animationSpec = tween(150)) +
-                            fadeOut(tween(150)))
-                },
-                label = "badge"
-            ) { sel ->
-                if (sel) {
-                    Icon(
-                        Icons.Filled.Check, contentDescription = null,
-                        tint = Color.White, modifier = Modifier.size(14.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    row.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(chipBg)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        row.probe.verdictLabel +
+                            if (verdict == LocationHealth.Verdict.VIDEO_ONLY) "（坐标在视频段）" else "",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = chipColor
                     )
-                } else {
-                    Box(Modifier.size(14.dp))
                 }
             }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                row.probe.evidence() + when {
+                    verdict == LocationHealth.Verdict.HAS_EXIF ->
+                        "（相册不显示位置时也可勾选强制重建）"
+                    verdict == LocationHealth.Verdict.NONE -> "（三处都没有，无可修复）"
+                    verdict == LocationHealth.Verdict.UNREADABLE -> "（文件读失败，无法判定）"
+                    else -> ""
+                },
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2
+            )
+        }
+        if (selectable) {
+            Spacer(Modifier.width(8.dp))
+            CircleTriCheckbox(
+                state = if (selected) ToggleableState.On else ToggleableState.Off,
+                onClick = onToggle,
+                contentDescription = "选择 ${row.name}"
+            )
         }
     }
 }

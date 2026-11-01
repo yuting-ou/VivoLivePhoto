@@ -18,13 +18,17 @@ import java.nio.file.Files
 /**
  * 真机样本回归测试（vivo X200 系列传输样本）。
  * 样本缺失时自动跳过，不影响其他环境。
- * 样本目录：C:/Users/brova/Downloads/vivo办公套件/
+ * 样本目录：系统属性 `vlc.sample.dir` 可配置（默认原作者机器上的路径）——
+ * 把脱敏样本放到任意机器后加 `-Dvlc.sample.dir=/path/to/samples` 即可让
+ * byteCompletenessAudit 真正跑起来；本机无样本时跳过属于**环境限制，不是产品缺陷**。
+ * 样本目录（默认）：C:/Users/brova/Downloads/vivo办公套件/
  * - IMG_20260831_134354 普通实况（曾可识别）
  * - IMG_20260831_134432 人像实况（footer tail 55B，曾不被识别）
  */
 class RealSampleRegressionTest {
 
-    private val sampleDir = "C:/Users/brova/Downloads/vivo办公套件"
+    private val sampleDir = System.getProperty("vlc.sample.dir")
+        ?: "C:/Users/brova/Downloads/vivo办公套件"
 
     private fun log(level: String, msg: String, tag: String) {
         println("[$level][$tag] $msg")

@@ -195,7 +195,7 @@ fun SettingsScreen(
                 SettingsPair(singleColumn,
                     first = { modifier ->
                         SettingsToolCard(
-                            Icons.Filled.Place, "找回位置", "检测缺位置的产物，选中重建",
+                            Icons.Filled.Place, "找回位置", "体检产物位置，选中修复并可导出诊断报告",
                             onRepairLocationDisplay, modifier, available = !isBusy
                         )
                     },

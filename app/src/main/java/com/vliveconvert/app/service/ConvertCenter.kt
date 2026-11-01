@@ -63,6 +63,8 @@ object ConvertCenter {
     var repairCurrent by mutableStateOf<String?>(null)
     /** 重建结果摘要（服务完成/中止时写入；页面消费后置回 null） */
     var repairResult by mutableStateOf<String?>(null)
+    /** 重建逐张明细（诊断报告内容；页面消费后置回 null） */
+    internal var repairReport by mutableStateOf<List<com.vliveconvert.app.convert.LocationHealth.ReportLine>?>(null)
 
     /**
      * 批次结束后待 Activity 发起「移入回收站」确认的原图 URI
