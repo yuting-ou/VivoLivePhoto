@@ -161,6 +161,50 @@ internal object MediaExport {
         }
     }
 
+    /** 单张导出的位置溯源统计（批次摘要据此输出，供真机研究「哪批照片坐标从哪来」） */
+    internal class LocationStats {
+        var exif = 0      // 坐标来自产物 EXIF
+        var xmp = 0       // 坐标来自产物 XMP（部分机型把位置写进 XMP 而非 EXIF）
+        var video = 0     // 坐标来自嵌入视频段（mp4 udta/©xyz）
+        var none = 0      // 三处都没有（源本身无位置）
+        var rowHealed = 0 // 行坐标与文件不一致，经 UPDATE/重建拉齐
+        var rowFailed = 0 // 行坐标无法拉齐（本张按失败交付）
+        val totalCoords: Int get() = exif + xmp + video
+    }
+
+    /**
+     * 写入后不变式：**行坐标必须等于文件坐标**——不一致先 UPDATE，仍不一致走行
+     * 重建，重建后还不一致 → 返回 null（调用方按失败处理，绝不静默交付）。
+     * 这是「数量多起来必丢位置」的通用自愈机制：无论哪个环节（ROM 忽略 UPDATE、
+     * 批量插入时坐标列被丢、媒体扫描回写）把坐标弄丢，这里都会当场发现并拉齐。
+     */
+    internal fun ensureRowCoords(
+        resolver: android.content.ContentResolver,
+        uri: Uri,
+        src: File,
+        timestamp: Long,
+        coords: Pair<Double, Double>?,
+        stats: LocationStats?
+    ): Uri? {
+        val before = queryLocationColumns(resolver, uri)
+        if (coordsMatch(coords, before)) return uri
+        updateLocationColumns(resolver, uri, coords)
+        var after = queryLocationColumns(resolver, uri)
+        if (!coordsMatch(coords, after)) {
+            // UPDATE 没生效（vivo 静默忽略既有行坐标列）：删行重插，出生带坐标
+            val rebuilt = rebuildRowWithCoords(resolver, uri, src, timestamp, coords)
+            if (rebuilt != null) after = queryLocationColumns(resolver, rebuilt)
+            if (rebuilt == null || !coordsMatch(coords, after)) {
+                stats?.rowFailed++
+                return null
+            }
+            stats?.rowHealed++
+            return rebuilt
+        }
+        stats?.rowHealed++
+        return uri
+    }
+
     /**
      * 导出转换产物到系统相册并做写后自检，返回入库 URI。
      *
@@ -174,9 +218,10 @@ internal object MediaExport {
      *
      * @param useCameraDir true 时写入 DCIM/Camera，false 时写入 [relPath]
      * @param oldUriString 显式指定的既有产物 URI（重转路径）
-     * @param requireGps 位置交付校验：源字节含 GPS（读取未脱敏）时，产物 EXIF 也必须
-     *   带上坐标，否则视为本张转换失败——「成功」的定义包含位置不失守。破损修复
-     *   （糊图）不开启。正常管线逐字节保留 EXIF，此校验是防线而非常触发路径
+     * @param requireGps 位置交付校验：源字节含 GPS（读取未脱敏）时，产物必须有
+     *   任何坐标来源，且入库行坐标必须与文件一致——「成功」的定义包含位置不失守。
+     *   破损修复（糊图）不开启
+     * @param stats 位置溯源统计（批次摘要输出，研究「坐标从哪来、哪张被自愈」）
      */
     fun exportAndVerify(
         context: Context,
@@ -185,7 +230,8 @@ internal object MediaExport {
         relPath: String,
         useCameraDir: Boolean,
         oldUriString: String? = null,
-        requireGps: Boolean = false
+        requireGps: Boolean = false,
+        stats: LocationStats? = null
     ): Uri {
         val resolver = context.contentResolver
         val src = File(result.path)
@@ -194,31 +240,51 @@ internal object MediaExport {
         }
         val targetRelPath = if (useCameraDir) "DCIM/Camera" else relPath
         val stem = src.name.substringBeforeLast('.')
-
-        // 待导出产物 XMP 里的源指纹（VivoSingle 写入）——判定「既往产物是否同源」的依据
         val outBytes = src.readBytes()
-        val expectedFingerprint = try {
-            XmpTemplate.extractSourceFingerprint(JpegUtil.findXmpSegment(outBytes)?.xmpText)
+
+        // 拍摄坐标三级兜底链（写入媒体库坐标列；vivo 相册的「位置」显示只认列，
+        // 不回读文件 EXIF——2026-10 真机结论）：
+        // ① EXIF（常规：源 EXIF 的 GPS 随主图字节进入产物）
+        // ② XMP（部分机型把位置写进 XMP 而非 EXIF，管线已合并进产物 XMP）
+        // ③ 嵌入视频段（vivo 相机在 mp4 udta/©xyz 写 ISO 6709 串，EXIF/XMP 都没有时仍在）
+        // 字节不动（MD5 自检链保持）；EXIF 回写留给「找回位置」的行重建
+        val xmpText = try {
+            JpegUtil.findXmpSegment(outBytes)?.xmpText
         } catch (_: Exception) {
             null
         }
-        // 拍摄坐标（源 EXIF 的 GPS，随主图进入产物）：写入媒体库坐标列。
-        // vivo 相册的「位置」显示读媒体库列、不回读文件 EXIF，相机拍照时由系统写入该列；
-        // 应用插入的行若不带坐标，相册就永远显示不出位置（2026-10 真机结论）
+        val expectedFingerprint = try {
+            XmpTemplate.extractSourceFingerprint(xmpText)
+        } catch (_: Exception) {
+            null
+        }
         var coords = try {
             JpegUtil.gpsCoordinates(outBytes)
         } catch (_: Exception) {
             null
         }
-        // 坐标兜底：产物 EXIF 无 GPS 但嵌入视频段带坐标（vivo 相机在 mp4 udta/©xyz
-        // 写 ISO 6709 串，部分源 EXIF 缺失/解析不出的照片视频段仍在）→ 用视频段坐标
-        // 写入媒体库列，产物出生带坐标，不再落到「转完没位置」。字节不动（MD5 自检链
-        // 保持）；EXIF 回写留给「找回位置」的行重建
+        val fromExif = coords != null
+        var fromXmp = false
+        var fromVideo = false
+        if (!fromExif) {
+            coords = try { XmpTemplate.gpsCoordsFromXmp(xmpText) } catch (_: Exception) { null }
+            fromXmp = coords != null
+        }
         if (coords == null) {
             coords = try {
                 GpsRecovery.recoverFromVideoSegment(outBytes)
             } catch (_: Exception) {
                 null
+            }
+            fromVideo = coords != null
+        }
+        // 双路并发下计数需互斥（读方在批次 joinAll 之后，无并发读）
+        if (stats != null) synchronized(stats) {
+            when {
+                fromExif -> stats.exif++
+                fromXmp -> stats.xmp++
+                fromVideo -> stats.video++
+                else -> stats.none++
             }
         }
         // 位置交付校验：源有位置而产物没有任何坐标来源 = 管线丢了 EXIF，绝不能当
@@ -232,7 +298,10 @@ internal object MediaExport {
         val previous = oldUriString?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: findPreviousOutput(resolver, targetRelPath, stem, src.absolutePath, expectedFingerprint)
         if (previous != null) {
-            overwriteExisting(resolver, previous, src, result, timestamp, coords)?.let { return it }
+            overwriteExisting(resolver, previous, src, result, timestamp, coords, stats)?.let {
+                return ensureRowCoords(resolver, it, src, timestamp, coords, stats)
+                    ?: throw IOException("位置校验失败：入库行坐标与文件不一致且无法拉齐（已回滚，原图未删）")
+            }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
         }
 
@@ -293,7 +362,13 @@ internal object MediaExport {
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             throw IOException("输出自检失败（导出文件与转换结果不一致，已回滚本次导出）")
         }
-        return uri
+        // 写入后不变式：行坐标必须等于文件坐标（批量插入时坐标列偶发丢失的通用自愈）
+        return ensureRowCoords(resolver, uri, src, timestamp, coords, stats)
+            ?: run {
+                try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                throw IOException(
+                    "位置校验失败：媒体库坐标与文件不一致且无法拉齐（已回滚本张导出，原图未删）")
+            }
     }
 
     /**
@@ -308,7 +383,8 @@ internal object MediaExport {
         src: File,
         result: SingleWriteResult,
         timestamp: Long,
-        coords: Pair<Double, Double>?
+        coords: Pair<Double, Double>?,
+        stats: LocationStats?
     ): Uri? {
         // 旧记录仍有效才覆盖（用户可能已手动删除产物）
         val valid = try {
@@ -346,19 +422,10 @@ internal object MediaExport {
             if (verified) {
                 // 坐标随覆盖刷新：行必须如实描述刚写入的文件（新无 GPS 亦清旧坐标）。
                 // ⚠ 不能只靠 UPDATE：vivo 对既有记录的坐标列 UPDATE **静默忽略**
-                // （2026-10 真机结论，见 LocationDisplayRepair）——旧行若出生时没坐标，
-                // 覆盖后 UPDATE 无效，文件里有 GPS 相册却不显示（批量重转时零星几张
-                // 「转了还是没位置」的根因）。先 UPDATE 再复查，没写进去就走行重建
-                // （删行重插，文件名/目录/时间戳全部保持）。
-                updateLocationColumns(resolver, old, coords)
-                val afterUpdate = queryLocationColumns(resolver, old)
-                if (!coordsMatch(coords, afterUpdate)) {
-                    // UPDATE 没生效且坐标不一致 → 行重建（出生带坐标）
-                    rebuildRowWithCoords(resolver, old, src, timestamp, coords)?.let { return it }
-                    // 重建失败：旧行已被删、调用方会落到新建路径（同名空出，无序号）
-                    return null
-                }
-                return old
+                // （2026-10 真机结论）——旧行出生时没坐标，覆盖后 UPDATE 无效，
+                // 文件里有 GPS 相册却不显示（批量重转零星几张丢位置的根因）。
+                // 交给 ensureRowCoords：UPDATE → 复查 → 行重建 → 复查，拉不齐由调用方落新建
+                return ensureRowCoords(resolver, old, src, timestamp, coords, stats)
             }
             // 覆盖后自检失败（极罕见）：内容已不可信，删记录后由调用方新建
             try { resolver.delete(old, null, null) } catch (_: Exception) {}

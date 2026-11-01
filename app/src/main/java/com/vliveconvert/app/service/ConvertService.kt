@@ -174,6 +174,8 @@ class ConvertService : Service() {
             if (Runtime.getRuntime().maxMemory() >= 384L * 1024 * 1024) 2 else 1
         val sem = Semaphore(parallelism)
 
+        // 位置溯源统计（研究「坐标从哪来、哪张被自愈」——批量必丢位置问题的观测数据）
+        val locationStats = MediaExport.LocationStats()
         // 逐张位置守卫（彻底杜绝的最后一环）：批次开跑后用户仍可能在系统设置里
         // 收回「位置」权限——剩余照片会静默脱敏转换。守卫在每张开转前复查，
         // 一旦发现立即停批：已完成的保留成果，未转的留在队列待授权续转。
@@ -196,7 +198,7 @@ class ConvertService : Service() {
                 sem.withPermit {
                     if (!locationGuardOk(ci.externalSource)) return@withPermit
                     convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
-                        firstOutUri, ok, fail, noGps)
+                        firstOutUri, ok, fail, noGps, locationStats)
                     val d = done.incrementAndGet()
                     withContext(Dispatchers.Main) {
                         // 收尾并入进度条时，转换段只占 0~0.9，剩余 0.1 留给收尾
@@ -235,6 +237,17 @@ class ConvertService : Service() {
                 "；$noGpsCount 张照片源文件本身不含 GPS 位置"
             else -> ""
         }
+        // 位置溯源摘要：研究「批量必丢位置」的观测数据（坐标来源分布 + 被自愈/失败的张数）
+        val locNote = synchronized(locationStats) {
+            val parts = mutableListOf("EXIF ${locationStats.exif}")
+            if (locationStats.xmp > 0) parts.add("XMP ${locationStats.xmp}")
+            if (locationStats.video > 0) parts.add("视频段 ${locationStats.video}")
+            if (locationStats.none > 0) parts.add("无位置 ${locationStats.none}")
+            var note = "；位置溯源：${parts.joinToString("/")}"
+            if (locationStats.rowHealed > 0) note += "，自愈 ${locationStats.rowHealed} 行"
+            if (locationStats.rowFailed > 0) note += "，无法对齐 ${locationStats.rowFailed} 行"
+            note
+        }
         val batchTitle = if (reconvertBatch) "重新转换完成" else "转换完成"
         // 逐张守卫触发：如实说明停批与剩余，队列里的未转项重新授权后续转
         val guardNote = if (locationGuardTripped.get()) {
@@ -243,7 +256,7 @@ class ConvertService : Service() {
                 "（重新授权后点「开始转换」可继续）"
         } else ""
         val finalStatus = "$batchTitle：成功 ${ok.get()} 个，失败 ${fail.get()} 个" +
-            (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote + guardNote
+            (if (reconvertBatch) "" else "（输出目录：$finalDest）") + gpsNote + guardNote + locNote
         if (!finalizeInBar) {
             // 转换就是全部工作：立即宣告完成（进度条 100% + 完成节拍）
             withContext(Dispatchers.Main) {
@@ -320,7 +333,8 @@ class ConvertService : Service() {
         firstOutUri: AtomicReference<String?>,
         ok: AtomicInteger,
         fail: AtomicInteger,
-        noGps: AtomicInteger
+        noGps: AtomicInteger,
+        locationStats: MediaExport.LocationStats
     ) {
         val app = applicationContext
         // 重转模式（找回位置）：跳过删除原图收集（上次批次已处理过），
@@ -370,7 +384,8 @@ class ConvertService : Service() {
                 useCameraDir = moveToCamera && !deferToCamera,
                 oldUriString = if (isReconvert) ci.outUri else null,
                 // 位置交付校验：源读到 GPS（未脱敏）时产物必须仍带坐标，否则本张判失败
-                requireGps = result.sourceHasGps)
+                requireGps = result.sourceHasGps,
+                stats = locationStats)
             // 精确「已转」索引：源路径 → 产物 URI（选择器据此标记/筛选，不依赖名称猜测）
             ConvertedStore.record(app, ci.item.path, exportUri.toString())
             firstOutUri.compareAndSet(null, exportUri.toString())

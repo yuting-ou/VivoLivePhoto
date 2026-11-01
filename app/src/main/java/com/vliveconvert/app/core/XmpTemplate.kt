@@ -111,6 +111,54 @@ internal object XmpTemplate {
             .find(sourceXmp)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * 从 XMP 的 GPS 属性解析十进制经纬度（GCamera 约定形态）。
+     *
+     * 兼容形态：
+     * - `22,50.2088N`（度,分+半球）  / `22,50,30.5N`（度,分,秒+半球）
+     * - `22.8389`（纯十进制）+ 独立 Ref 属性（`GPSLatitudeRef="N"`）
+     * 半球字母（N/S/E/W）可挂在值尾或 Ref 属性里；S/W 取负。
+     * 无 GPS 属性、解析不出、纬经度不成对 → null。
+     *
+     * 为什么需要：vivo 相册的位置显示只认媒体库坐标列，坐标链（EXIF → XMP → 视频段）
+     * 里 XMP 是第二来源——部分机型把位置写进 XMP 而非 EXIF（导出时只看 EXIF 会
+     * 漏掉这批，产物出生无坐标，相册就不显示位置）。
+     */
+    fun gpsCoordsFromXmp(sourceXmp: String?): Pair<Double, Double>? {
+        val attrs = extractGpsAttributes(sourceXmp).toMap()
+        val latRaw = attrs["GPSLatitude"] ?: return null
+        val lonRaw = attrs["GPSLongitude"] ?: return null
+        val latRef = attrs["GPSLatitudeRef"]
+        val lonRef = attrs["GPSLongitudeRef"]
+
+        fun component(value: String, ref: String?, positive: Char, negative: Char): Double? {
+            var v = value.trim()
+            var sign = 1.0
+            // 半球字母：挂在值尾
+            when (v.lastOrNull()?.uppercaseChar()) {
+                positive -> v = v.dropLast(1)
+                negative -> { sign = -1.0; v = v.dropLast(1) }
+            }
+            val parts = v.split(',').mapNotNull { p -> p.trim().toDoubleOrNull() }
+            if (parts.isEmpty()) return null
+            var deg = parts[0]
+            if (parts.size >= 2) deg += parts[1] / 60.0
+            if (parts.size >= 3) deg += parts[2] / 3600.0
+            deg *= sign
+            // Ref 属性兜底半球（值尾没带字母时）
+            when (ref?.trim()?.firstOrNull()?.uppercaseChar()) {
+                negative -> if (deg > 0) deg = -deg
+                positive -> if (deg < 0) deg = -deg
+            }
+            return deg
+        }
+
+        val lat = component(latRaw, latRef, 'N', 'S') ?: return null
+        val lon = component(lonRaw, lonRef, 'E', 'W') ?: return null
+        if (lat == 0.0 && lon == 0.0) return null // 0,0 是无位置，不是海上的家
+        return lat to lon
+    }
+
     private fun xmlEscape(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;").replace("'", "&apos;")
