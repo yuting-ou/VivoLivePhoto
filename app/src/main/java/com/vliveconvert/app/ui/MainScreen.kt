@@ -874,6 +874,18 @@ private fun ConvertItemRow(
                         maxLines = if (busy) 1 else 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    // 逐张位置溯源（只在注入恢复/失败/EXIF 段不可解析时出现）：
+                    // 默认 EXIF 直出不加行，避免把每行都撑成三行
+                    ci.locNote?.takeIf { ci.done && !busy }?.let { note ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            note,
+                            style = TextStyle(fontSize = 11.sp,
+                                color = statusColor.copy(alpha = 0.85f)),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     if (busy) {
                         Spacer(Modifier.height(5.dp))
                         GlassIndeterminateBar(height = 3.dp)

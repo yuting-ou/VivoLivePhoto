@@ -201,9 +201,12 @@ internal object MediaExport {
         var xmp = 0        // 坐标来自产物 XMP（部分机型把位置写进 XMP 而非 EXIF）
         var video = 0      // 坐标来自嵌入视频段（mp4 udta/©xyz）
         var none = 0       // 三处都没有（源本身无位置）
-        var injected = 0   // 管线内注入 EXIF 的张数（源 EXIF 无 GPS 但 XMP/视频有坐标）
+        var injected = 0   // 管线内注入 EXIF 的张数（源 EXIF 无**可用** GPS 但 XMP/视频有坐标）
+        var injectedXmp = 0   // 其中坐标来自源 XMP 的张数（逐张溯源用）
+        var injectedVideo = 0 // 其中坐标来自伴生视频 ©xyz 的张数
+        var exifUnusable = 0 // 源 EXIF 有 GPS IFD 但**解不出可用经纬度**的张数（v2.7.0 静默丢位置形态）
         var injectFailed = 0 // 注入失败的张数（**显式失败**，绝不算进「源无 GPS」）
-        var unsaved = 0    // 源有位置但产物没能带上 EXIF GPS 的张数（可见、可重试）
+        var unsaved = 0    // 源有位置但产物**没有可用 EXIF GPS** 的张数（可见、可重试）
         var rowRebuilt = 0 // 覆盖路径行重建的张数（出生带坐标的确定性修复）
         val totalCoords: Int get() = exif + xmp + video
     }
@@ -592,18 +595,42 @@ internal object MediaExport {
                 }
             } catch (_: Exception) { null }
             // 目标名查询与移动之间无并发写入（应用内串行），此处仍以唯一名兜底
+            // 时序保护：行必须以 IS_PENDING=1 落库（对外不可见），字节写完、回读校验长度后
+            // 才发布。原实现先插「可见行」再写文件——扫描/相册可能在空文件上建索引，
+            // 得到一条无坐标/无尺寸的行（正是「行插入与文件落盘时序」的缺陷窗口）。
             newUri = resolver.insert(
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
                 ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Camera")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                     if (carried != null) putGpsColumns(this, carried)
                 }
             ) ?: return false
             resolver.openOutputStream(newUri, "w")?.use { out ->
                 resolver.openInputStream(uri)?.use { input -> input.copyTo(out) }
             } ?: return false
+            // 发布前从 MediaStore 回读确认字节已真正落盘（0 字节行一旦发布就是坏照片）
+            val length = resolver.openInputStream(newUri)?.use { ins ->
+                var n = 0L
+                val buf = ByteArray(8192)
+                while (true) {
+                    val r = ins.read(buf)
+                    if (r < 0) break
+                    n += r
+                }
+                n
+            } ?: -1L
+            if (length <= 0L) throw IOException("移动回退：新行写入 0 字节")
+            resolver.update(
+                newUri,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    put(MediaStore.MediaColumns.SIZE, length)
+                },
+                null, null
+            )
             resolver.delete(uri, null, null)
             true
         } catch (_: Exception) {

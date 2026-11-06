@@ -84,13 +84,37 @@ class ConverterLocationTest {
     }
 
     /** 主图：SOI + [EXIF?] + [XMP?] + SOF0 + SOS + 熵数据 + EOI */
-    private fun primary(withExifGps: Boolean, xmpApp1: ByteArray?): ByteArray {
+    private fun primary(withExifGps: Boolean, xmpApp1: ByteArray?): ByteArray = primaryWithExif(
+        if (withExifGps) exifGpsApp1() else null, xmpApp1)
+
+    private fun primaryWithExif(exifApp1: ByteArray?, xmpApp1: ByteArray?): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         out.write(byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
-        if (withExifGps) out.write(exifGpsApp1())
+        exifApp1?.let { out.write(it) }
         xmpApp1?.let { out.write(it) }
         out.write(jpegBodyAfterSoi())
         return out.toByteArray()
+    }
+
+    /** GPS IFD **非空但没有经纬度三元组**（只有 GPSLatitudeRef="N"）——
+     *  真机里「拍摄时有 GPS 段、却解不出坐标」的形态（refs-only / 全 0,0 / 字段残缺）。
+     *  与 ConverterPipelineTest 的 tiffWithGpsRefOnly 同源：hasGpsExif=true、gpsCoordinates=null。 */
+    private fun junkGpsExifApp1(): ByteArray {
+        val tiff = byteArrayOf(
+            0x4D, 0x4D, 0, 42, 0, 0, 0, 8,                    // big-endian MM / 42 / IFD0@8
+            0, 1,                                              // 1 entry
+            0x88.toByte(), 0x25, 0, 4, 0, 0, 0, 26,             // GPSInfoIFD -> @26
+            0, 0, 0, 0,                                        // next IFD = 0
+            0, 1,                                              // GPS IFD: 1 entry
+            0, 1, 0, 2, 0, 0, 0, 2, 'N'.code.toByte(), 0,      // GPSLatitudeRef="N"
+            0, 0, 0, 0                                         // next IFD = 0
+        )
+        val payload = "Exif\u0000\u0000".toByteArray() + tiff
+        val seg = ByteArray(4 + payload.size)
+        seg[0] = 0xFF.toByte(); seg[1] = 0xE1.toByte()
+        BinaryUtils.writeU16BE(seg, 2, payload.size + 2)
+        System.arraycopy(payload, 0, seg, 4, payload.size)
+        return seg
     }
 
     private fun pseudoRandom(size: Int, seed: Int): ByteArray {
@@ -244,5 +268,62 @@ class ConverterLocationTest {
         assertNull("没有注入动作，就不该有注入失败", result.gpsInjectFailed)
         assertFalse(result.outputHasExifGps)
         assertTrue("转换产物必须照常写出", File(result.path).length() > 0)
+    }
+
+    /**
+     * 最小复现（v2.7.0 零星丢位置的根因）：
+     * 源 EXIF 的 GPS IFD **非空但解不出经纬度**（只有 GPSLatitudeRef），XMP 有真实坐标。
+     *
+     * v2.7.0 行为：`ensureExifGps` 用 `hasGpsExif` 判定「源已有位置」→ 直接 return 不注入；
+     * `VivoSingle` 又用 `hasGpsExif` 判产物 → outputHasExifGps=true；
+     * 批次层因此判 unsavedLocation=false。三层全静默。但 vivo 媒体扫描按文件 EXIF
+     * 重算行坐标，这段不可解析的 GPS 段让扫描写不出坐标 → 相册不显示位置。
+     *
+     * 修复后：必须识别「GPS 段不可用」，用 XMP 坐标**覆盖**注入，产物 EXIF 可解析。
+     */
+    @Test
+    fun junkGpsIfdSourceMustGetUsableExifGps() {
+        val dir = Files.createTempDirectory("vlc_loc_junk").toFile()
+        val primary = primaryWithExif(exifApp1 = junkGpsExifApp1(), xmpApp1 = gpsXmpApp1())
+        // 前置事实：这就是「非空但不可用」的形态，两个判据结论相反
+        assertTrue("前置：源 EXIF 确有 GPS IFD", JpegUtil.hasGpsExif(primary))
+        assertNull("前置：但它解不出经纬度", JpegUtil.gpsCoordinates(primary))
+
+        val (jpg, _) = makePair(dir, "IMG_JUNK",
+            vivoDualJpeg(primary), vivoDualMp4(xyz = null))
+        val outDir = Files.createTempDirectory("vlc_loc_out5").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+
+        assertTrue("XMP 有坐标：源有位置", result.sourceHasLocation)
+        assertTrue("必须识别为不可用并注入", result.gpsInjected)
+        assertTrue("应标记源 EXIF 段不可解析", result.exifGpsUnusable)
+        assertNull(result.gpsInjectFailed)
+        assertTrue("产物 EXIF 必须带可用经纬度", result.outputHasExifGps)
+
+        val coords = JpegUtil.gpsCoordinates(File(result.path).readBytes())
+        assertNotNull("相册靠这段 EXIF 才能显示位置", coords)
+        assertEquals(22.8389, coords!!.first, 1e-3)
+        assertEquals(108.1780, coords.second, 1e-3)
+        // 指纹仍以注入前原始主图计算（重转可原地覆盖）
+        assertEquals(sha16(primary), result.sourceFingerprint)
+    }
+
+    /** GPS 段非空但不可用、且 XMP/视频也没有坐标：如实判「源无可交付位置」，
+     *  不能谎报成功，也不能凭空注入 */
+    @Test
+    fun junkGpsIfdWithoutFallbackCoordsIsReportedAsNoLocation() {
+        val dir = Files.createTempDirectory("vlc_loc_junk2").toFile()
+        val primary = primaryWithExif(exifApp1 = junkGpsExifApp1(), xmpApp1 = null)
+        val (jpg, _) = makePair(dir, "IMG_JUNK2",
+            vivoDualJpeg(primary), vivoDualMp4(xyz = null))
+
+        val outDir = Files.createTempDirectory("vlc_loc_out6").toFile()
+        val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
+
+        assertFalse("没有可恢复坐标：sourceHasLocation 必须为 false", result.sourceHasLocation)
+        assertTrue("但要显式记录 EXIF 段不可解析", result.exifGpsUnusable)
+        assertFalse(result.gpsInjected)
+        assertFalse("产物不可能凭空多出可用坐标", result.outputHasExifGps)
+        assertTrue(File(result.path).length() > 0)
     }
 }

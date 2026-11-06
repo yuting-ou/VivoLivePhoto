@@ -42,6 +42,22 @@ class ConvertQueueJsonTest {
     }
 
     @Test
+    fun locationNoteSurvivesRestart() {
+        // 逐张「位置溯源」结论必须随队列持久化：进程被杀后重开，用户仍能看到
+        // 哪张是注入恢复、哪张位置未保住——不能只靠进相册巡查
+        val note = "位置：源 EXIF 无可用坐标，已从 XMP 恢复并写入 EXIF"
+        val queue = listOf(
+            ConvertItem(item = item(7, "IMG_1007.jpg"), status = "完成：已导出", done = true,
+                locNote = note))
+        val restored = QueueJson.fromJson(QueueJson.toJson(queue))!!
+        assertEquals(note, restored[0].locNote)
+        // 旧队列（无 locNote 字段）不炸、恢复为 null
+        val legacy = "[{\"id\":8,\"path\":\"/a/IMG_1008.jpg\",\"name\":\"IMG_1008.jpg\"," +
+            "\"done\":true,\"status\":\"完成：已导出\"}]"
+        assertNull(QueueJson.fromJson(legacy)!![0].locNote)
+    }
+
+    @Test
     fun interruptedConvertingResetsToPending() {
         val queue = listOf(
             ConvertItem(item = item(5, "IMG_1005.jpg"), status = "转换中…"))

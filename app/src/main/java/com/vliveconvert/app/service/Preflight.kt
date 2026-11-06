@@ -81,17 +81,19 @@ internal object Preflight {
 
     /** 源照片位置普查结果：哪些拍摄时记录了位置、哪些本来就没有 */
     class GpsCensus(
-        /** 源字节含 GPS EXIF 的张数（转换后将保留位置） */
+        /** 源 EXIF 含**可用**经纬度的张数（转换后位置可直接保留） */
         val withGps: Int,
-        /** 源字节无 GPS 的张数（拍摄时未记录位置，转后也不会有——与脱敏无关） */
+        /** 源 EXIF 无**可用**经纬度的张数（口径同交付判据；其中一部分可从 XMP/视频段恢复） */
         val withoutGps: Int
     )
 
     /**
      * 源照片位置普查（关1「先确定每一张都有位置」）：逐张读文件头判 EXIF GPS。
      *
-     * 调用前提：**位置权限已授予**（门禁保证）——此时读到无 GPS 即拍摄时未记录，
-     * 不存在脱敏误判；转换后产物若无位置反而说明管线失守（另由导出侧交付校验把关）。
+     * 调用前提：**位置权限已授予**（门禁保证）——此时 EXIF 无可用坐标不是脱敏误判，
+     * 但仍不等于「拍摄时无位置」：坐标可能只在 XMP 或伴生视频的 ©xyz 里，转换时会恢复。
+     * 普查只读文件头（EXIF/XMP 必在头部），不读伴生 mp4（那是整文件扫描，成本不可接受）；
+     * 因此本结果是**保守下界**，不能当「这批照片没有位置」的结论。
      * 只读头部（EXIF 必在文件头），每张开销一次开流；在 IO 线程调用，结果异步
      * 补进预检弹窗——不打破 compute 的「主线程 stat 级」纪律。
      */
@@ -113,7 +115,9 @@ internal object Preflight {
             } catch (_: Exception) {
                 null
             } ?: continue
-            if (JpegUtil.hasGpsExif(head)) withGps++ else withoutGps++
+            // 普查口径必须与交付口径一致：只把「能解析出经纬度」算作有位置，
+            // 否则 GPS 段非空但不可用的照片会被承诺「有位置」而在相册里显示不出来。
+            if (JpegUtil.hasUsableGpsExif(head)) withGps++ else withoutGps++
         }
         return GpsCensus(withGps, withoutGps)
     }

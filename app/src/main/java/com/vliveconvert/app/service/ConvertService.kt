@@ -239,14 +239,25 @@ class ConvertService : Service() {
         }
         // 位置溯源摘要：研究「批量必丢位置」的观测数据（坐标来源分布 + 注入/失败/未保住张数）。
         // 「源无 GPS」与「注入失败」「位置未保住」分开计数——后者是可见缺陷（可重试），
-        // 绝不允许混进「源本身没位置」里蒙混
+        // 绝不允许混进「源本身没位置」里蒙混。
+        // 「EXIF 段不可解析」单独计数：它是 v2.7.0 静默误判成功的形态，出现即说明本批
+        // 有照片曾会被相册显示成「无位置」，现在已被恢复（或已显式失败）。
         val locNote = synchronized(locationStats) {
             val parts = mutableListOf("EXIF ${locationStats.exif}")
             if (locationStats.xmp > 0) parts.add("XMP ${locationStats.xmp}")
             if (locationStats.video > 0) parts.add("视频段 ${locationStats.video}")
             if (locationStats.none > 0) parts.add("无位置 ${locationStats.none}")
-            var note = "；位置溯源：${parts.joinToString("/")}"
-            if (locationStats.injected > 0) note += "，注入 ${locationStats.injected} 张"
+            var note = "；位置交付：${parts.joinToString("/")}"
+            if (locationStats.injected > 0) {
+                val from = buildList {
+                    if (locationStats.injectedXmp > 0) add("XMP ${locationStats.injectedXmp}")
+                    if (locationStats.injectedVideo > 0) add("视频 ${locationStats.injectedVideo}")
+                }
+                note += "，注入 ${locationStats.injected} 张" +
+                    (if (from.isNotEmpty()) "（${from.joinToString("/")}）" else "")
+            }
+            if (locationStats.exifUnusable > 0) note +=
+                "，EXIF 的 GPS 段不可解析 ${locationStats.exifUnusable} 张"
             if (locationStats.injectFailed > 0) note +=
                 "，⚠注入失败 ${locationStats.injectFailed} 张"
             if (locationStats.unsaved > 0) note +=
@@ -397,15 +408,37 @@ class ConvertService : Service() {
                 requireGps = result.sourceHasLocation,
                 stats = locationStats)
             // ── 位置明细显式记账（全部来自转换管线的事实，不再是本层的猜测）──
-            if (result.gpsInjected) synchronized(locationStats) { locationStats.injected++ }
+            if (result.gpsInjected) synchronized(locationStats) {
+                locationStats.injected++
+                when (result.gpsCoordsSource) {
+                    "xmp" -> locationStats.injectedXmp++
+                    "video" -> locationStats.injectedVideo++
+                }
+            }
+            if (result.exifGpsUnusable) synchronized(locationStats) { locationStats.exifUnusable++ }
             if (result.gpsInjectFailed != null) {
                 synchronized(locationStats) { locationStats.injectFailed++ }
             }
-            // 产物自检（不查媒体库坐标列，直接看文件事实）：源有位置但产物没能带上
-            // EXIF GPS = 「位置未保住」——可见缺陷，标记可重转、保留原图、单独计数，
-            // 绝不允许静默交付后让用户在相册里才发现
+            // 产物自检（不查媒体库坐标列，直接看文件事实）：源有位置但产物**没有可用 EXIF
+            // 经纬度** = 「位置未保住」——可见缺陷，标记可重转、保留原图、单独计数，
+            // 绝不允许静默交付后让用户在相册里才发现。
+            // 注意判据必须是「可用经纬度」而不是「EXIF 里有 GPS 段」：后者对
+            // GPSLatitudeRef-only / 全 0,0 / 三元组不完整的文件会误报成功（v2.7.0 根因）。
             val unsavedLocation = result.sourceHasLocation && !result.outputHasExifGps
             if (unsavedLocation) synchronized(locationStats) { locationStats.unsaved++ }
+            // 逐张「位置溯源」结论：只在**非默认路径**才写一行（默认 EXIF 直出不打扰列表）。
+            // 失败/恢复都必须一眼可见，用户不必再进相册巡查。
+            val locNote = when {
+                unsavedLocation ->
+                    "位置：⚠ 未能写入可用 EXIF（原图已保留，可重转找回）"
+                result.gpsInjected && result.gpsCoordsSource == "xmp" ->
+                    "位置：源 EXIF 无可用坐标，已从 XMP 恢复并写入 EXIF"
+                result.gpsInjected && result.gpsCoordsSource == "video" ->
+                    "位置：源 EXIF 无可用坐标，已从视频段恢复并写入 EXIF"
+                result.exifGpsUnusable ->
+                    "位置：EXIF 的 GPS 段不可解析（源本身无可交付坐标）"
+                else -> null
+            }
             // 精确「已转」索引：源路径 → 产物 URI（选择器据此标记/筛选，不依赖名称猜测）
             ConvertedStore.record(app, ci.item.path, exportUri.toString())
             firstOutUri.compareAndSet(null, exportUri.toString())
@@ -449,6 +482,7 @@ class ConvertService : Service() {
                     // 「位置未保住」与「源无位置」都驱动重转入口（琥珀「!」徽标）；
                     // 前者重转是真能找回（管线修复后），后者如实展示
                     lostGps = !isReconvert && (unsavedLocation || !result.sourceHasLocation),
+                    locNote = locNote,
                     outUri = exportUri.toString(),
                     reconvert = false))
             }

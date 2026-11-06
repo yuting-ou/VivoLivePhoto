@@ -93,11 +93,26 @@ internal object Converter {
      */
     private fun ensureExifGps(asset: LivePhotoAsset, log: (String, String, String) -> Unit) {
         val primary = asset.primaryJpeg
-        if (JpegUtil.hasGpsExif(primary)) {
+        val exifCoords = try {
+            JpegUtil.gpsCoordinates(primary)
+        } catch (_: Exception) {
+            null
+        }
+        if (exifCoords != null) {
             asset.extras["gps_coords_source"] = "exif"
             asset.extras["source_has_location"] = true
             return
         }
+        // 「GPS IFD 非空」≠「有可用经纬度」：只有 GPSLatitudeRef/GPSVersionID、
+        // 三元组不完整、全 0,0、类型不对都会让 hasGpsExif=true 而 gpsCoordinates=null。
+        // 这类文件媒体扫描写不进行坐标（相册不显示位置），必须继续从 XMP/视频恢复
+        // 并**覆盖**那段无效 EXIF——v2.7.0 在这里提前 return 是本轮零星丢位置的根因。
+        val hadUnusableGpsIfd = try {
+            JpegUtil.hasGpsExif(primary)
+        } catch (_: Exception) {
+            false
+        }
+        if (hadUnusableGpsIfd) asset.extras["gps_exif_unusable"] = true
         val sourceXmp = try {
             JpegUtil.findXmpSegment(primary)?.xmpText
         } catch (_: Exception) {
@@ -146,7 +161,15 @@ internal object Converter {
                 asset.extras["gps_injected"] = true
                 asset.extras["source_has_gps"] = true
                 val src = if (xmpCoords != null) "源 XMP" else "伴生视频 ©xyz"
-                log("info", "源 EXIF 无 GPS：已从${src}恢复坐标并注入主图 EXIF（产物天生带位置）", "转换")
+                if (hadUnusableGpsIfd) {
+                    asset.extras["gps_exif_replaced"] = true
+                    log("info",
+                        "源 EXIF 的 GPS 段非空但解不出经纬度：已用${src}的坐标覆盖，" +
+                            "产物 EXIF 现在可被媒体扫描写入行坐标",
+                        "转换")
+                } else {
+                    log("info", "源 EXIF 无 GPS：已从${src}恢复坐标并注入主图 EXIF（产物天生带位置）", "转换")
+                }
             }
             is GpsRecovery.InjectResult.Fail -> {
                 // 显式失败：上层必须把本张标记为「位置未保住」（可见、可重试），

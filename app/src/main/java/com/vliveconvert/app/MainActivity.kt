@@ -2539,14 +2539,14 @@ internal fun PreflightContent(
                 null -> "将保留（核对中…）"
                 else -> when {
                     census.withoutGps == 0 -> "全部将保留（${census.withGps} 张）"
-                    census.withGps == 0 -> "全部不含位置（${census.withoutGps} 张）"
-                    else -> "${census.withGps} 张保留；${census.withoutGps} 张不含"
+                    census.withGps == 0 -> "源 EXIF 无坐标（${census.withoutGps} 张）"
+                    else -> "${census.withGps} 张 EXIF 可用；${census.withoutGps} 张待恢复"
                 }
             },
             when {
                 !hasLocationPermission -> "未授予「位置」权限"
                 gpsCensus != null && gpsCensus.withoutGps > 0 ->
-                    "无位置为拍摄时未记录，非转换丢失"
+                    "EXIF 无坐标≠无位置，转换时从 XMP/视频恢复"
                 else -> null
             },
             // 源本身无位置不是失败（不染错误色）；只有权限缺失才是「会丢失」

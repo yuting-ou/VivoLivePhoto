@@ -13,6 +13,8 @@ data class ConvertItem(
     val lostGps: Boolean = false,
     /** 上次导出的 MediaStore URI（重新转换时原地覆盖旧产物，避免重名加序号） */
     val outUri: String? = null,
+    /** 逐张「位置溯源」一行结论（只在非默认路径出现：注入恢复/失败/EXIF 段不可解析） */
+    val locNote: String? = null,
     /** 本项为「重新转换」（找回位置）：跳过删除原图收集，输出覆盖旧产物 */
     val reconvert: Boolean = false,
     /** 外部分享进来的缓存副本：源不是用户相册里的文件，删除原图/移相机语义全部停用 */

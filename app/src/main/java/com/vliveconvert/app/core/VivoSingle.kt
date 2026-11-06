@@ -142,10 +142,13 @@ internal object VivoSingle {
             sourceFingerprint = sourceFingerprint,
             sourceFormat = asset.sourceFormat,
             sourceHasLocation = asset.extras["source_has_location"] == true,
+            gpsCoordsSource = asset.extras["gps_coords_source"] as? String,
+            exifGpsUnusable = asset.extras["gps_exif_unusable"] == true,
             gpsInjected = asset.extras["gps_injected"] == true,
             gpsInjectFailed = asset.extras["gps_inject_failed"] as? String,
-            // 产物 EXIF 是否带 GPS：对**最终写出的主图**判定（注入后的字节）
-            outputHasExifGps = JpegUtil.hasGpsExif(primary))
+            // 产物 EXIF 是否带**可用**经纬度：对最终写出的主图（注入后的字节）判定。
+            // 必须用强判据——媒体扫描只认能解析出的经纬度，GPS 段「非空」不算。
+            outputHasExifGps = JpegUtil.hasUsableGpsExif(primary))
     }
 
     /**

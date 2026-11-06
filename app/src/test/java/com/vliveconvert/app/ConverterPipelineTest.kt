@@ -485,8 +485,14 @@ class ConverterPipelineTest {
         0x00, 0x00, 0x00, 0x00              // next IFD = 0
     )
 
-    /** 小端 TIFF：IFD0 的 0x8825 指向含 1 个条目的 GPS IFD（有效 GPS） */
-    private val tiffWithGps: ByteArray = byteArrayOf(
+    /**
+     * 小端 TIFF：IFD0 的 0x8825 指向**只有 GPSLatitudeRef** 的 GPS IFD。
+     *
+     * 这是「GPS 段非空、却解不出经纬度」的夹具（hasGpsExif=true / gpsCoordinates=null）：
+     * v2.7.0 转换链路把它当「源已有位置」跳过注入，是「300 张里零星几张没位置」的根因。
+     * 名字必须诚实——早期版本叫 tiffWithGps，把缺陷钉成了「有效 GPS」。
+     */
+    private val tiffWithGpsRefOnly: ByteArray = byteArrayOf(
         0x49, 0x49, 0x2A, 0x00,             // "II" + magic
         0x08, 0x00, 0x00, 0x00,             // IFD0 offset = 8
         0x01, 0x00,                         // IFD0: 1 entry
@@ -501,8 +507,8 @@ class ConverterPipelineTest {
         0x00, 0x00, 0x00, 0x00              // next IFD = 0
     )
 
-    /** 大端 TIFF（"MM"）：IFD0 的 0x8825 指向含 1 个条目的 GPS IFD */
-    private val tiffWithGpsBE: ByteArray = byteArrayOf(
+    /** 大端 TIFF（"MM"）：同样只有 GPSLatitudeRef 的 GPS IFD（无经纬度三元组） */
+    private val tiffWithGpsRefOnlyBE: ByteArray = byteArrayOf(
         0x4D, 0x4D, 0x00, 0x2A,             // "MM" + magic 0x002A（大端）
         0x00, 0x00, 0x00, 0x08,             // IFD0 offset = 8
         0x00, 0x01,                         // IFD0: 1 entry
@@ -530,6 +536,38 @@ class ConverterPipelineTest {
         0x00, 0x00, 0x00, 0x00
     )
 
+    /**
+     * 大端 TIFF：GPS IFD 含**完整经纬度三元组**（22°50'20"N / 108°10'40"E）。
+     * 这才是「源本身带可用位置」的真夹具：hasGpsExif 与 gpsCoordinates 同真。
+     */
+    private fun tiffWithUsableGps(): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf(0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08))
+        // IFD0：1 项 GPSInfo(0x8825)→26；next=0
+        out.write(byteArrayOf(0x00, 0x01))
+        out.write(byteArrayOf(
+            0x88.toByte(), 0x25, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1A))
+        out.write(byteArrayOf(0x00, 0x00, 0x00, 0x00))
+        // GPS IFD @26：4 项，lat@80 lon@104，next=0
+        out.write(byteArrayOf(0x00, 0x04))
+        fun i16(v: Long) = byteArrayOf(((v shr 8) and 0xFF).toByte(), (v and 0xFF).toByte())
+        fun i32(v: Long) = byteArrayOf(
+            ((v shr 24) and 0xFF).toByte(), ((v shr 16) and 0xFF).toByte(),
+            ((v shr 8) and 0xFF).toByte(), (v and 0xFF).toByte())
+        fun entry(tag: Int, typ: Int, cnt: Long, value: Long) {
+            out.write(i16(tag.toLong()) + i16(typ.toLong()) + i32(cnt) + i32(value))
+        }
+        entry(1, 2, 2, 0x4E000000L)      // GPSLatitudeRef = "N"
+        entry(2, 5, 3, 80L)              // GPSLatitude：RATIONAL ×3
+        entry(3, 2, 2, 0x45000000L)      // GPSLongitudeRef = "E"
+        entry(4, 5, 3, 104L)             // GPSLongitude：RATIONAL ×3
+        out.write(byteArrayOf(0x00, 0x00, 0x00, 0x00))
+        fun rational(n: Long, d: Long) { out.write(i32(n) + i32(d)) }
+        rational(22, 1); rational(50, 1); rational(20, 1)     // @80
+        rational(108, 1); rational(10, 1); rational(40, 1)    // @104
+        return out.toByteArray()
+    }
+
     @Test
     fun gpsExifDetection() {
         // 无 EXIF → false
@@ -537,12 +575,24 @@ class ConverterPipelineTest {
         // 有 EXIF 但无 GPS → false
         assertFalse("有 EXIF 无 GPS IFD 应判定为无 GPS",
             JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithoutGps))))
-        // GPS IFD 存在且非空 → true
-        assertTrue("含非空 GPS IFD 应判定为有 GPS",
-            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithGps))))
-        // 大端（MM）EXIF 同样正确解析
-        assertTrue("大端 EXIF 的非空 GPS IFD 应判定为有 GPS",
-            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithGpsBE))))
+        // 真夹具：GPS 段非空且含完整三元组 → 两个判据都成立
+        val usable = jpegWithExif(exifApp1(tiffWithUsableGps()))
+        assertTrue("含完整经纬度的 GPS IFD 应判定为有 GPS", JpegUtil.hasGpsExif(usable))
+        assertTrue("含完整经纬度的 GPS IFD 应判定为有可用 GPS", JpegUtil.hasUsableGpsExif(usable))
+        val (lat, lon) = JpegUtil.gpsCoordinates(usable)!!
+        assertTrue("纬度应≈22.8389，实际 $lat", lat in 22.8388..22.8390)
+        assertTrue("经度应≈108.1778，实际 $lon", lon in 108.1777..108.1779)
+        // 回归钉：GPS 段非空但只有 Ref（无三元组）→ hasGpsExif=true、可用判据=false。
+        // v2.7.0 用 hasGpsExif 当交付判据，正是漏掉这一类（零星丢位置的根因）
+        val refOnly = jpegWithExif(exifApp1(tiffWithGpsRefOnly))
+        assertTrue("只有 GPSLatitudeRef 的段仍是「非空 GPS IFD」", JpegUtil.hasGpsExif(refOnly))
+        assertNull("只有 GPSLatitudeRef 解不出经纬度", JpegUtil.gpsCoordinates(refOnly))
+        assertFalse("只有 GPSLatitudeRef 不算有可用位置", JpegUtil.hasUsableGpsExif(refOnly))
+        // 大端（MM）同样正确解析
+        assertTrue("大端 REF-only 的非空 GPS IFD 应判定为有 GPS",
+            JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithGpsRefOnlyBE))))
+        assertFalse("大端 REF-only 不算有可用位置",
+            JpegUtil.hasUsableGpsExif(jpegWithExif(exifApp1(tiffWithGpsRefOnlyBE))))
         // GPS 指针指向空 IFD（脱敏残留形态）→ false
         assertFalse("空 GPS IFD 应判定为无 GPS",
             JpegUtil.hasGpsExif(jpegWithExif(exifApp1(tiffWithEmptyGpsIfd))))
@@ -554,7 +604,7 @@ class ConverterPipelineTest {
 
     @Test
     fun convertPreservesGpsExifEndToEnd() {
-        // 源 JPEG 带 GPS EXIF → 转换结果 sourceHasGps=true，且输出主体仍含 GPS（无损透传）
+        // 源 JPEG 带**可用** GPS EXIF → 转换结果 sourceHasGps=true，且输出主体坐标可解析
         val dir = Files.createTempDirectory("vlc_gps").toFile()
         val jpgFooterJson = FooterUtil.buildFooterJson(linkedMapOf(
             "com.android.camera.imageTime" to 12L,
@@ -563,18 +613,19 @@ class ConverterPipelineTest {
         ))
         val jpgFooter = FooterUtil.buildFooter(jpgFooterJson, TEST_LIVE_ID, FooterUtil.vivoPrefix)
         val jpg = File(dir, "IMG_8001.jpg").apply {
-            writeBytes(jpegWithExif(exifApp1(tiffWithGps)) +
+            writeBytes(jpegWithExif(exifApp1(tiffWithUsableGps())) +
                 fakeStreamData("DEGS", 64, 11) + jpgFooter)
         }
         File(dir, "IMG_8001.mp4").apply { writeBytes(vivoDualMp4()) }
-        assertTrue(JpegUtil.hasGpsExif(jpg.readBytes()))
+        assertTrue(JpegUtil.hasUsableGpsExif(jpg.readBytes()))
 
         val outDir = Files.createTempDirectory("vlc_gps_out").toFile()
         val result = Converter.convertToVivoSingle(jpg.absolutePath, outDir.absolutePath, ::log)
-        assertTrue("源含 GPS 时 sourceHasGps 应为 true", result.sourceHasGps)
+        assertTrue("源含可用 GPS 时 sourceHasGps 应为 true", result.sourceHasGps)
+        assertTrue("源坐标直接可用时不应触发注入", result.gpsCoordsSource == "exif")
 
         val (jpegs, _) = JpegUtil.splitJpegs(File(result.path).readBytes())
-        assertTrue("GPS EXIF 应无损保留到输出主图", JpegUtil.hasGpsExif(jpegs[0]))
+        assertNotNull("GPS EXIF 应无损保留到输出主图", JpegUtil.gpsCoordinates(jpegs[0]))
     }
 
     @Test

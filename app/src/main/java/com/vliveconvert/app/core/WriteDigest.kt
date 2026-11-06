@@ -20,7 +20,7 @@ internal class SegmentDigest(
 internal class SingleWriteResult(
     val path: String,
     val segments: List<SegmentDigest>,
-    /** 源 JPEG「读到的字节」是否含 GPS EXIF；false = 无位置，或已被系统脱敏（见 JpegUtil.hasGpsExif） */
+    /** 源 JPEG「读到的字节」是否含**可用** GPS 经纬度（false = 无位置/脱敏/EXIF 段解不出坐标） */
     val sourceHasGps: Boolean = false,
     /** 源指纹（源 JPEG 首段 SHA-256 前 16 位 hex），已写入产物 XMP 的 vlp:sourceFingerprint */
     val sourceFingerprint: String? = null,
@@ -29,11 +29,15 @@ internal class SingleWriteResult(
     // ── v2.6.0-test27 位置链路明细（交付判定与批次摘要的依据，全部显式）──
     /** 源在 EXIF / XMP / 伴生视频 ©xyz 任一处有位置（交付校验的真正前提） */
     val sourceHasLocation: Boolean = false,
-    /** 本次把坐标注入了主图 EXIF（源 EXIF 无 GPS 但 XMP/视频有坐标的人群） */
+    /** 坐标的来源容器："exif" / "xmp" / "video" / "none"（逐张位置溯源的依据） */
+    val gpsCoordsSource: String? = null,
+    /** 源 EXIF 有 GPS IFD 但解不出可用经纬度（v2.7.0 静默丢位置的形态） */
+    val exifGpsUnusable: Boolean = false,
+    /** 本次把坐标注入了主图 EXIF（源 EXIF 无可用 GPS 但 XMP/视频有坐标的人群） */
     val gpsInjected: Boolean = false,
     /** GPS 注入失败原因；非 null 即失败——**显式失败**，绝不允许当作「源无 GPS」 */
     val gpsInjectFailed: String? = null,
-    /** 产物文件 EXIF 带 GPS（唯一能扛住 vivo 媒体扫描重算的形态；自检依据） */
+    /** 产物文件 EXIF 带**可用经纬度**（唯一能扛住 vivo 媒体扫描重算的形态；自检依据） */
     val outputHasExifGps: Boolean = false
 )
 

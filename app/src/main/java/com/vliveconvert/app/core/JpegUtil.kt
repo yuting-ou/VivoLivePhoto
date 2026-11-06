@@ -154,7 +154,12 @@ internal object JpegUtil {
     }
 
     /**
-     * 检测 JPEG 的 EXIF 中是否存在非空 GPS IFD。
+     * 检测 JPEG 的 EXIF 中是否存在**非空 GPS IFD**。
+     *
+     * 注意：这是「有没有 GPS 段」的结构判定，**不代表能解析出经纬度**。GPS IFD 里可能
+     * 只有 GPSLatitudeRef/GPSVersionID、经纬度三元组不完整、全是 0,0、或类型不是
+     * RATIONAL/SRATIONAL——这些情况下 [hasGpsExif] 为 true，但 [gpsCoordinates] 为 null。
+     * 位置交付链路的成功判据必须用 [hasUsableGpsExif]，不能用本函数（见其注释）。
      *
      * 背景：Android 10+（本项目 minSdk 34）在应用缺少 ACCESS_MEDIA_LOCATION 时，
      * MediaProvider/FUSE 会在「读取层」实时改写媒体文件的 EXIF、剥离全部 GPS 标签，
@@ -180,6 +185,20 @@ internal object JpegUtil {
             false
         }
     }
+
+    /**
+     * JPEG 的 EXIF 是否带**可用经纬度**（[gpsCoordinates] 能解析出、且不是 0,0）。
+     *
+     * 这是位置交付链路的唯一成功判据。依据是两条已真机证实的规则：
+     * ① vivo 相册只认 MediaStore 行的 latitude/longitude；
+     * ② 媒体扫描按**文件 EXIF** 重算这两个列（README「已知限制」）。
+     * 所以「行坐标在插入时带上了」不是持久保证，**文件 EXIF 可解析**才是——
+     * EXIF 段非空但解不出经纬度的产物，扫描会把行坐标写成 NULL，相册不显示位置。
+     *
+     * v2.7.0 之前转换链路误用 [hasGpsExif] 当判据，导致这类照片被判定为「已有位置」
+     * 而跳过注入，且不报「位置未保住」——是「300 张里零星几张没位置」的根因。
+     */
+    fun hasUsableGpsExif(jpeg: ByteArray): Boolean = gpsCoordinates(jpeg) != null
 
     /**
      * 读取 EXIF IFD0 的 Make(0x010F) 与 Model(0x0110) ASCII 值，返回 (Make, Model)。
