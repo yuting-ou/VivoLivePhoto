@@ -21,12 +21,24 @@ import java.io.IOException
 internal object MediaExport {
 
     /**
-     * MediaStore 的拍摄坐标列。MediaColumns.LATITUDE/LONGITUDE 常量已从 API 36 SDK 移除，
-     * 但 Provider 的列仍在（真机可查）；相册的位置显示读的就是这两列。
+     * MediaStore 的拍摄坐标列。
+     *
+     * **这两列自 API 29（Android 10）起已废弃**：位置不再由媒体库承载，改由应用按需读取
+     * 文件 EXIF（`ACCESS_MEDIA_LOCATION` 权限就是为这条读取路径而设）。因此：
+     *
+     * - 相册/图库的位置显示**不依赖**这两列，真正的命门是**产物文件 EXIF 里的可用经纬度**
+     *   （见 `Converter.ensureExifGps` 的强判据）；
+     * - 写入这里**只对少数仍在读列的老 ROM 有意义**，API 29+ 的 AOSP Provider 会忽略甚至
+     *   清理它们（模拟器实测：全库 4716 行坐标列无一非空）；
+     * - **不要因为「列写进去了」就认为位置保住了**，也不要把「列为空」当成位置丢失的证据。
      */
     private const val GPS_LATITUDE_COLUMN = "latitude"
     private const val GPS_LONGITUDE_COLUMN = "longitude"
 
+    /**
+     * 把坐标写进**已废弃**的媒体库列（仅老 ROM 兼容路径）。
+     * 写入是否成功与位置交付无关：交付判定看文件 EXIF（见上方列定义注释）。
+     */
     private fun putGpsColumns(values: ContentValues, coords: Pair<Double, Double>) {
         values.put(GPS_LATITUDE_COLUMN, coords.first)
         values.put(GPS_LONGITUDE_COLUMN, coords.second)
@@ -56,7 +68,7 @@ internal object MediaExport {
     /**
      * 从**文件字节**解析坐标（EXIF → XMP → 嵌入视频段）。
      * 这是「位置体检/移动回退/导出」共用的唯一取证入口：**全部基于文件内容**，
-     * 不依赖媒体库坐标列（test24-26 已证该列在 vivo 上读不回，不能当判据）。
+     * 不依赖媒体库坐标列（该列自 API 29 已废弃，vivo 上读不回，不能当判据）。
      */
     internal fun resolveCoords(
         bytes: ByteArray,
@@ -224,9 +236,9 @@ internal object MediaExport {
      *
      * @param useCameraDir true 时写入 DCIM/Camera，false 时写入 [relPath]
      * @param oldUriString 显式指定的既有产物 URI（重转路径）
-     * @param requireGps 位置交付校验：源字节含 GPS（读取未脱敏）时，产物必须有
-     *   任何坐标来源，且入库行坐标必须与文件一致——「成功」的定义包含位置不失守。
-     *   破损修复（糊图）不开启
+     * @param requireGps 位置交付校验：源字节含 GPS（读取未脱敏）时，产物**文件**必须能
+     *   解析出任何来源的可用坐标——「成功」的定义包含位置不失守。看的是文件 EXIF，
+     *   不是已废弃的行坐标列。破损修复（糊图）不开启
      * @param stats 位置溯源统计（批次摘要输出，研究「坐标从哪来、哪张被自愈」）
      */
     fun exportAndVerify(
@@ -248,8 +260,8 @@ internal object MediaExport {
         val stem = src.name.substringBeforeLast('.')
         val outBytes = src.readBytes()
 
-        // 拍摄坐标三级兜底链（写入媒体库坐标列；vivo 相册的「位置」显示只认列，
-        // 不回读文件 EXIF——2026-10 真机结论）：
+        // 拍摄坐标三级兜底链（解析**产物文件字节**；解析结果顺手写入已废弃的媒体库
+        // 坐标列——只有老 ROM 还读列，API 29+ 的位置显示由应用按需读文件 EXIF）：
         // ① EXIF（常规：源 EXIF 的 GPS 随主图字节进入产物）
         // ② XMP（部分机型把位置写进 XMP 而非 EXIF，管线已合并进产物 XMP）
         // ③ 嵌入视频段（vivo 相机在 mp4 udta/©xyz 写 ISO 6709 串，EXIF/XMP 都没有时仍在）
@@ -311,7 +323,9 @@ internal object MediaExport {
             throw e
         } catch (e: Exception) {
             if (coords == null) throw e
-            // 个别 ROM 拒绝已废弃的坐标列：去掉坐标重试一次（文件写入不受影响）
+            // 个别老 ROM 拒绝已废弃的坐标列：去掉坐标重试一次。
+            // 这两列自 API 29 废弃，位置显示不依赖它们（API 29+ 由应用按需读文件 EXIF）；
+            // 真正的位置在下面写入的产物文件里，丢列不影响交付，绝不能为此丢整张照片。
             values.remove(GPS_LATITUDE_COLUMN)
             values.remove(GPS_LONGITUDE_COLUMN)
             resolver.insert(collection, values)
@@ -359,7 +373,8 @@ internal object MediaExport {
      * - 旧实现先把新内容写进旧行、再删旧行重建——同一份字节写两遍，且「写开旧行
      *   即截断」让旧产物在重建失败时已毁。现在**直接重建**：新行先落地（含读回校验），
      *   旧行后删，任何失败都留下完好的旧产物
-     * - 不依赖坐标列 UPDATE（vivo 静默忽略）与坐标列查询（读不回），行为确定
+     * - 不依赖坐标列 UPDATE（vivo 静默忽略）与坐标列查询（读不回）：坐标列自 API 29
+     *   已废弃，位置的事实只在文件 EXIF 里，行为确定
      *
      * 返回新行 URI；旧行失效或重建未成返回 null（调用方落到新建路径兜底）。
      */
@@ -587,7 +602,7 @@ internal object MediaExport {
         var newUri: Uri? = null
         return try {
             // 回退复制会新建行：坐标从**文件字节**直接解析（EXIF→XMP→视频段）。
-            // 不查媒体库坐标列——test24-26 已证该查询在 vivo 上读不回（曾因此
+            // 不查媒体库坐标列——该列自 API 29 已废弃（vivo 上读不回，曾因此
             // carried=null，新行丢坐标，相册不显示位置）
             val carried = try {
                 resolver.openInputStream(uri)?.use { ins ->
