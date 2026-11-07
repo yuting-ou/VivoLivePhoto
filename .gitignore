@@ -23,3 +23,6 @@ local.properties
 
 # 视觉设计伴侣的临时产物（草图/会话状态）
 .superpowers/
+
+# 真机验证取证产物（截图/UI dump，仅本机留存）
+/evidence/
