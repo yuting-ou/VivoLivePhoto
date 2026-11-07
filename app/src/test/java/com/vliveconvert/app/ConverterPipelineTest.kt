@@ -324,9 +324,9 @@ class ConverterPipelineTest {
         assertTrue("streamdata 附加块应透传",
             BinaryUtils.indexOf(data, fakeStreamData("DEGS", 64, 11)) >= 0)
 
-        // 7. 修改时间保留
-        assertEquals("输出修改时间应继承源文件",
-            jpg.lastModified() / 1000, out.lastModified() / 1000)
+        // mtime 契约不在本测试：暂存产物**不**继承源时间（Converter.kt 注释，v1.7.19 修——
+        // 继承拍摄时间会被残留清理误删），该契约由 stagingOutputKeepsItsOwnMtime 覆盖。
+        // 旧版这里的「输出修改时间应继承源文件」断言与该契约矛盾，靠源/产物同秒偶然通过。
     }
 
     @Test
