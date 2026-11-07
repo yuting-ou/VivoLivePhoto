@@ -16,8 +16,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 118
-        versionName = "2.7.1"
+        versionCode = 119
+        versionName = "2.7.2-test1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -115,8 +115,10 @@ dependencies {
     // 1.6.10 用 Kotlin 2.1/Compose 1.8 构建，与本项目 Kotlin 2.2.10 兼容
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     // 液态玻璃折射/色散/高光：GitHub Kyant0/AndroidLiquidGlass，Apache-2.0。
-    // 1.0.2 面向 Kotlin 2.2/Compose 1.10，与本项目同代
-    implementation("io.github.kyant0:backdrop:1.0.2")
+    // 1.0.6 面向 Kotlin 2.3/Compose 1.10.3：metadata 2.3 可被本项目 2.2.10 读取（n+1），
+    // 公开 API 与 1.0.2 完全一致；得「绘制不更新」修复与 Shapes 圆角采样支持。
+    // 2.0.1 需 Kotlin 2.4 metadata + Compose 1.12，属工具链 overhaul，不在此版。
+    implementation("io.github.kyant0:backdrop:1.0.6")
     // 启动动画接管：最短停留让品牌动画播完（Android 12+ 系统 splash）
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation(libs.androidx.lifecycle.runtime.ktx)
