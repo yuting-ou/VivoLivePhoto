@@ -47,7 +47,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: 安装 SDK 37.0（runner 预装集不含）
-        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0" "build-tools;37.0.0"
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: 构建 Release APK
         run: ./gradlew :app:assembleRelease
