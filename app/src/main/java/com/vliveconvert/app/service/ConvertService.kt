@@ -232,6 +232,13 @@ class ConvertService : Service() {
         val retries = synchronized(oomRetry) { oomRetry.toList() }
         for (ci in retries) {
             currentCoroutineContext().ensureActive()
+            // 守卫同样适用于重试轮：批内权限被收回后，绝不把已被脱敏的源转成丢位置的照片
+            if (!locationGuardOk(ci.externalSource)) {
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.replaceItem(ci, ci.copy(status = "待转换"))
+                }
+                continue
+            }
             val jpgLen = try { File(ci.item.path).length() } catch (_: Exception) { 0L }
             val mp4Len = try {
                 VivoDual.siblingMp4(ci.item.path)?.let { File(it).length() } ?: 0L
@@ -784,7 +791,10 @@ class ConvertService : Service() {
         running = false
         pendingStart = false
         ConvertCenter.items.forEachIndexed { i, ci ->
-            if (ci.status.startsWith("转换中") || ci.status.startsWith("重新转换中")) {
+            if (ci.status.startsWith("转换中") || ci.status.startsWith("重新转换中") ||
+                ci.status == "内存不足，批次末尾单线程重试"
+            ) {
+                // OOM 缓冲行的「批次末尾重试」承诺随取消一起失效，别让列表挂着假承诺
                 ConvertCenter.items[i] = ci.copy(status = "待转换")
             }
         }

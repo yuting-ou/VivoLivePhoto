@@ -353,12 +353,15 @@ class MainActivity : ComponentActivity() {
     private val KEY_TRASH_COUNT = "trash_count"
     private val KEY_TRASH_REMAINING = "trash_remaining"
     private val KEY_TRASH_CONFIRMED = "trash_confirmed"
+    private val KEY_RESTORE_CURRENT = "restore_current"
+    private val KEY_RESTORE_REMAINING = "restore_remaining"
+    private val KEY_RESTORE_CONFIRMED = "restore_confirmed"
     /** 回收站确认弹窗是否已在途（防止 onStart 重复拉起） */
     private var trashRequestInFlight = false
-    /** 恢复原图的分批确认队列与记账 */
-    private var restoreQueue: com.vliveconvert.app.service.TrashBatchQueue? = null
+    /** 恢复原图分批状态（跨重建持久化）：当前批 / 剩余 URI / 已确认记账 */
     private var restoreCurrent: List<String> = emptyList()
-    private var restoreConfirmed = 0
+    private var restoreRemainingUris: List<String> = emptyList()
+    private var restoreConfirmedUris: ArrayList<String> = arrayListOf()
     /** 回收站中的原图记录数（未授权所有文件访问的删除路径），应用内可恢复（30 天内） */
     private var pendingRestoreCount by mutableIntStateOf(0)
 
@@ -427,6 +430,12 @@ class MainActivity : ComponentActivity() {
             outState.putInt(KEY_TRASH_COUNT, pendingDeleteCount)
             outState.putStringArrayList(KEY_TRASH_REMAINING, ArrayList(deleteRemainingUris))
             outState.putStringArrayList(KEY_TRASH_CONFIRMED, ArrayList(deleteConfirmedUris))
+        }
+        // 恢复弹窗悬着时重建：分批状态同样必须幸存，否则系统侧已恢复、应用记录不更新
+        if (restoreCurrent.isNotEmpty() || restoreRemainingUris.isNotEmpty()) {
+            outState.putStringArrayList(KEY_RESTORE_CURRENT, ArrayList(restoreCurrent))
+            outState.putStringArrayList(KEY_RESTORE_REMAINING, ArrayList(restoreRemainingUris))
+            outState.putStringArrayList(KEY_RESTORE_CONFIRMED, ArrayList(restoreConfirmedUris))
         }
     }
 
@@ -653,15 +662,16 @@ class MainActivity : ComponentActivity() {
 
     /** 发起下一批删除确认（仅删除路径，全部确认后才落地中转产物） */
     private fun launchNextDeleteBatch() {
-        val batchSize = com.vliveconvert.app.service.TrashBatchQueue.DEFAULT_BATCH_SIZE
-        val next = deleteRemainingUris.take(batchSize)
-        deleteRemainingUris = deleteRemainingUris.drop(batchSize)
-        lastTrashUris = next
+        // 剩余序列按对重新切批（保持 jpg/mp4 不拆批）
+        val remaining = deleteRemainingUris.map { Uri.parse(it) }
+        val next = com.vliveconvert.app.service.chunkTrashBatches(remaining).first()
+        deleteRemainingUris = remaining.drop(next.size).map { it.toString() }
+        lastTrashUris = next.map { it.toString() }
         trashRequestInFlight = true
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val sender = MediaStore.createTrashRequest(
-                    contentResolver, next.map { Uri.parse(it) }, true).intentSender
+                    contentResolver, next, true).intentSender
                 withContext(Dispatchers.Main) {
                     deleteRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
                 }
@@ -681,8 +691,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 删除取消/中断：把「待原图删除后以原名移入相机相册」的假承诺如实改写 */
+    /** 删除取消/中断：把「待原图删除后以原名移入相机相册」的假承诺如实改写
+     *  （已确认入回收站批次的原话是「已入回收站」，未确认的才是「已保留」） */
     private fun rewriteDeferredOnDeleteCancel() {
+        val confirmed = deleteConfirmedUris.toHashSet()
         val cancelled = synchronized(ConvertCenter.pendingFinalize) {
             val snapshot = ConvertCenter.pendingFinalize.toList()
             ConvertCenter.pendingFinalize.clear()
@@ -691,9 +703,11 @@ class MainActivity : ComponentActivity() {
         var rewritten = 0
         for (e in cancelled) {
             ConvertCenter.items.firstOrNull { it.item.key == e.itemKey }?.let { cur ->
+                val inTrash = cur.item.uri.toString() in confirmed
                 ConvertCenter.replaceItem(
                     cur,
-                    cur.copy(status = "完成：原图已保留，产物在输出目录 $outputRelPath"))
+                    cur.copy(status = if (inTrash) "完成：原图已入回收站，产物保留在输出目录 $outputRelPath"
+                             else "完成：原图已保留，产物在输出目录 $outputRelPath"))
                 rewritten++
             }
         }
@@ -745,15 +759,16 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK) {
             removeTrashedRecords(restoreCurrent)
-            restoreQueue?.confirm()
-            restoreConfirmed += restoreCurrent.size
+            restoreConfirmedUris.addAll(restoreCurrent)
             restoreCurrent = emptyList()
             launchNextRestoreBatch() // 无更多批时汇报恢复总数
         } else {
-            ConvertCenter.statusText = if (restoreConfirmed > 0)
-                "已恢复 $restoreConfirmed 项，其余仍在回收站" else "已取消恢复原图"
-            restoreQueue = null
+            ConvertCenter.statusText = if (restoreConfirmedUris.isNotEmpty())
+                "已恢复 ${restoreConfirmedUris.size} 项，其余仍在回收站（可再次点「恢复」继续）"
+            else "已取消恢复原图"
             restoreCurrent = emptyList()
+            restoreRemainingUris = emptyList()
+            restoreConfirmedUris = arrayListOf()
             refreshRestoreCount()
         }
     }
@@ -814,6 +829,10 @@ class MainActivity : ComponentActivity() {
             deleteRemainingUris = savedInstanceState.getStringArrayList(KEY_TRASH_REMAINING) ?: emptyList()
             deleteConfirmedUris = ArrayList(
                 savedInstanceState.getStringArrayList(KEY_TRASH_CONFIRMED) ?: emptyList())
+            restoreCurrent = savedInstanceState.getStringArrayList(KEY_RESTORE_CURRENT) ?: emptyList()
+            restoreRemainingUris = savedInstanceState.getStringArrayList(KEY_RESTORE_REMAINING) ?: emptyList()
+            restoreConfirmedUris = ArrayList(
+                savedInstanceState.getStringArrayList(KEY_RESTORE_CONFIRMED) ?: emptyList())
         }
 
         // 启动时清理上次残留的暂存产物 + MediaStore 半成品记录；
@@ -822,6 +841,9 @@ class MainActivity : ComponentActivity() {
             cleanupStaleStagingFiles()
             cleanupPendingMediaStore()
             val pending = ConvertCenter.loadQueue(applicationContext)
+            // 队列恢复后再清分享导入缓存：队列条目可能仍引用 shared/import_* 路径，
+            // 先清会把「上次没转完的分享照片」的源文件删掉（宁可不扫，不可误删）
+            cleanupSharedImportCache()
             if (pending > 0) {
                 withContext(Dispatchers.Main) {
                     ConvertCenter.statusText = "上次转换被中断，$pending 张待转换可继续（直接点「开始转换」）"
@@ -2171,7 +2193,7 @@ class MainActivity : ComponentActivity() {
         deleteBaseStatus = baseStatus
         pendingDeleteCount = valid.size
         deleteConfirmedUris = arrayListOf()
-        val batches = valid.chunked(com.vliveconvert.app.service.TrashBatchQueue.DEFAULT_BATCH_SIZE)
+        val batches = com.vliveconvert.app.service.chunkTrashBatches(valid)
         lastTrashUris = batches.first().map { it.toString() }
         deleteRemainingUris = batches.drop(1).flatten().map { it.toString() }
         try {
@@ -2274,8 +2296,10 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             withContext(Dispatchers.Main) {
-                restoreQueue = com.vliveconvert.app.service.TrashBatchQueue(uris)
-                restoreConfirmed = 0
+                val batches = com.vliveconvert.app.service.chunkTrashBatches(uris)
+                restoreCurrent = batches.first().map { it.toString() }
+                restoreRemainingUris = batches.drop(1).flatten().map { it.toString() }
+                restoreConfirmedUris = arrayListOf()
                 launchNextRestoreBatch()
             }
         }
@@ -2283,26 +2307,31 @@ class MainActivity : ComponentActivity() {
 
     /** 发起下一批恢复确认；无更多批时汇报总数 */
     private fun launchNextRestoreBatch() {
-        val q = restoreQueue ?: return
-        if (!q.hasMore) {
-            ConvertCenter.statusText = "已恢复 $restoreConfirmed 项原图到原位置"
-            restoreQueue = null
+        if (restoreRemainingUris.isEmpty()) {
+            if (restoreConfirmedUris.isNotEmpty()) {
+                ConvertCenter.statusText = "已恢复 ${restoreConfirmedUris.size} 项原图到原位置"
+            }
+            restoreCurrent = emptyList()
             refreshRestoreCount()
             return
         }
-        val batch = q.peek()
-        restoreCurrent = batch.map { it.toString() }
+        // 剩余序列按对重新切批（保持 jpg/mp4 不拆批）
+        val remaining = restoreRemainingUris.map { Uri.parse(it) }
+        val nextBatch = com.vliveconvert.app.service.chunkTrashBatches(remaining).first()
+        restoreRemainingUris = remaining.drop(nextBatch.size).map { it.toString() }
+        restoreCurrent = nextBatch.map { it.toString() }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val sender = MediaStore.createTrashRequest(contentResolver, batch, false).intentSender
+                val sender = MediaStore.createTrashRequest(contentResolver, nextBatch, false).intentSender
                 withContext(Dispatchers.Main) {
                     restoreRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     ConvertCenter.statusText = "恢复原图失败（${e.message}）"
-                    restoreQueue = null
                     restoreCurrent = emptyList()
+                    restoreRemainingUris = emptyList()
+                    restoreConfirmedUris = arrayListOf()
                     refreshRestoreCount()
                 }
             }
@@ -2343,6 +2372,27 @@ class MainActivity : ComponentActivity() {
                 crashLogCount = CrashLog.count(this@MainActivity)
             }
         }
+    }
+
+    /**
+     * 清理分享导入缓存中「上次启动遗留且不再被队列引用」的 import_* 目录：
+     * 每次导入独立目录后缓存只进不出（几十 MB/对），必须在冷启动收口。
+     * 必须在 loadQueue **之后**调用——队列条目可能仍引用这些路径（见 onCreate 调用点注释）。
+     */
+    private fun cleanupSharedImportCache() {
+        try {
+            val referenced = ConvertCenter.itemsSnapshot().map { it.item.path }.toHashSet()
+            val dir = File(cacheDir, "shared")
+            dir.listFiles()
+                ?.filter { it.isDirectory && it.name.startsWith("import_") }
+                ?.forEach { d ->
+                    if (d.lastModified() < launchedAtMs &&
+                        referenced.none { it.startsWith(d.absolutePath) }
+                    ) {
+                        try { d.deleteRecursively() } catch (_: Exception) {}
+                    }
+                }
+        } catch (_: Exception) {}
     }
 
     /**

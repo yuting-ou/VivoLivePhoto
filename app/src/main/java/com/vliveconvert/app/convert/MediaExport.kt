@@ -176,7 +176,9 @@ internal object MediaExport {
                 put(MediaStore.MediaColumns.SIZE, content.size.toLong())
             }, null, null)
             true
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
+            // Throwable 而非 Exception：OOM 落在 insert 之后时也必须走下面的清理，
+            // 否则带 IS_PENDING 的新行会随 Error 逃出（重试后再插一行 → 重复导出/孤儿行）
             false
         }
         if (!newReady) {
@@ -285,13 +287,16 @@ internal object MediaExport {
         }
         val resolved = resolveCoords(outBytes, xmpText)
         val coords = resolved.coords
-        // 双路并发下计数需互斥（读方在批次 joinAll 之后，无并发读）
-        if (stats != null) synchronized(stats) {
-            when {
-                resolved.fromExif -> stats.exif++
-                resolved.fromXmp -> stats.xmp++
-                resolved.fromVideo -> stats.video++
-                else -> stats.none++
+        // 溯源计数必须在**全部可能失败的写入成功之后**：OOM 等资源性失败会整张重试，
+        // 先计会被重试再计一次（统计口径必须一次成功交付恰好计一次）
+        fun countCoords() {
+            if (stats != null) synchronized(stats) {
+                when {
+                    resolved.fromExif -> stats.exif++
+                    resolved.fromXmp -> stats.xmp++
+                    resolved.fromVideo -> stats.video++
+                    else -> stats.none++
+                }
             }
         }
         // 位置交付校验：源有位置而产物没有任何坐标来源 = 管线丢了 EXIF，绝不能当
@@ -307,6 +312,7 @@ internal object MediaExport {
         if (previous != null) {
             // 覆盖失败（旧记录失效/重建未成）→ 落到下面的新建路径兜底
             overwriteExisting(resolver, previous, outBytes, timestamp, coords, stats)?.let {
+                countCoords()
                 return it
             }
             // 覆盖不可行（旧记录已失效 / 内容已不可信）→ 落到下面的新建路径
@@ -356,8 +362,11 @@ internal object MediaExport {
             // 只改 MediaStore 列的话会在媒体扫描时被文件 mtime 覆盖回写入时刻
             fixPhysicalMtime(resolver, uri, timestamp)
             fixTimestamps(resolver, uri, timestamp)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable：OOM 也必须先删已插行再逃出，否则孤儿行 + 重试重复导出；
+            // OOM 保持原样重抛（convertOne 按 OOM 收进重试名单），其余包装成 IOException
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            if (e is OutOfMemoryError) throw e
             throw IOException("写入相册失败：${e.message}")
         }
 
@@ -371,6 +380,8 @@ internal object MediaExport {
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             throw IOException("输出自检失败（导出文件与转换结果不一致，已回滚本次导出）")
         }
+        // 溯源计数：一次成功交付恰好计一次（新建路径终点；覆盖路径在 return 前已计）
+        countCoords()
         return uri
     }
 
