@@ -20,6 +20,10 @@ internal class LivePhotoAsset(
     /** 封面帧视频内时间戳（微秒），-1 未知 */
     var presentationTsUs: Long = -1L
 
+    /** [videoMp4] 中有效视频段的字节长度（不含尾部 vivoMediaExtInfo uuid）。
+     *  与数组本身分离：剥尾只记边界，不复制整段视频。默认整段（直接构造 asset 的测试不受影响）。 */
+    var videoByteLength: Int = videoMp4.size
+
     /** vivo 关联 ID（28 字符） */
     var livephotoId: String? = null
 

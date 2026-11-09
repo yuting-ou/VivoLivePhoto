@@ -50,6 +50,8 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
     class ScanState {
         /** 已识别为双文件实况的列表（Compose 状态，UI 直接观察） */
         val results = mutableStateListOf<MediaItem>()
+        /** results 的 id 集合（仅主线程读写）：O(1) 去重，避免逐张 none{} 全表查重退化成 O(n²) */
+        val resultIds = HashSet<Long>()
         /** 当前相册已知全部项 */
         val known = ConcurrentHashMap<String, MediaItem>()
         /** 待扫描队列 */
@@ -75,6 +77,7 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
          */
         fun resetProgress() {
             results.clear()
+            resultIds.clear()
             known.clear()
             pending.clear()
             scanned.clear()
@@ -153,9 +156,7 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
             if (!st.known.containsKey(item.key)) continue // 队列残留已被删除的项
             if (isDualLivePhotoPath(item.path)) {
                 withContext(Dispatchers.Main) {
-                    if (st.known.containsKey(item.key) &&
-                        st.results.none { it.id == item.id }
-                    ) {
+                    if (st.known.containsKey(item.key) && st.resultIds.add(item.id)) {
                         st.results.add(item)
                     }
                 }
@@ -184,6 +185,7 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
                 st.results.forEach { knownIds.add(it.id) }
                 val toAdd = hits.filter { knownIds.add(it.id) }
                 if (toAdd.isNotEmpty()) st.results.addAll(toAdd)
+                st.resultIds.addAll(knownIds)
             }
             for (item in hits) st.scanned.add(item.key)
             st.doneCount.set(st.scanned.size)

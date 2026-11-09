@@ -57,13 +57,15 @@ internal object LocationHealth {
         /** 最可信坐标（EXIF > XMP > 视频段） */
         val best: Pair<Double, Double>? get() = exif ?: xmp ?: video
 
-        /** 判定依据（报告与 UI 展示用）：每个来源解析到了什么 */
-        fun evidence(): String {
-            val parts = mutableListOf<String>()
-            parts.add(exif?.let { "EXIF=${fmt(it)}" } ?: "EXIF=无")
-            parts.add(xmp?.let { "XMP=${fmt(it)}" } ?: "XMP=无")
-            parts.add(video?.let { "视频段=${fmt(it)}" } ?: "视频段=无")
-            return parts.joinToString("，")
+        /** 判定依据（报告与 UI 展示用）：每个来源解析到了什么。redact=true 只报有无、不报精确坐标 */
+        fun evidence(redact: Boolean = false): String {
+            fun label(name: String, c: Pair<Double, Double>?): String = when {
+                c == null -> "$name=无"
+                redact -> "$name=有（已脱敏）"
+                else -> "$name=${fmt(c)}"
+            }
+            return listOf(label("EXIF", exif), label("XMP", xmp), label("视频段", video))
+                .joinToString("，")
         }
 
         val verdictLabel: String

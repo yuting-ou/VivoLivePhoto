@@ -378,4 +378,21 @@ class ColdStartConvertTest {
         assertFalse("上次残留的暂存文件应被清掉", stale.exists())
         assertTrue("批次正在组装的暂存文件被冷启动清理删掉了", inFlight.exists())
     }
+
+    /** job 子目录形态的残留：旧的整目录清掉，在途的新目录原样保留 */
+    @org.junit.Test
+    fun coldStartCleanup_removesStaleJobDirKeepsFresh() {
+        val dir = File(activity.cacheDir, "output").apply { mkdirs() }
+        val staleJob = File(dir, "job_111_1").apply { mkdirs() }
+        File(staleJob, "IMG_X.jpg").writeBytes(ByteArray(4))
+        staleJob.setLastModified(System.currentTimeMillis() - 60_000)
+        val freshJob = File(dir, "job_222_2").apply { mkdirs() }
+        File(freshJob, "IMG_Y.jpg").writeBytes(ByteArray(4))
+
+        invokeNoArg("cleanupStaleStagingFiles")
+
+        assertFalse("上次残留的 job 目录应被整目录清掉", staleJob.exists())
+        assertTrue("在途 job 目录不能被冷启动清理误删",
+            freshJob.exists() && File(freshJob, "IMG_Y.jpg").exists())
+    }
 }

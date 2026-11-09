@@ -100,15 +100,17 @@ internal object Mp4Util {
     }
 
     /** 若 MP4 末尾存在 UUID 为 'vivoMediaExtInfo' 的 uuid box，则去除。 */
-    fun stripVivoUuid(data: ByteArray): ByteArray {
+    /** 有效视频段长度（剥尾部 vivoMediaExtInfo uuid）：只返回边界，不复制整段视频。 */
+    fun stripVivoUuidEnd(data: ByteArray): Int {
         val boxes = iterateBoxes(data, 0, data.size).toList()
-        if (boxes.isEmpty()) return data
+        val last = boxes.lastOrNull() ?: return data.size
+        return if (last.type == "uuid" && BinaryUtils.arrayEquals(data, last.offset + 8, vivoUuid))
+            last.offset else data.size
+    }
 
-        val last = boxes.last()
-        if (last.type == "uuid" && BinaryUtils.arrayEquals(data, last.offset + 8, vivoUuid)) {
-            return data.copyOfRange(0, last.offset)
-        }
-        return data
+    fun stripVivoUuid(data: ByteArray): ByteArray {
+        val end = stripVivoUuidEnd(data)
+        return if (end == data.size) data else data.copyOfRange(0, end)
     }
 
     private fun walkInto(
@@ -152,15 +154,24 @@ internal object Mp4Util {
         }
     }
 
-    /** 把一个顶层自定义 box 追加为 moov 的最后一个子 box，并修复 stco/co64 偏移。 */
-    fun insertBoxIntoMoov(data: ByteArray, boxType: String, payload: ByteArray): ByteArray {
-        val boxes = iterateBoxes(data, 0, data.size).toList()
+    /** 把一个顶层自定义 box 追加为 moov 的最后一个子 box，并修复 stco/co64 偏移。
+     *  [sourceEnd] 是有效视频段长度（尾部 uuid 之前）：直接按该范围构造结果，
+     *  无需先 copyOfRange 剥尾再插入，省一份整段视频副本。 */
+    fun insertBoxIntoMoov(
+        data: ByteArray,
+        boxType: String,
+        payload: ByteArray,
+        sourceEnd: Int = data.size
+    ): ByteArray {
+        val end = sourceEnd.coerceIn(0, data.size)
+        val boxes = iterateBoxes(data, 0, end).toList()
         val moov = boxes.firstOrNull { it.type == "moov" }
             ?: throw Mp4Exception("MP4 缺少 moov box")
 
         val moovOff = moov.offset
         val moovSize = moov.size
         val insertAt = moovOff + moovSize
+        if (insertAt > end) throw Mp4Exception("moov 超出有效视频段")
 
         val newBox = ByteArray(8 + payload.size)
         BinaryUtils.writeU32BE(newBox, 0, (payload.size + 8).toLong())
@@ -169,16 +180,14 @@ internal object Mp4Util {
         System.arraycopy(payload, 0, newBox, 8, payload.size)
         val delta = newBox.size
 
-        // 单次分配完成拼装（较原先 copyOf 全量副本 + 再拼接少一份大数组，降低内存峰值）：
-        // stco/co64 全部位于 moov 内（insertAt 之前），而 result 的 [0, insertAt) 段
-        // 与 data 逐字节一致，可安全在其上原地修复偏移
-        val result = ByteArray(data.size + delta)
-        System.arraycopy(data, insertAt, result, insertAt + delta, data.size - insertAt)
+        // 单次分配：按有效段长度直接构造最终数组（不含尾部 uuid）
+        val result = ByteArray(end + delta)
         System.arraycopy(data, 0, result, 0, insertAt)
-        fixChunkOffsets(result, result, moovOff, moovSize, insertAt, delta)
-        // 更新 moov size
-        BinaryUtils.writeU32BE(result, moovOff, (moovSize + delta).toLong())
         System.arraycopy(newBox, 0, result, insertAt, delta)
+        System.arraycopy(data, insertAt, result, insertAt + delta, end - insertAt)
+        // 以原始 data 的结构为参照，修正 result 中 moov 内的偏移
+        fixChunkOffsets(data, result, moovOff, moovSize, insertAt, delta)
+        BinaryUtils.writeU32BE(result, moovOff, (moovSize + delta).toLong())
         return result
     }
 

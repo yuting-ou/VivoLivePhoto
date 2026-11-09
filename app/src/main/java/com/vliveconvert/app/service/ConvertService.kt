@@ -36,6 +36,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -173,6 +174,10 @@ class ConvertService : Service() {
         val parallelism =
             if (Runtime.getRuntime().maxMemory() >= 384L * 1024 * 1024) 2 else 1
         val sem = Semaphore(parallelism)
+        // 字节预算准入闸（并发上限之外的附加闸）：按源大小估算峰值，不足排队
+        val budget = MemoryBudget(defaultBudgetBytes())
+        // OOM 且尚未提交导出的条目：批次末尾串行重试一次（自愈，不推给用户手动重来）
+        val oomRetry = Collections.synchronizedList(mutableListOf<ConvertItem>())
 
         // 位置溯源统计（研究「坐标从哪来、哪张被自愈」——批量必丢位置问题的观测数据）
         val locationStats = MediaExport.LocationStats()
@@ -197,21 +202,52 @@ class ConvertService : Service() {
             serviceScope.launch(Dispatchers.IO) {
                 sem.withPermit {
                     if (!locationGuardOk(ci.externalSource)) return@withPermit
-                    convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
-                        firstOutUri, ok, fail, noGps, locationStats)
-                    val d = done.incrementAndGet()
-                    withContext(Dispatchers.Main) {
-                        // 收尾并入进度条时，转换段只占 0~0.9，剩余 0.1 留给收尾
-                        ConvertCenter.progress =
-                            convertProgressWeight(finalizeInBar) * d / total
-                        ConvertCenter.progressDetail = "已处理 $d/$total"
+                    val jpgLen = try { File(ci.item.path).length() } catch (_: Exception) { 0L }
+                    val mp4Len = try {
+                        VivoDual.siblingMp4(ci.item.path)?.let { File(it).length() } ?: 0L
+                    } catch (_: Exception) { 0L }
+                    budget.withCharge(estimatePeakBytes(jpgLen, mp4Len)) {
+                        convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
+                            firstOutUri, ok, fail, noGps, locationStats, oomRetry)
                     }
-                    persistQueueSnapshot()
-                    notifyProgress(d, total)
+                    // 被收进 OOM 重试名单的条目本轮不计进度，留到批次末尾串行重试时再计
+                    val deferred = synchronized(oomRetry) { ci in oomRetry }
+                    if (!deferred) {
+                        val d = done.incrementAndGet()
+                        withContext(Dispatchers.Main) {
+                            // 收尾并入进度条时，转换段只占 0~0.9，剩余 0.1 留给收尾
+                            ConvertCenter.progress =
+                                convertProgressWeight(finalizeInBar) * d / total
+                            ConvertCenter.progressDetail = "已处理 $d/$total"
+                        }
+                        persistQueueSnapshot()
+                        notifyProgress(d, total)
+                    }
                 }
             }
         }
         jobs.joinAll()
+
+        // OOM 自愈：其它任务已释放内存，串行重试一次（oomRetry=null → 本轮必定落定成功/失败）
+        val retries = synchronized(oomRetry) { oomRetry.toList() }
+        for (ci in retries) {
+            currentCoroutineContext().ensureActive()
+            val jpgLen = try { File(ci.item.path).length() } catch (_: Exception) { 0L }
+            val mp4Len = try {
+                VivoDual.siblingMp4(ci.item.path)?.let { File(it).length() } ?: 0L
+            } catch (_: Exception) { 0L }
+            budget.withCharge(estimatePeakBytes(jpgLen, mp4Len)) {
+                convertOne(ci, tempDir, moveToCamera, outputRelPath, deleteOriginal,
+                    firstOutUri, ok, fail, noGps, locationStats, null)
+            }
+            val d = done.incrementAndGet()
+            withContext(Dispatchers.Main) {
+                ConvertCenter.progress = convertProgressWeight(finalizeInBar) * d / total
+                ConvertCenter.progressDetail = "已处理 $d/$total"
+            }
+            persistQueueSnapshot()
+            notifyProgress(d, total)
+        }
 
         val finalDest = if (moveToCamera) "DCIM/Camera" else outputRelPath
         // 位置权限缺失时系统在读取层剥离 GPS（脱敏），转换产物必丢地点信息——
@@ -327,8 +363,8 @@ class ConvertService : Service() {
             )
         )
 
-        // 清理暂存目录
-        try { tempDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
+        // 清理暂存目录（含失败/被杀遗留的 job 子目录）
+        try { tempDir.listFiles()?.forEach { it.deleteRecursively() } } catch (_: Exception) {}
         running = false
         BatchWakeLock.release(this)
         if (pendingStart) {
@@ -351,7 +387,8 @@ class ConvertService : Service() {
         ok: AtomicInteger,
         fail: AtomicInteger,
         noGps: AtomicInteger,
-        locationStats: MediaExport.LocationStats
+        locationStats: MediaExport.LocationStats,
+        oomRetry: MutableList<ConvertItem>?
     ) {
         val app = applicationContext
         // 重转模式（找回位置）：跳过删除原图收集（上次批次已处理过），
@@ -368,6 +405,8 @@ class ConvertService : Service() {
                 status = if (isReconvert) "重新转换中…" else "转换中…"))
         }
         var staged: String? = null
+        // 是否已成功提交导出（入库自检通过）：OOM 重试只允许未提交的条目，避免重复导出/删源
+        var committed = false
         currentFileName = ci.item.name
         // 位置保障已全部收进转换管线（Converter.ensureExifGps）：对内存中的主图
         // 判定/注入，不再有 test25 的 cache 副本 + 符号链接路径（其失败点全部静默）。
@@ -407,6 +446,7 @@ class ConvertService : Service() {
                 // 否则本张判失败、原图不动
                 requireGps = result.sourceHasLocation,
                 stats = locationStats)
+            committed = true
             // ── 位置明细显式记账（全部来自转换管线的事实，不再是本层的猜测）──
             if (result.gpsInjected) synchronized(locationStats) {
                 locationStats.injected++
@@ -488,18 +528,39 @@ class ConvertService : Service() {
             }
         } catch (e: CancellationException) {
             throw e // 协程取消必须继续传播（服务销毁等场景）
+        } catch (e: OutOfMemoryError) {
+            // 资源性失败：未提交导出且允许重试 → 收进名单，批次末尾串行重试一次；
+            // 已提交或重试轮（oomRetry=null）→ 如实标失败，不重复导出/删源
+            if (!committed && oomRetry != null) {
+                synchronized(oomRetry) { oomRetry.add(ci) }
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.replaceItem(ci, ci.copy(status = "内存不足，批次末尾单线程重试"))
+                }
+            } else {
+                fail.incrementAndGet()
+                withContext(Dispatchers.Main) {
+                    ConvertCenter.replaceItem(ci, ci.copy(
+                        status = "失败：内存不足（文件过大），请减少单批数量后重试", failed = true))
+                }
+            }
         } catch (e: Throwable) {
-            // 兜底捕获 OutOfMemoryError 等 Error：单张标记失败，不再闪退整个应用
-            val reason = if (e is OutOfMemoryError)
-                "内存不足（文件过大），请减少单批数量后重试" else (e.message ?: "未知错误")
+            // 兜底捕获其余 Error/Exception：单张标记失败，不再闪退整个应用
+            val reason = e.message ?: "未知错误"
             fail.incrementAndGet()
             withContext(Dispatchers.Main) {
                 ConvertCenter.replaceItem(ci, ci.copy(status = "失败：$reason", failed = true))
             }
         } finally {
             currentFileName = null
-            // 清理本地暂存产物（已导出 / 失败均清理）
-            staged?.let { p -> try { File(p).delete() } catch (_: Exception) {} }
+            // 清理本地暂存产物及其 job 子目录（已导出 / 失败均清理）
+            staged?.let { p ->
+                try {
+                    val f = File(p)
+                    val parent = f.parentFile
+                    if (parent != null && parent.name.startsWith("job_")) parent.deleteRecursively()
+                    else f.delete()
+                } catch (_: Exception) {}
+            }
         }
     }
 

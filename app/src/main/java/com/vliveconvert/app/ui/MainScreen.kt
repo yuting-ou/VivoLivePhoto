@@ -41,6 +41,11 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -163,6 +168,14 @@ fun MainScreen(
     // 否则 5 条照片也会在玻璃面板尾部拖出一截约 110dp 的空白
     val dockInset = if (isConverting || finishedBeat) 176.dp else 132.dp
     val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    // 主队列浏览模式：列表（默认，状态详细）/ 网格（认照片）。偏好持久化，切换不丢队列状态。
+    val prefs = LocalContext.current.getSharedPreferences("vliveconvert", 0)
+    var viewMode by remember { mutableStateOf(prefs.getString("main_view_mode", "list") ?: "list") }
+    fun setViewMode(mode: String) {
+        viewMode = mode
+        prefs.edit().putString("main_view_mode", mode).apply()
+    }
     // 列表容器底边 与 Dock 顶边的实测位置：用来算「Dock 到底盖住了多少」。
     // 别用常量估——Dock 三态高度不同，实测在 360dp 机器上盖住 152dp 而不是 132dp。
     var listBottomPx by remember { mutableFloatStateOf(0f) }
@@ -333,6 +346,13 @@ fun MainScreen(
                 }
                 if (!isConverting) {
                     InlineTextButton(
+                        text = if (viewMode == "grid") "列表" else "网格",
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { setViewMode(if (viewMode == "grid") "list" else "grid") },
+                        style = TextStyle(fontSize = 14.sp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    InlineTextButton(
                         text = "清空",
                         contentColor = MaterialTheme.colorScheme.primary,
                         onClick = onClearAll,
@@ -375,21 +395,25 @@ fun MainScreen(
                         // 改用「行高 × 条数」估内容高度：超过可见区才垫，短列表不留空白尾巴。
                         val listMaxHeight = maxHeight
                         val density = LocalDensity.current
-                        val rowHeightPx by remember {
+                        val firstItemPx by remember {
                             derivedStateOf {
-                                listState.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: 0
+                                if (viewMode == "grid")
+                                    gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.size?.height ?: 0
+                                else
+                                    listState.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: 0
                             }
                         }
-                        val rowHeight = with(density) { rowHeightPx.toDp() }
+                        val itemHeight = with(density) { firstItemPx.toDp() }
                         // Dock 实际盖住的高度（列表容器底边 − Dock 顶边）；还没量到时按 0 处理
                         val occluded = with(density) {
                             (listBottomPx - dockTopPx).coerceAtLeast(0f).toDp()
                         }
                         val visibleHeight = (listMaxHeight - occluded).coerceAtLeast(0.dp)
-                        // 估算按「行高 × 条数 + 一行余量」：宁可多留一行，也不能让最后一张
-                        // 卡在 Dock 底下滚不出来（估算偏一行以内都能被这条余量兜住）
+                        // 估算按「单项高 × 行数 + 一行余量」：宁可多留一行，也不能让最后一张
+                        // 卡在 Dock 底下滚不出来（网格按 3 列向上取整行数）
+                        val rowCount = if (viewMode == "grid") (items.size + 2) / 3 else items.size
                         val listBottomInset =
-                            if (rowHeight > 0.dp && rowHeight * (items.size + 1) > visibleHeight) {
+                            if (itemHeight > 0.dp && itemHeight * (rowCount + 1) > visibleHeight) {
                                 occluded
                             } else {
                                 0.dp
@@ -400,26 +424,42 @@ fun MainScreen(
                                 .wrapContentHeight()
                                 .glassSurface(radius = 24.dp)
                         ) {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
-                                contentPadding = PaddingValues(
-                                    top = 4.dp, bottom = 4.dp + listBottomInset),
-                                verticalArrangement = Arrangement.spacedBy(0.dp)
-                            ) {
-                                items(items, key = { it.item.key }) { ci ->
-                                    ConvertItemRow(
-                                        modifier = Modifier.animateItem(
-                                            fadeInSpec = tween(220),
-                                            placementSpec = spring(
-                                                dampingRatio = 0.9f, stiffness = 380f),
-                                            fadeOutSpec = tween(180)
-                                        ),
-                                        ci = ci,
-                                        onRemove = { onRemove(ci) },
-                                        onReconvert = { onReconvertItem(ci) },
-                                        onShare = { onShareItem(ci) }
-                                    )
+                            if (viewMode == "grid") {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(3),
+                                    state = gridState,
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
+                                    contentPadding = PaddingValues(
+                                        start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp + listBottomInset),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    gridItems(items, key = { it.item.key }) { ci ->
+                                        ConvertItemGridCard(ci = ci, onRemove = { onRemove(ci) })
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = listMaxHeight),
+                                    contentPadding = PaddingValues(
+                                        top = 4.dp, bottom = 4.dp + listBottomInset),
+                                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                                ) {
+                                    items(items, key = { it.item.key }) { ci ->
+                                        ConvertItemRow(
+                                            modifier = Modifier.animateItem(
+                                                fadeInSpec = tween(220),
+                                                placementSpec = spring(
+                                                    dampingRatio = 0.9f, stiffness = 380f),
+                                                fadeOutSpec = tween(180)
+                                            ),
+                                            ci = ci,
+                                            onRemove = { onRemove(ci) },
+                                            onReconvert = { onReconvertItem(ci) },
+                                            onShare = { onShareItem(ci) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -933,6 +973,95 @@ private fun ConvertItemRow(
             }
             GlassDivider(startInset = 70.dp)
         }
+    }
+}
+
+/**
+ * 网格模式下的紧凑卡片：认照片优先（大缩略图），状态用角标与语义色表达，
+ * 移除走右上角 48dp 按钮（无左滑）。失败/丢位置的可见性不打折。
+ */
+@Composable
+private fun ConvertItemGridCard(
+    ci: ConvertItem,
+    onRemove: () -> Unit
+) {
+    val resolver = LocalContext.current.contentResolver
+    val busy = isBusyStatus(ci.status)
+    val lostGps = ci.done && ci.lostGps && !ci.failed
+    val status = statusColors
+    val tint = when {
+        ci.failed -> MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+        lostGps -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+        else -> Color.Transparent
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
+                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)
+                else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .background(tint)
+            .semantics { contentDescription = "${ci.item.name}，${ci.status}" }
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+            // 完成后源文件可能已被移走：优先用导出产物 URI（与列表行同口径）
+            val thumbUri = ci.outUri?.let {
+                runCatching { android.net.Uri.parse(it) }.getOrNull()
+            } ?: ci.item.uri
+            MediaThumbnail(thumbUri, resolver, Modifier.fillMaxSize())
+            // 状态角标（与列表行同一套符号/语义色）
+            val badge: Triple<String, Color, Color>? = when {
+                ci.failed -> Triple("!", MaterialTheme.colorScheme.error,
+                    MaterialTheme.colorScheme.onError)
+                lostGps -> Triple("!", status.warning, status.onWarning)
+                ci.done -> Triple("✓", status.success, status.onSuccess)
+                else -> null
+            }
+            badge?.let { (glyph, bg, fg) ->
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(bg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(glyph, color = fg, style = TextStyle(
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold))
+                }
+            }
+            // 移除：48dp 触点（转换中禁用，与左滑语义一致）
+            if (!busy) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .size(48.dp)
+                        .clickableNoRipple(onRemove),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        Modifier.size(26.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Close, "移除",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
+        }
+        Text(
+            ci.item.name,
+            style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)
+        )
     }
 }
 

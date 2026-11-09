@@ -33,6 +33,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -52,6 +54,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Icon
@@ -104,10 +108,18 @@ internal val EaseOutStrong = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
 
 
 /**
- * 缩略图内存 LRU 缓存（按需加载）：
+ * 缩略图内存 LRU 缓存（按需加载，按字节计预算）：
  * 每次仅组合屏幕可见区域附近的网格项，滚动回来命中缓存直接显示。
+ * 上限取应用堆的 1/16（8–64MB），按张数计会在大图设备上随解码尺寸膨胀。
  */
-val thumbCache = LruCache<String, Bitmap>(96)
+val thumbCache = object : LruCache<String, Bitmap>(thumbnailCacheBytes()) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+}
+
+private fun thumbnailCacheBytes(): Int {
+    val sixteenth = Runtime.getRuntime().maxMemory() / 16
+    return sixteenth.coerceIn(8L * 1024 * 1024, 64L * 1024 * 1024).toInt()
+}
 
 // 缩略图加载有界并发：限制同时进行的 ContentResolver.loadThumbnail 数量，
 // 避免快速滚动/千张列表时并发 I/O 过多拖垮主线程与磁盘
@@ -121,6 +133,7 @@ val thumbDispatcher = Dispatchers.IO.limitedParallelism(4)
  */
 @Composable
 fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
+    var failed by remember(uri) { mutableStateOf(false) }
     val bitmap by produceState<Bitmap?>(null, uri) {
         val key = uri.toString()
         // 命中缓存（滚动回来）：直接显示，不重复加载
@@ -132,14 +145,18 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
         // 表现即用户报告的「照片多了滑不动」）。行在延迟内被划走 → produceState
         // 取消 → 请求根本不发生；慢速浏览的行不受影响。缓存命中不经过此延迟。
         delay(120)
-        value = withContext(thumbDispatcher) {
-            val b = try {
+        val b = withContext(thumbDispatcher) {
+            try {
                 resolver.loadThumbnail(uri, Size(160, 160), null)
             } catch (_: Exception) {
                 null
             }
-            if (b != null) thumbCache.put(key, b)
-            b
+        }
+        if (b != null) {
+            thumbCache.put(key, b)
+            value = b
+        } else {
+            failed = true
         }
     }
     Box(modifier, contentAlignment = Alignment.Center) {
@@ -158,9 +175,21 @@ fun MediaThumbnail(uri: Uri, resolver: ContentResolver, modifier: Modifier) {
                 )
             }
         }
+        // 加载失败：与「还在加载」明确区分（静态感叹号，不再无限呼吸）
+        if (bitmap == null && failed) {
+            Box(
+                Modifier.fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .semantics { contentDescription = "缩略图加载失败" },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("!", style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            }
+        }
         // 加载占位：呼吸底色 + 淡淡的「照片」字形。
         // 只给一块灰板会让人以为「这里本来就空」，画上轮廓才读得出是在等缩略图
-        if (bitmap == null) {
+        if (bitmap == null && !failed) {
             val pulse = if (LocalReduceMotion.current) 0.65f
             else rememberInfiniteTransition(label = "thumbPulse").animateFloat(
                 initialValue = 0.45f,

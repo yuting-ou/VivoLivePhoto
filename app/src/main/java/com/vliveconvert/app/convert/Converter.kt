@@ -29,6 +29,8 @@ internal class ConvertException(message: String) : Exception(message)
 
 internal object Converter {
 
+    private val jobSeq = java.util.concurrent.atomic.AtomicLong(0)
+
     /**
      * 把一个 vivo 双文件实况转换为单文件实况（含破损实况的修复合并）。
      *
@@ -69,7 +71,10 @@ internal object Converter {
         ensureExifGps(asset, log)
 
         val stem = src.nameWithoutExtension
-        val result = VivoSingle.write(asset, outDir, stem, log)
+        // 每次转换独立暂存子目录：不同相册的同名 IMG_xxx.jpg 并发时互不覆盖
+        val jobDir = File(outDir, "job_${System.nanoTime()}_${jobSeq.incrementAndGet()}")
+            .apply { mkdirs() }
+        val result = VivoSingle.write(asset, jobDir.absolutePath, stem, log)
 
         // 注意：这里**不能** setLastModified(源照片时间)。相册里的日期由 MediaExport
         // 显式写入 DATE_MODIFIED，暂存文件的 mtime 没有任何消费者；而 MainActivity 的
@@ -124,7 +129,7 @@ internal object Converter {
             null
         }
         val videoCoords = if (xmpCoords == null) {
-            try { GpsRecovery.recoverFromMp4Bytes(asset.videoMp4) } catch (_: Exception) { null }
+            try { GpsRecovery.recoverFromMp4Bytes(asset.videoMp4, asset.videoByteLength) } catch (_: Exception) { null }
         } else {
             null
         }

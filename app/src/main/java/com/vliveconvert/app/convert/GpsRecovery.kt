@@ -35,6 +35,15 @@ internal object GpsRecovery {
     private val XXYZ_MARKER = byteArrayOf(0xA9.toByte(), 0x78, 0x79, 0x7A)
 
     /**
+     * GPSVersionID 的标准值（EXIF 规范：tag 0x0000，**BYTE[4]**，默认 `02 03 00 00`）。
+     *
+     * 注意编码方式：androidx 的 [ExifInterface.setAttribute] 按 UTF-8 编码字符串，
+     * 只有控制字符串 `"\u0002\u0003\u0000\u0000"` 才会落成 4 个原始字节；
+     * 传 `"02030000"` 会写成 8 个 ASCII 字符（类型/计数都不对，严格解析器仍可能拒读）。
+     */
+    private const val GPS_VERSION_2_3_0_0 = "\u0002\u0003\u0000\u0000"
+
+    /**
      * 从 [data] 的 [start] 起找第一个**通过范围校验**的 ISO 6709 坐标串。
      * 超范围/0,0 的命中跳过继续找——误命中不再污染结果。
      */
@@ -74,15 +83,16 @@ internal object GpsRecovery {
      * 调用方已持有视频字节（转换管线 / 产物修复），不再整文件二次读盘；
      * 并发下也不会为扫描额外复制整段 mp4。
      */
-    fun recoverFromMp4Bytes(video: ByteArray): Pair<Double, Double>? {
+    fun recoverFromMp4Bytes(video: ByteArray, end: Int = video.size): Pair<Double, Double>? {
+        val limit = end.coerceIn(0, video.size)
         var idx = BinaryUtils.indexOf(video, XXYZ_MARKER, 0)
-        while (idx >= 0) {
+        while (idx in 0 until limit) {
             val from = maxOf(0, idx - 4)
-            val to = minOf(video.size, idx + 4 + 512)
+            val to = minOf(limit, idx + 4 + 512)
             parseIso6709From(video, from, to)?.let { return it }
             idx = BinaryUtils.indexOf(video, XXYZ_MARKER, idx + 1)
         }
-        return parseIso6709From(video, 0)
+        return parseIso6709From(video, 0, limit)
     }
 
     /**
@@ -159,6 +169,17 @@ internal object GpsRecovery {
                 // 「库不可用」必须降级为显式 Fail，绝不能让 Error 炸穿整个转换批次
                 val newJpeg = try {
                     ExifInterface(tmp.path).apply {
+                        // EXIF 规范里 GPS IFD 的 0x0000 GPSVersionID（BYTE[4]）是必需项。
+                        // androidx 的 saveAttributes 不会自动补：源无 GPS IFD 时产物只有
+                        // LatRef/Lat/LonRef/Lon 四条，严格解析器见到缺版本号的 GPS IFD
+                        // 可能整块拒读——那就退化成「有 GPS 段却解不出坐标」，正是本次
+                        // 要修的失败形态。只补不覆盖：源里已有版本值（vivo 常规是
+                        // 02 03 00 00）原样保留。
+                        // 库的 String setter 按 UTF-8 编码，控制字符 "\u0002\u0003\u0000\u0000"
+                        // 恰好写成 BYTE[4] = 02 03 00 00（传 "02030000" 会写成 8 个 ASCII 字节）。
+                        if (getAttributeBytes(ExifInterface.TAG_GPS_VERSION_ID) == null) {
+                            setAttribute(ExifInterface.TAG_GPS_VERSION_ID, GPS_VERSION_2_3_0_0)
+                        }
                         setLatLong(coords.first, coords.second)
                         saveAttributes()
                     }

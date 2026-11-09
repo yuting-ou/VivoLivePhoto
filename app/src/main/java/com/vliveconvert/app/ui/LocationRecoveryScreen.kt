@@ -40,6 +40,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -108,6 +109,8 @@ fun LocationRecoveryScreen(
     var confirm by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
     var showUnknown by remember { mutableStateOf(false) }
+    /** 导出诊断报告默认脱敏坐标；勾选后才带精确坐标（主动选择） */
+    var reportWithCoords by remember { mutableStateOf(false) }
     var showOk by remember { mutableStateOf(false) }
     var lastRecords by remember { mutableStateOf<List<LocationHealth.ReportLine>>(emptyList()) }
     val repairing = ConvertCenter.isLocationRepairing
@@ -201,9 +204,9 @@ fun LocationRecoveryScreen(
                 verdict = r.classification.label +
                     (r.rowCoordsPresent?.let { if (it) "（行坐标在位）" else "（行坐标缺失）" }
                         ?: "（行坐标不可观测）"),
-                evidence = r.probe.evidence() + "；" + r.reason +
-                    (r.rowCoordsRaw?.let { "；行列原始读数=${"%.5f,%.5f".format(it.first, it.second)}" }
-                        ?: ""),
+                evidence = r.probe.evidence(redact = !reportWithCoords) + "；" + r.reason +
+                    (if (reportWithCoords) r.rowCoordsRaw?.let { "；行列原始读数=${"%.5f,%.5f".format(it.first, it.second)}" }
+                        ?: "" else ""),
                 repair = record?.repair?.let { "${record.verdict}：$it" })
         } + lastRecords.filter { rec -> rows.none { it.name == rec.name } }
         val (verName, verCode) = try {
@@ -567,6 +570,22 @@ fun LocationRecoveryScreen(
                         height = 5.dp, active = true
                     )
                 } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { reportWithCoords = !reportWithCoords }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Checkbox(
+                            checked = reportWithCoords,
+                            onCheckedChange = { reportWithCoords = it }
+                        )
+                        Text(
+                            "报告包含精确坐标（默认脱敏）",
+                            style = TextStyle(fontSize = 12.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         GlassOutlineButton(
                             text = "重新扫描",

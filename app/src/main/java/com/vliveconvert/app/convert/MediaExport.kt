@@ -256,6 +256,14 @@ internal object MediaExport {
         if (!src.exists() || src.length() == 0L) {
             throw IOException("转换产物缺失或为空")
         }
+        // 交付前自检：暂存文件必须与转换时的分段摘要一致。覆盖路径的读回比对只能证明
+        // 「拷贝忠实」——若暂存被串写，自证一致会把损坏内容交付；新建/覆盖都在此拦截。
+        val stagedVerified = try {
+            src.inputStream().use { OutputVerifier.verify(it, result.segments) }
+        } catch (_: Exception) { false }
+        if (!stagedVerified) {
+            throw IOException("暂存产物自检失败（内容与转换结果不一致，已放弃本张，原图未动）")
+        }
         val targetRelPath = if (useCameraDir) "DCIM/Camera" else relPath
         val stem = src.name.substringBeforeLast('.')
         val outBytes = src.readBytes()

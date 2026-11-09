@@ -31,16 +31,20 @@ internal object VivoSingle {
         //   - vivoMediaEStream：vivo 相册识别「实况视频」的关键标识 → 必须保留
         //   - vivoMediaExtInfo：其内容即源 cameralbum footer（双文件 mp4 自带的旧 footer）→ 必须剥掉，
         //     否则视频段会内嵌一个 cameralbum footer，与尾部 convert footer 重复，破坏识别。
-        var video = Mp4Util.stripVivoUuid(asset.videoMp4)
+        // 不复制整段视频：用有效段长度 videoSize 标记剥尾边界，写出时按 [0, videoSize) 截取
+        var video = asset.videoMp4
+        var videoSize = asset.videoByteLength.coerceIn(0, video.size)
 
         // ── 2. 插入 lpex (LivePhotoExtension) box 到 moov ──
         // 实测「可被 vivo 相册识别」的输出视频流里带 lpex box；缺 lpex → 不被识别。
-        if (video.size >= 8) {
-            val searchEnd = minOf(65536, video.size)
+        if (videoSize >= 8) {
+            val searchEnd = minOf(65536, videoSize)
             val lpexMarker = byteArrayOf(0x6C, 0x70, 0x65, 0x78) // "lpex"
-            if (BinaryUtils.indexOf(video.copyOfRange(0, searchEnd), lpexMarker) < 0) {
+            val lpexIndex = BinaryUtils.indexOf(video, lpexMarker)
+            if (lpexIndex < 0 || lpexIndex >= searchEnd) {
                 try {
-                    video = Mp4Util.insertBoxIntoMoov(video, "lpex", buildLpexPayload(asset))
+                    video = Mp4Util.insertBoxIntoMoov(video, "lpex", buildLpexPayload(asset), sourceEnd = videoSize)
+                    videoSize = video.size
                     log("info", "已合成 lpex box（LivePhotoExtension）插入 moov", "vivo")
                 } catch (ex: Exception) {
                     log("warning", "lpex 合成失败，跳过（不影响播放）：${ex.message}", "vivo")
@@ -88,7 +92,7 @@ internal object VivoSingle {
                 .joinToString("") { "%02x".format(it) }
                 .take(16)
         val xmp = XmpTemplate.buildVivoSingleXmp(
-            pts, asset.gainmapLength, video.size + footer.size, sourceXmpGps,
+            pts, asset.gainmapLength, videoSize + footer.size, sourceXmpGps,
             sourceFingerprint)
         val primary = asset.primaryJpeg
         // 主图 XMP 段位置：命中时按 [前段][新 XMP][后段] 流式写出，
@@ -105,35 +109,47 @@ internal object VivoSingle {
         // 顺序流式写出（不拼装全量 output 数组），降低大文件的内存峰值；
         // 同时记录每段的偏移与 MD5（导出后据此做写后自检，防静默损坏）
         val streamData = asset.extras["vivo_streamdata"] as? ByteArray ?: ByteArray(0)
-        val outPath = File(outDir, "$stem.jpg").path
+        val outFile = File(outDir, "$stem.jpg")
+        val tmpFile = File(outDir, "$stem.jpg.tmp")
         File(outDir).mkdirs()
         val segments = mutableListOf<SegmentDigest>()
         var pos = 0
-        File(outPath).outputStream().use { out ->
-            // 只写切片、不做数组复制（out.write 带 offset/len 直接落盘，摘要也按切片算）
-            fun writeSegment(name: String, bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
-                out.write(bytes, offset, length)
-                segments.add(SegmentDigest(
-                    name, pos, length, OutputVerifier.md5Of(bytes, offset, length)))
-                pos += length
+        try {
+            tmpFile.outputStream().use { out ->
+                // 只写切片、不做数组复制（out.write 带 offset/len 直接落盘，摘要也按切片算）
+                fun writeSegment(name: String, bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
+                    out.write(bytes, offset, length)
+                    segments.add(SegmentDigest(
+                        name, pos, length, OutputVerifier.md5Of(bytes, offset, length)))
+                    pos += length
+                }
+                if (oldXmpSeg != null) {
+                    // 已有 XMP：按 [主图前段][新 XMP][主图后段] 三段写出
+                    writeSegment("primary-pre", primary, 0, oldXmpSeg.segStart)
+                    writeSegment("xmp", newXmpSeg)
+                    val after = oldXmpSeg.segStart + oldXmpSeg.totalLen
+                    writeSegment("primary-post", primary, after, primary.size - after)
+                } else {
+                    // 源无 XMP（vivo 双文件极罕见）：插入会改变整体布局，回退整数组路径
+                    writeSegment("primary", JpegUtil.replaceOrInsertXmp(primary, xmp))
+                }
+                asset.gainmapJpeg?.let { writeSegment("gainmap", it) }
+                if (streamData.isNotEmpty()) writeSegment("streamdata", streamData)
+                writeSegment("video", video, 0, videoSize)
+                writeSegment("footer", footer)
             }
-            if (oldXmpSeg != null) {
-                // 已有 XMP：按 [主图前段][新 XMP][主图后段] 三段写出
-                writeSegment("primary-pre", primary, 0, oldXmpSeg.segStart)
-                writeSegment("xmp", newXmpSeg)
-                val after = oldXmpSeg.segStart + oldXmpSeg.totalLen
-                writeSegment("primary-post", primary, after, primary.size - after)
-            } else {
-                // 源无 XMP（vivo 双文件极罕见）：插入会改变整体布局，回退整数组路径
-                writeSegment("primary", JpegUtil.replaceOrInsertXmp(primary, xmp))
+            // 先写 tmp 再改名发布：中途失败不暴露半成品。rename 失败显式报错，
+            // 不回退普通复制——复制非原子，可能把半成品覆盖到可信旧产物上
+            if (!tmpFile.renameTo(outFile)) {
+                throw java.io.IOException("暂存产物发布失败（rename 返回 false）：${outFile.path}")
             }
-            asset.gainmapJpeg?.let { writeSegment("gainmap", it) }
-            if (streamData.isNotEmpty()) writeSegment("streamdata", streamData)
-            writeSegment("video", video)
-            writeSegment("footer", footer)
+        } catch (e: Exception) {
+            try { tmpFile.delete() } catch (_: Exception) {}
+            throw e
         }
-        log("info", "写出 vivo 单文件实况：${File(outPath).name}" +
-            "（图像 ${primaryOutLen}B + 视频 ${video.size}B（含 lpex）" +
+        val outPath = outFile.path
+        log("info", "写出 vivo 单文件实况：${outFile.name}" +
+            "（图像 ${primaryOutLen}B + 视频 ${videoSize}B（含 lpex）" +
             (if (streamData.isNotEmpty()) " + streamdata ${streamData.size}B" else "") +
             " + footer ${footer.size}B）", "vivo")
         return SingleWriteResult(

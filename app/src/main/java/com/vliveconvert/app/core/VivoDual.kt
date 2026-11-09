@@ -197,19 +197,21 @@ internal object VivoDual {
             }
         }
 
-        val video = Mp4Util.stripVivoUuid(mp4Raw)
-        if (!Mp4Util.hasFtyp(video))
+        // MP4：记录有效段长度（剥尾部 vivoMediaExtInfo uuid），但不复制整段视频
+        val videoEnd = Mp4Util.stripVivoUuidEnd(mp4Raw)
+        if (!Mp4Util.hasFtyp(mp4Raw))
             throw VivoDualException("伴生 MP4 无效（缺少 ftyp box）")
 
         val asset = LivePhotoAsset(
             primaryJpeg = primary,
             gainmapJpeg = gainmap,
-            videoMp4 = video,
+            videoMp4 = mp4Raw,
             sourceFormat = if (footer == null) "vivo_broken" else "vivo_dual",
         )
+        asset.videoByteLength = videoEnd
         asset.livephotoId = liveId
         asset.imageTime = imageTime
-        asset.videoInfo = Mp4Util.getTrackInfo(video) ?: mutableMapOf()
+        asset.videoInfo = Mp4Util.getTrackInfo(mp4Raw) ?: mutableMapOf()
         // 透传数据：streamdata 附加块 + 源 JPG/MP4 footer 的完整字段
         // （供单文件写出时合并人像标记 moduleid/joint.refocus 等）
         asset.extras["vivo_streamdata"] = streamData
