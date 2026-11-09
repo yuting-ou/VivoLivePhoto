@@ -67,6 +67,8 @@ jobs:
         run: |
           test -n "$VLP_V3_KEYSTORE_BASE64" || { echo "::error::缺少 Secret VLP_V3_KEYSTORE_BASE64"; exit 1; }
           test -n "$VLP_V3_STORE_PASSWORD" || { echo "::error::缺少 Secret VLP_V3_STORE_PASSWORD"; exit 1; }
+          echo "$VLP_V3_KEYSTORE_BASE64" | base64 -d > app/release-v3.keystore
+          test -s app/release-v3.keystore || { echo "::error::v3 keystore 解码为空"; exit 1; }
 
       - name: 构建 Release APK（旧章基线 + v3 新章 lineage 重签）
         env:
