@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,7 +41,26 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalView
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
@@ -184,62 +204,95 @@ internal fun SettingsScreen(
                         },
                         Modifier
                     )
-                    if (!perf.manual) {
-                        Spacer(Modifier.height(10.dp))
-                        GlassDivider()
-                        Spacer(Modifier.height(10.dp))
-                        Text(perfAutoDetail, style = settingsDescriptionStyle(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(4.dp))
-                        Text(deviceInfo, style = settingsDescriptionStyle(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        Spacer(Modifier.height(10.dp))
-                        GlassDivider()
-                        Spacer(Modifier.height(10.dp))
-                        Text("一键预设（填充下面四个旋钮）", style = settingsDescriptionStyle(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(2.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            com.vliveconvert.app.service.PerfPreset.entries.forEach { p ->
-                                InlineTextButton(
-                                    text = p.label,
-                                    contentColor = MaterialTheme.colorScheme.primary,
-                                    onClick = { onPerfChange(p.apply()) },
-                                    style = TextStyle(fontSize = 14.sp)
+                    // 自动↔手动内容切换：淡入+轻上滑（与底栏三态切换同一套曲线）；
+                    // 高度差用 SizeTransform 平滑过渡，减少动效时直切
+                    val reduceMotion = LocalReduceMotion.current
+                    AnimatedContent(
+                        targetState = perf.manual,
+                        transitionSpec = {
+                            if (reduceMotion) {
+                                (fadeIn(snap()) togetherWith fadeOut(snap()))
+                            } else {
+                                (fadeIn(tween(220, easing = EaseOutStrong)) +
+                                    slideInVertically(tween(220, easing = EaseOutStrong)) { it / 6 }
+                                ) togetherWith
+                                    (fadeOut(tween(140))) using SizeTransform(clip = false)
+                            }
+                        },
+                        label = "perfModeSwitch"
+                    ) { manual ->
+                        if (!manual) {
+                            Column {
+                                Spacer(Modifier.height(12.dp))
+                                GlassDivider()
+                                Spacer(Modifier.height(12.dp))
+                                Text(perfAutoDetail, style = settingsDescriptionStyle(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(4.dp))
+                                Text(deviceInfo, style = settingsDescriptionStyle(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Column {
+                                Spacer(Modifier.height(12.dp))
+                                GlassDivider()
+                                Spacer(Modifier.height(12.dp))
+                                Text("一键预设（填充下面四个旋钮）", style = settingsDescriptionStyle(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(2.dp))
+                                // 量墨迹：InlineTextButton 文字内边距 10dp，行整体左移 10dp
+                                // 让「省电/均衡/性能」的字左缘与下方旋钮标题左缘对齐
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    modifier = Modifier // DEBUG: offset 已移除以定位点击失效
+                                ) {
+                                    val view = LocalView.current
+                                    com.vliveconvert.app.service.PerfPreset.entries.forEach { p ->
+                                        InlineTextButton(
+                                            text = p.label,
+                                            contentColor = MaterialTheme.colorScheme.primary,
+                                            onClick = {
+                                                // 预设是「一键落定」：CONFIRM 触觉 + 旋钮弹簧滑移到新值
+                                                view.performHapticFeedback(
+                                                    HapticFeedbackConstants.CONFIRM)
+                                                onPerfChange(p.apply())
+                                            },
+                                            style = TextStyle(fontSize = 14.sp)
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                PerfSlider("转换并发", "并发 ${perf.concurrency} 张",
+                                    perf.concurrency.toFloat(), 1f..8f, steps = 6, hapticStep = true
+                                ) { v ->
+                                    onPerfChange(perf.copy(concurrency = v.roundToInt().coerceIn(1, 8)))
+                                }
+                                PerfSlider("内存预算上限", "约 ${perf.memoryLimitMb} MB",
+                                    perf.memoryLimitMb.toFloat(),
+                                    128f..com.vliveconvert.app.service.PerfSettings.memoryUpperMb().toFloat(),
+                                    steps = 0, hapticStep = false
+                                ) { v ->
+                                    onPerfChange(perf.copy(memoryLimitMb = v.roundToInt()
+                                        .coerceIn(128, com.vliveconvert.app.service.PerfSettings.memoryUpperMb())))
+                                }
+                                PerfSlider("相册扫描线程", "${perf.scanThreads} 个",
+                                    perf.scanThreads.toFloat(), 1f..8f, steps = 6, hapticStep = true
+                                ) { v ->
+                                    onPerfChange(perf.copy(scanThreads = v.roundToInt().coerceIn(1, 8)))
+                                }
+                                PerfSlider("缩略图线程", "${perf.thumbThreads} 个",
+                                    perf.thumbThreads.toFloat(), 1f..8f, steps = 6, hapticStep = true
+                                ) { v ->
+                                    onPerfChange(perf.copy(thumbThreads = v.roundToInt().coerceIn(1, 8)))
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "修改对下一批转换生效；拧过头也有内存预算闸和自动重试兜底。",
+                                    style = settingsDescriptionStyle(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        PerfSlider("转换并发", "并发 ${perf.concurrency} 张",
-                            perf.concurrency.toFloat(), 1f..8f, steps = 6
-                        ) { v ->
-                            onPerfChange(perf.copy(concurrency = v.roundToInt().coerceIn(1, 8)))
-                        }
-                        PerfSlider("内存预算上限", "约 ${perf.memoryLimitMb} MB",
-                            perf.memoryLimitMb.toFloat(),
-                            128f..com.vliveconvert.app.service.PerfSettings.memoryUpperMb().toFloat(),
-                            steps = 0
-                        ) { v ->
-                            onPerfChange(perf.copy(memoryLimitMb = v.roundToInt()
-                                .coerceIn(128, com.vliveconvert.app.service.PerfSettings.memoryUpperMb())))
-                        }
-                        PerfSlider("相册扫描线程", "${perf.scanThreads} 个",
-                            perf.scanThreads.toFloat(), 1f..8f, steps = 6
-                        ) { v ->
-                            onPerfChange(perf.copy(scanThreads = v.roundToInt().coerceIn(1, 8)))
-                        }
-                        PerfSlider("缩略图线程", "${perf.thumbThreads} 个",
-                            perf.thumbThreads.toFloat(), 1f..8f, steps = 6
-                        ) { v ->
-                            onPerfChange(perf.copy(thumbThreads = v.roundToInt().coerceIn(1, 8)))
-                        }
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            "修改对下一批转换生效；拧过头也有内存预算闸和自动重试兜底。",
-                            style = settingsDescriptionStyle(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
                 SettingsSection("外观")
@@ -476,7 +529,9 @@ private fun settingsCardTitleStyle() = TextStyle(fontSize = 15.sp, lineHeight = 
 
 private fun settingsDescriptionStyle() = TextStyle(fontSize = 12.sp, lineHeight = 18.sp)
 
-/** 性能旋钮行：标题 + 当前值 + 滑杆（读屏读「标题，当前值」） */
+/** 性能旋钮行：标题 + 当前值 + 滑杆（读屏读「标题，当前值」）。
+ *  动效：程序性变更（点预设/开关）时旋钮弹簧滑移到新值，拖动中直接跟手不打架；
+ *  整数档滑杆跨档时 CLOCK_TICK 触觉（音量条同款）。减少动效时全部退化为直变。 */
 @Composable
 private fun PerfSlider(
     title: String,
@@ -484,20 +539,55 @@ private fun PerfSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
+    hapticStep: Boolean,
     onChange: (Float) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+    val view = LocalView.current
+    val reduceMotion = LocalReduceMotion.current
+    val interaction = remember { MutableInteractionSource() }
+    val dragged by interaction.collectIsDraggedAsState()
+    // 预设应用时旋钮滑移（拖动中用原始值，动画不能和手指打架）
+    val animated = animateFloatAsState(
+        targetValue = value.coerceIn(range.start, range.endInclusive),
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
+        label = "perfKnob_$title"
+    )
+    val shown = if (dragged || reduceMotion) value else animated.value
+    var lastStep by remember(title) { mutableIntStateOf(value.roundToInt()) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = settingsCardTitleStyle(),
                 color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-            Text(valueLabel, style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.primary)
+            // 数值变化轻跳一下（上滑 6dp + 淡入），比原地换字有「生效了」的确认感
+            AnimatedContent(
+                targetState = valueLabel,
+                transitionSpec = {
+                    if (reduceMotion) fadeIn(snap()) togetherWith fadeOut(snap())
+                    else (fadeIn(tween(160, easing = EaseOutStrong)) +
+                        slideInVertically(tween(160, easing = EaseOutStrong)) { it / 2 }) togetherWith
+                        fadeOut(tween(90))
+                },
+                label = "perfValue_$title"
+            ) { label ->
+                Text(label, style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary)
+            }
         }
         Slider(
-            value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = onChange,
+            value = shown.coerceIn(range.start, range.endInclusive),
+            onValueChange = { raw ->
+                if (hapticStep) {
+                    val step = raw.roundToInt()
+                    if (step != lastStep) {
+                        lastStep = step
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                }
+                onChange(raw)
+            },
             valueRange = range,
             steps = steps,
+            interactionSource = interaction,
             modifier = Modifier.fillMaxWidth()
                 .semantics { contentDescription = "$title，$valueLabel" }
         )
