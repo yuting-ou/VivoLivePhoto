@@ -26,3 +26,8 @@ local.properties
 
 # 真机验证取证产物（截图/UI dump，仅本机留存）
 /evidence/
+
+# 签名材料不入库（2026-11-09 止血）：私钥与密码曾随仓库公开，改由本机
+# keystore.properties + CI Secrets 提供；构建配置见 app/build.gradle.kts
+app/release.keystore
+app/keystore.properties

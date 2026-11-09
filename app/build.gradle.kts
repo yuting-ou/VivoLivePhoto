@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -26,16 +28,30 @@ android {
         }
     }
 
-    // 正式签名：keystore 随仓库提交（个人开源应用，密码即仓库明文）。
-    // 此前 release 挂 debug 签名，而 debug keystore 不入库——换机器/沙箱重建后
-    // 自动生成新钥匙，同一包名的先后产物签名不一致，用户无法覆盖安装。
-    // 签名随仓库恒定后，任何环境构建的 APK 都可无缝升级
+    // 签名材料不再入库（2026-11-09 止血，方案 A）：私钥与密码曾随仓库公开。
+    // 现在的读取顺序：app/keystore.properties（本机，gitignore）→ 环境变量（CI Secrets）。
+    // 两者皆缺时不挂任何签名配置：assembleRelease 产出 app-release-unsigned.apk
+    // （无法安装、CI 侧有材料自检不会发布）——绝不静默回退 debug 签名冒充正式包。
+    // 签名恒定的目的不变：本机 keystore 与 CI Secret 是同一把钥匙，产物可互相覆盖升级。
+    val keystoreProps = Properties().apply {
+        val f = project.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { stream -> load(stream) }
+    }
+    fun signingValue(propsKey: String, envName: String): String? =
+        keystoreProps.getProperty(propsKey) ?: System.getenv(envName)
+    val signStoreFile = signingValue("storeFile", "VLP_STORE_FILE") ?: "release.keystore"
+    val signStorePassword = signingValue("storePassword", "VLP_STORE_PASSWORD")
+    val signKeyAlias = signingValue("keyAlias", "VLP_KEY_ALIAS")
+    val signKeyPassword = signingValue("keyPassword", "VLP_KEY_PASSWORD")
+
     signingConfigs {
-        create("release") {
-            storeFile = file("release.keystore")
-            storePassword = "yingzhongying2026"
-            keyAlias = "yingzhongying"
-            keyPassword = "yingzhongying2026"
+        if (signStorePassword != null && signKeyAlias != null && signKeyPassword != null) {
+            create("release") {
+                storeFile = file(signStoreFile)
+                storePassword = signStorePassword
+                keyAlias = signKeyAlias
+                keyPassword = signKeyPassword
+            }
         }
     }
 
@@ -49,7 +65,8 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt")
             )
-            signingConfig = signingConfigs.getByName("release")
+            // 签名材料存在才挂（见上方说明）：缺失时产出未签名包并由 CI 材料自检拦截
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
     compileOptions {
