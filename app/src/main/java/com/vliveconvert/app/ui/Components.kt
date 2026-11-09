@@ -73,6 +73,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -122,9 +123,26 @@ private fun thumbnailCacheBytes(): Int {
 }
 
 // 缩略图加载有界并发：限制同时进行的 ContentResolver.loadThumbnail 数量，
-// 避免快速滚动/千张列表时并发 I/O 过多拖垮主线程与磁盘
+// 避免快速滚动/千张列表时并发 I/O 过多拖垮主线程与磁盘。
+// 并发值由性能设置「缩略图线程」驱动（默认 4 = 自动挡）；limitedParallelism 视图
+// 按值缓存，切换设置即热更，不用重建组合。
+object ThumbConcurrency {
+    @Volatile private var dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(4)
+    var threads: Int = 4
+        private set
+
+    fun setThreads(value: Int) {
+        synchronized(this) {
+            threads = value.coerceIn(1, 8)
+            dispatcher = Dispatchers.IO.limitedParallelism(threads)
+        }
+    }
+
+    val current: CoroutineDispatcher get() = dispatcher
+}
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-val thumbDispatcher = Dispatchers.IO.limitedParallelism(4)
+val thumbDispatcher: CoroutineDispatcher get() = ThumbConcurrency.current
 
 /**
  * 系统缩略图（loadThumbnail，走系统缓存不落盘）：

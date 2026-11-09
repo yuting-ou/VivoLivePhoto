@@ -112,7 +112,13 @@ import com.vliveconvert.app.service.BatchLogEntry
 import com.vliveconvert.app.service.ConvertCenter
 import com.vliveconvert.app.service.ConvertedStore
 import com.vliveconvert.app.service.ConvertService
+import com.vliveconvert.app.service.PerfSettings
+import com.vliveconvert.app.service.PerfStore
 import com.vliveconvert.app.service.Preflight
+import com.vliveconvert.app.service.autoConcurrency
+import com.vliveconvert.app.service.defaultBudgetBytes
+import com.vliveconvert.app.service.effectiveScanThreads
+import com.vliveconvert.app.service.effectiveThumbThreads
 import com.vliveconvert.app.service.mergeClearedUndo
 import com.vliveconvert.app.ui.AboutScreen
 import com.vliveconvert.app.ui.BrokenRepairScreen
@@ -127,6 +133,7 @@ import com.vliveconvert.app.ui.LocalGlassSourceEnabled
 import com.vliveconvert.app.ui.LocalReduceMotion
 import com.vliveconvert.app.ui.MainScreen
 import com.vliveconvert.app.ui.MotionPrefs
+import com.vliveconvert.app.ui.ThumbConcurrency
 import com.vliveconvert.app.ui.PermissionScreen
 import com.vliveconvert.app.ui.SettingsScreen
 import com.vliveconvert.app.ui.ShareIntents
@@ -339,6 +346,8 @@ class MainActivity : ComponentActivity() {
     private var deleteOriginal by mutableStateOf(false)
     // 转换后移到相机相册（持久化开关，默认开启）：导出文件直接写入 DCIM/Camera
     private var moveToCamera by mutableStateOf(true)
+    /** 性能设置（自动挡默认）：并发/内存预算/扫描线程/缩略图线程 */
+    private var perf by mutableStateOf(PerfSettings())
     private var deleteBaseStatus = ""
     private var pendingDeleteCount = 0
     /** 当前待确认批的 URI（确认成功后转持久化恢复记录） */
@@ -852,7 +861,10 @@ class MainActivity : ComponentActivity() {
         }
 
         mediaRepo = MediaRepo(contentResolver)
-        scanner = PickerScanner(mediaRepo, ScanCache(applicationContext))
+        // 扫描线程数走性能设置（每次进选择器现取，改设置即生效）
+        scanner = PickerScanner(mediaRepo, ScanCache(applicationContext)) {
+            PerfStore(applicationContext).load().effectiveScanThreads()
+        }
         singleLiveScanner = SingleLiveScanner(mediaRepo)
 
         // 恢复删除原图开关 + 刷新可恢复记录数
@@ -864,6 +876,9 @@ class MainActivity : ComponentActivity() {
         // 恢复「跟随系统取色」开关（默认开启）
         dynamicColor = getSharedPreferences("vliveconvert", MODE_PRIVATE)
             .getBoolean("dynamic_color", true)
+        // 性能设置（自动挡默认）：缩略图并发即时生效
+        perf = PerfStore(this).load()
+        ThumbConcurrency.setThreads(perf.effectiveThumbThreads())
         refreshRestoreCount()
         // 恢复自定义输出目录
         outputRelPath = getSharedPreferences("vliveconvert", MODE_PRIVATE)
@@ -1152,6 +1167,19 @@ class MainActivity : ComponentActivity() {
                                 outputRelPath = outputRelPath,
                                 moveToCamera = moveToCamera,
                                 deleteOriginal = deleteOriginal,
+                                perf = perf,
+                                perfAutoDetail = "当前：并发 ${
+                                    autoConcurrency(Runtime.getRuntime().maxMemory())
+                                } 路 · 内存预算约 ${
+                                    defaultBudgetBytes(Runtime.getRuntime().maxMemory()) / (1024 * 1024)
+                                } MB",
+                                deviceInfo = "本机 ${Runtime.getRuntime().availableProcessors()} 核 · " +
+                                    "应用堆约 ${PerfSettings.maxHeapMb()} MB（手动上限可到 ${PerfSettings.memoryUpperMb()} MB）",
+                                onPerfChange = { new ->
+                                    perf = new
+                                    PerfStore(this@MainActivity).save(new)
+                                    ThumbConcurrency.setThreads(new.effectiveThumbThreads())
+                                },
                                 crashLogCount = crashLogCount,
                                 batchLogCount = batchLogCount,
                                 onOpenBatchLog = {

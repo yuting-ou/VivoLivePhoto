@@ -45,7 +45,12 @@ internal fun isDualLivePhotoPath(path: String): Boolean =
  *
  * 无磁盘持久化：扫描结果仅存内存，不产生任何本地存储。
  */
-class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? = null) {
+class PickerScanner(
+    private val repo: MediaRepo,
+    private val cache: ScanCache? = null,
+    /** 扫描线程数提供者（性能设置驱动；每次 enter 现取，设置变更即生效） */
+    private val scanThreadsProvider: () -> Int = { 4 }
+) {
 
     class ScanState {
         /** 已识别为双文件实况的列表（Compose 状态，UI 直接观察） */
@@ -120,7 +125,8 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
             if (hasWork) {
                 st.running = true
                 // workers 作为本 job 的子协程启动，随父协程取消而终止
-                val workers = (1..SCAN_THREADS).map {
+                val threads = scanThreadsProvider().coerceIn(1, 8)
+                val workers = (1..threads).map {
                     launch { scanWorker(st) }
                 }
                 workers.forEach { it.join() }
@@ -192,9 +198,5 @@ class PickerScanner(private val repo: MediaRepo, private val cache: ScanCache? =
         }
         st.total = current.size
         return st.pending.isNotEmpty()
-    }
-
-    companion object {
-        private const val SCAN_THREADS = 4
     }
 }

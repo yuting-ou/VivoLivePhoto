@@ -169,13 +169,14 @@ class ConvertService : Service() {
         val noGps = AtomicInteger(0)
         val firstOutUri = AtomicReference<String?>(null)
 
-        // 并发度按应用堆大小动态决定：字节级转换的内存峰值约为源文件的 3~5 倍，
-        // 大堆设备最多 2 路、小堆设备串行；配合 largeHeap 与 Throwable 兜底防 OOM 闪退
-        val parallelism =
-            if (Runtime.getRuntime().maxMemory() >= 384L * 1024 * 1024) 2 else 1
+        // 并发/预算来自性能设置：自动挡=按堆大小（v2.7 行为，默认），手动挡=用户旋钮；
+        // 无论哪挡，字节预算闸与 OOM 自愈始终兜底
+        val perf = PerfStore(app).load()
+        val parallelism = perf.effectiveConcurrency(
+            Runtime.getRuntime().maxMemory(), Runtime.getRuntime().availableProcessors())
         val sem = Semaphore(parallelism)
         // 字节预算准入闸（并发上限之外的附加闸）：按源大小估算峰值，不足排队
-        val budget = MemoryBudget(defaultBudgetBytes())
+        val budget = MemoryBudget(perf.effectiveBudgetBytes(Runtime.getRuntime().maxMemory()))
         // OOM 且尚未提交导出的条目：批次末尾串行重试一次（自愈，不推给用户手动重来）
         val oomRetry = Collections.synchronizedList(mutableListOf<ConvertItem>())
 

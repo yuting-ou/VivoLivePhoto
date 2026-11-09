@@ -31,12 +31,14 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -49,6 +51,9 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -60,12 +65,16 @@ import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.HazeState
 
 @Composable
-fun SettingsScreen(
+internal fun SettingsScreen(
     appName: String,
     versionName: String,
     outputRelPath: String,
     moveToCamera: Boolean,
     deleteOriginal: Boolean,
+    perf: com.vliveconvert.app.service.PerfSettings = com.vliveconvert.app.service.PerfSettings(),
+    perfAutoDetail: String = "",
+    deviceInfo: String = "",
+    onPerfChange: (com.vliveconvert.app.service.PerfSettings) -> Unit = {},
     crashLogCount: Int,
     isBusy: Boolean,
     onBack: () -> Unit,
@@ -161,6 +170,78 @@ fun SettingsScreen(
                         )
                     }
                 )
+                SettingsSection("性能")
+                SettingsCard {
+                    SettingsToggleCard(
+                        Icons.Filled.Refresh, "手动调节性能",
+                        if (perf.manual) "手动挡：按下面的旋钮执行"
+                        else "自动挡：按设备内存自动决定（推荐）",
+                        perf.manual, true,
+                        { on ->
+                            onPerfChange(
+                                if (on) com.vliveconvert.app.service.PerfPreset.Balanced.apply()
+                                else perf.copy(manual = false))
+                        },
+                        Modifier
+                    )
+                    if (!perf.manual) {
+                        Spacer(Modifier.height(10.dp))
+                        GlassDivider()
+                        Spacer(Modifier.height(10.dp))
+                        Text(perfAutoDetail, style = settingsDescriptionStyle(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text(deviceInfo, style = settingsDescriptionStyle(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Spacer(Modifier.height(10.dp))
+                        GlassDivider()
+                        Spacer(Modifier.height(10.dp))
+                        Text("一键预设（填充下面四个旋钮）", style = settingsDescriptionStyle(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(2.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            com.vliveconvert.app.service.PerfPreset.entries.forEach { p ->
+                                InlineTextButton(
+                                    text = p.label,
+                                    contentColor = MaterialTheme.colorScheme.primary,
+                                    onClick = { onPerfChange(p.apply()) },
+                                    style = TextStyle(fontSize = 14.sp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        PerfSlider("转换并发", "并发 ${perf.concurrency} 张",
+                            perf.concurrency.toFloat(), 1f..8f, steps = 6
+                        ) { v ->
+                            onPerfChange(perf.copy(concurrency = v.roundToInt().coerceIn(1, 8)))
+                        }
+                        PerfSlider("内存预算上限", "约 ${perf.memoryLimitMb} MB",
+                            perf.memoryLimitMb.toFloat(),
+                            128f..com.vliveconvert.app.service.PerfSettings.memoryUpperMb().toFloat(),
+                            steps = 0
+                        ) { v ->
+                            onPerfChange(perf.copy(memoryLimitMb = v.roundToInt()
+                                .coerceIn(128, com.vliveconvert.app.service.PerfSettings.memoryUpperMb())))
+                        }
+                        PerfSlider("相册扫描线程", "${perf.scanThreads} 个",
+                            perf.scanThreads.toFloat(), 1f..8f, steps = 6
+                        ) { v ->
+                            onPerfChange(perf.copy(scanThreads = v.roundToInt().coerceIn(1, 8)))
+                        }
+                        PerfSlider("缩略图线程", "${perf.thumbThreads} 个",
+                            perf.thumbThreads.toFloat(), 1f..8f, steps = 6
+                        ) { v ->
+                            onPerfChange(perf.copy(thumbThreads = v.roundToInt().coerceIn(1, 8)))
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "修改对下一批转换生效；拧过头也有内存预算闸和自动重试兜底。",
+                            style = settingsDescriptionStyle(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 SettingsSection("外观")
                 SettingsPair(singleColumn,
                     first = { modifier ->
@@ -394,3 +475,31 @@ private fun settingsCardTitleStyle() = TextStyle(fontSize = 15.sp, lineHeight = 
     fontWeight = FontWeight.SemiBold)
 
 private fun settingsDescriptionStyle() = TextStyle(fontSize = 12.sp, lineHeight = 18.sp)
+
+/** 性能旋钮行：标题 + 当前值 + 滑杆（读屏读「标题，当前值」） */
+@Composable
+private fun PerfSlider(
+    title: String,
+    valueLabel: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onChange: (Float) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = settingsCardTitleStyle(),
+                color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            Text(valueLabel, style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            steps = steps,
+            modifier = Modifier.fillMaxWidth()
+                .semantics { contentDescription = "$title，$valueLabel" }
+        )
+    }
+}
