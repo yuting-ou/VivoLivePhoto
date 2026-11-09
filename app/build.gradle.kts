@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.io.File
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,8 +19,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 123
-        versionName = "2.8.0-test2"
+        versionCode = 124
+        versionName = "2.8.0-test3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -75,6 +76,51 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+
+    // v3 密钥轮换（方案 B，2026-11-09）：assembleRelease 仍用旧章签名（保证 lineage
+    // 根证书与历史安装包一致），随后本任务用「新章 + lineage」重签——旧章用户可无缝
+    // 升级，泄漏的旧章对新版失去签名效力。lineage.bin 入库（内含公钥证书，非机密）；
+    // 新章材料走 keystore.properties（v3* 键）/ 环境变量（VLP_V3_*），不入库。
+    // 配置期解析成纯字符串（配置缓存不允许 Task 动作捕获脚本对象引用）。
+    val rotateV3StorePath = file(
+        signingValue("v3StoreFile", "VLP_V3_STORE_FILE") ?: "release-v3.keystore").absolutePath
+    val rotateV3Pass = signingValue("v3StorePassword", "VLP_V3_STORE_PASSWORD")
+        ?: throw GradleException("缺少 v3 轮换签名材料（keystore.properties 的 v3StorePassword 或环境变量 VLP_V3_STORE_PASSWORD）")
+    val rotateV3Alias = signingValue("v3KeyAlias", "VLP_V3_KEY_ALIAS") ?: "yingzhongying-v3"
+    val rotateSdkDir: String = run {
+        val localProps = Properties().apply {
+            val f = rootProject.file("local.properties")
+            if (f.exists()) f.inputStream().use { stream -> load(stream) }
+        }
+        localProps.getProperty("sdk.dir")
+            ?: System.getenv("ANDROID_HOME")
+            ?: System.getenv("ANDROID_SDK_ROOT")
+            ?: throw GradleException("无法定位 Android SDK（local.properties 的 sdk.dir 或 ANDROID_HOME 均缺失）")
+    }
+    val rotateApksignerPath = file("$rotateSdkDir/build-tools/37.0.0/apksigner").absolutePath
+    val rotateLineagePath = file("lineage.bin").absolutePath
+    val rotateBasePath = layout.buildDirectory.file("outputs/apk/release/VivoLivePhoto.apk").get().asFile.absolutePath
+    val rotateTmpPath = "$rotateBasePath.rotated.apk"
+    tasks.register("rotateSignRelease") {
+        dependsOn("assembleRelease")
+        doLast {
+            val cmd = listOf(
+                rotateApksignerPath, "sign",
+                "--ks", rotateV3StorePath, "--ks-pass", "pass:$rotateV3Pass",
+                "--ks-key-alias", rotateV3Alias,
+                "--lineage", rotateLineagePath,
+                "--v1-signing-enabled", "false", "--v2-signing-enabled", "false",
+                "--v3-signing-enabled", "true",
+                "--out", rotateTmpPath, rotateBasePath)
+            val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            val exit = process.waitFor()
+            if (exit != 0) throw GradleException("apksigner 轮换签名失败（exit=$exit）：\n$output")
+            File(rotateBasePath).delete()
+            File(rotateTmpPath).renameTo(File(rotateBasePath))
+            println("[rotateSignRelease] 已用 v3 新章 + lineage 重签：$rotateBasePath")
+        }
     }
     testOptions {
         unitTests {

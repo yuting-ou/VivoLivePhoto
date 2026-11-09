@@ -31,3 +31,4 @@ local.properties
 # keystore.properties + CI Secrets 提供；构建配置见 app/build.gradle.kts
 app/release.keystore
 app/keystore.properties
+app/release-v3.keystore

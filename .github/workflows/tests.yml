@@ -60,12 +60,21 @@ jobs:
           test -n "$VLP_KEYSTORE_BASE64" || { echo "::error::缺少 Secret VLP_KEYSTORE_BASE64"; exit 1; }
           echo "$VLP_KEYSTORE_BASE64" | base64 -d > app/release.keystore
 
-      - name: 构建 Release APK
+      - name: 还原 v3 轮换签名材料（Secrets 注入；缺失则发版链路显式失败）
+        env:
+          VLP_V3_KEYSTORE_BASE64: ${{ secrets.VLP_V3_KEYSTORE_BASE64 }}
+          VLP_V3_STORE_PASSWORD: ${{ secrets.VLP_V3_STORE_PASSWORD }}
+        run: |
+          test -n "$VLP_V3_KEYSTORE_BASE64" || { echo "::error::缺少 Secret VLP_V3_KEYSTORE_BASE64"; exit 1; }
+          test -n "$VLP_V3_STORE_PASSWORD" || { echo "::error::缺少 Secret VLP_V3_STORE_PASSWORD"; exit 1; }
+
+      - name: 构建 Release APK（旧章基线 + v3 新章 lineage 重签）
         env:
           VLP_STORE_PASSWORD: ${{ secrets.VLP_STORE_PASSWORD }}
           VLP_KEY_ALIAS: ${{ secrets.VLP_KEY_ALIAS }}
           VLP_KEY_PASSWORD: ${{ secrets.VLP_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease
+          VLP_V3_STORE_PASSWORD: ${{ secrets.VLP_V3_STORE_PASSWORD }}
+        run: ./gradlew :app:rotateSignRelease
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
