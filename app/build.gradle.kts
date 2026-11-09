@@ -83,10 +83,11 @@ android {
     // 升级，泄漏的旧章对新版失去签名效力。lineage.bin 入库（内含公钥证书，非机密）；
     // 新章材料走 keystore.properties（v3* 键）/ 环境变量（VLP_V3_*），不入库。
     // 配置期解析成纯字符串（配置缓存不允许 Task 动作捕获脚本对象引用）。
+    // v3 材料缺失不算配置期错误：单测/非发版任务不注入签名材料也必须能跑；
+    // 材料检查延迟到 rotateSignRelease 执行期（只有发版链路会执行它，届时缺失=显式失败）
     val rotateV3StorePath = file(
         signingValue("v3StoreFile", "VLP_V3_STORE_FILE") ?: "release-v3.keystore").absolutePath
-    val rotateV3Pass = signingValue("v3StorePassword", "VLP_V3_STORE_PASSWORD")
-        ?: throw GradleException("缺少 v3 轮换签名材料（keystore.properties 的 v3StorePassword 或环境变量 VLP_V3_STORE_PASSWORD）")
+    val rotateV3Pass: String? = signingValue("v3StorePassword", "VLP_V3_STORE_PASSWORD")
     val rotateV3Alias = signingValue("v3KeyAlias", "VLP_V3_KEY_ALIAS") ?: "yingzhongying-v3"
     val rotateSdkDir: String = run {
         val localProps = Properties().apply {
@@ -105,9 +106,11 @@ android {
     tasks.register("rotateSignRelease") {
         dependsOn("assembleRelease")
         doLast {
+            val pass = rotateV3Pass
+                ?: throw GradleException("缺少 v3 轮换签名材料（keystore.properties 的 v3StorePassword 或环境变量 VLP_V3_STORE_PASSWORD）")
             val cmd = listOf(
                 rotateApksignerPath, "sign",
-                "--ks", rotateV3StorePath, "--ks-pass", "pass:$rotateV3Pass",
+                "--ks", rotateV3StorePath, "--ks-pass", "pass:$pass",
                 "--ks-key-alias", rotateV3Alias,
                 "--lineage", rotateLineagePath,
                 "--v1-signing-enabled", "false", "--v2-signing-enabled", "false",
