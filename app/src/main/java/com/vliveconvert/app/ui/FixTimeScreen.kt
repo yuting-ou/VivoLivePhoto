@@ -34,7 +34,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -227,7 +226,7 @@ fun FixTimeScreen(
             val someSel = displayOrder.any { g -> selected.any { it.id == g.id } }
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(continuousShape(8.dp))
                     .clickableNoRipple(onClick = { if (n > 0) toggleGroup(displayOrder) }),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -475,7 +474,7 @@ private fun FixCell(
     Box(
         modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(continuousShape(12.dp))
             .clickable(onClick = onToggle)
     ) {
         Box(
@@ -487,11 +486,11 @@ private fun FixCell(
                     scaleY = scale
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .clip(RoundedCornerShape(cornerRadius))
+                .clip(continuousShape(cornerRadius))
                 .border(
                     width = if (selected) 2.dp else 0.dp,
                     color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    shape = RoundedCornerShape(cornerRadius)
+                    shape = continuousShape(cornerRadius)
                 )
         ) {
             MediaThumbnail(item.uri, resolver, Modifier.fillMaxSize())

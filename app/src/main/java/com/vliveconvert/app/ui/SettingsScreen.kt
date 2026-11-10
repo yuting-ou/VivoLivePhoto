@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -437,7 +436,7 @@ private fun SettingsToolCard(
         else -> MaterialTheme.colorScheme.primary
     }
     // 忙时仍交由业务回调解释原因，不把操作卡变成无反馈的死区。
-    SettingsCard(modifier.clip(RoundedCornerShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
+    SettingsCard(modifier.clip(continuousShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SettingsGlyph(icon, accent)
             Spacer(Modifier.weight(1f))
@@ -465,7 +464,7 @@ private fun SettingsToggleCard(
     val primary = MaterialTheme.colorScheme.primary
     val track = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
         MaterialTheme.colorScheme.primaryContainer else primary
-    SettingsCard(modifier.clip(RoundedCornerShape(24.dp))
+    SettingsCard(modifier.clip(continuousShape(24.dp))
         .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onToggle)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SettingsGlyph(icon, if (enabled) primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -495,7 +494,7 @@ private fun SettingsToggleCard(
 
 @Composable
 private fun SettingsLinkCard(title: String, description: String, onClick: () -> Unit) {
-    SettingsCard(Modifier.clip(RoundedCornerShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
+    SettingsCard(Modifier.clip(continuousShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = settingsCardTitleStyle(), color = MaterialTheme.colorScheme.onSurface)

@@ -19,8 +19,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 124
-        versionName = "2.8.0-test3"
+        versionCode = 125
+        versionName = "2.8.0-test4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -185,6 +185,9 @@ dependencies {
     // 公开 API 与 1.0.2 完全一致；得「绘制不更新」修复与 Shapes 圆角采样支持。
     // 2.0.1 需 Kotlin 2.4 metadata + Compose 1.12，属工具链 overhaul，不在此版。
     implementation("io.github.kyant0:backdrop:1.0.6")
+    // 苹果连续曲率圆角（squircle）：backdrop 传递依赖同版本，但传递 impl 不暴露到编译
+    // 类路径，显式声明以供 continuousShape() 引用（Gradle 去重，不会与 backdrop 重复打包）
+    implementation("io.github.kyant0:shapes:1.2.0")
     // 启动动画接管：最短停留让品牌动画播完（Android 12+ 系统 splash）
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation(libs.androidx.lifecycle.runtime.ktx)

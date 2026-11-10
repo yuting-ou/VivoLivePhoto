@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -261,7 +260,7 @@ private fun LicenseLink(url: String, onClick: () -> Unit) {
         style = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.primary,
             textDecoration = TextDecoration.Underline),
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(continuousShape(8.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp)
     )

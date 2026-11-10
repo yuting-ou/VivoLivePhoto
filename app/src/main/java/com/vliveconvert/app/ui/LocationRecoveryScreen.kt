@@ -34,7 +34,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -320,7 +319,7 @@ fun LocationRecoveryScreen(
                     style = glassSubtitleStyle(),
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(continuousShape(8.dp))
                         .clickable(enabled = !scanning && okRows.isNotEmpty()) {
                             showOk = !showOk
                         }
@@ -338,7 +337,7 @@ fun LocationRecoveryScreen(
                         fontSize = DesignTokens.ToolRowText,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(continuousShape(8.dp))
                             .clickable {
                                 selected = if (allSelected) emptySet()
                                 else selectable.map { it.uri.toString() }.toSet()
@@ -392,7 +391,7 @@ fun LocationRecoveryScreen(
                                     fontSize = DesignTokens.ToolRowText,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(continuousShape(8.dp))
                                         .clickable { showOk = !showOk }
                                         .padding(horizontal = 8.dp, vertical = 8.dp)
                                 )
@@ -474,7 +473,7 @@ fun LocationRecoveryScreen(
                                             color = MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(continuousShape(8.dp))
                                                 .clickable { showUnknown = !showUnknown }
                                                 .padding(vertical = 8.dp)
                                         )
@@ -742,7 +741,7 @@ private fun RecoveryGridCell(
     Box(
         Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(DesignTokens.CellRadius))
+            .clip(continuousShape(DesignTokens.CellRadius))
             .clickable(enabled = selectable, onClick = onToggle)
     ) {
         Box(
@@ -754,12 +753,12 @@ private fun RecoveryGridCell(
                     scaleY = scale
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .clip(RoundedCornerShape(cornerRadius))
+                .clip(continuousShape(cornerRadius))
                 .border(
                     width = if (selected) DesignTokens.CellBorderSelected else 0.dp,
                     color = if (selected) MaterialTheme.colorScheme.primaryContainer
                     else Color.Transparent,
-                    shape = RoundedCornerShape(cornerRadius)
+                    shape = continuousShape(cornerRadius)
                 )
         ) {
             MediaThumbnail(row.uri, resolver, Modifier.fillMaxSize())
@@ -793,7 +792,7 @@ private fun RecoveryGridCell(
                 Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
-                    .clip(RoundedCornerShape(DesignTokens.CornerBadgeRadius))
+                    .clip(continuousShape(DesignTokens.CornerBadgeRadius))
                     .background(badgeBgColor.copy(alpha = 0.88f))
                     .padding(
                         horizontal = DesignTokens.CornerBadgeHPadding,

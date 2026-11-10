@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -292,7 +291,7 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                             Box(
                                 Modifier
                                     .size(width = 46.dp, height = 46.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(continuousShape(12.dp))
                             ) {
                                 MediaThumbnail(item.uri, resolver, Modifier.fillMaxSize())
                             }

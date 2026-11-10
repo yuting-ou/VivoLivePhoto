@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -375,7 +374,7 @@ fun InlineTextButton(
     modifier: Modifier = Modifier,
     background: Color? = null,
     style: TextStyle = MaterialTheme.typography.labelLarge,
-    shape: Shape = RoundedCornerShape(8.dp)
+    shape: Shape = continuousShape(8.dp)
 ) {
     // 无涟漪的紧凑按钮只能靠缩放表达"按到了"：0.96 足够可见又不跳
     val interaction = remember { MutableInteractionSource() }

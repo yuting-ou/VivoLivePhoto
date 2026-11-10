@@ -559,7 +559,7 @@ fun MainScreen(
                                 Modifier
                                     .fillMaxWidth()
                                     .height(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(continuousShape(8.dp))
                                     .minimumInteractiveComponentSize()
                                     .clickableNoRipple(onOpenSettings),
                                 verticalAlignment = Alignment.CenterVertically
@@ -638,9 +638,9 @@ private fun EmptyState(onAdd: () -> Unit) {
                     .size(width = 94.dp, height = 116.dp)
                     .offset(x = (-16).dp, y = 4.dp)
                     .graphicsLayer { rotationZ = -10f }
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(continuousShape(18.dp))
                     .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f))
-                    .border(1.dp, Color.White.copy(alpha = 0.50f), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.50f), continuousShape(18.dp))
             )
             val primary = MaterialTheme.colorScheme.primary
             Box(
@@ -651,13 +651,13 @@ private fun EmptyState(onAdd: () -> Unit) {
                     .shadow(14.dp, RoundedCornerShape(18.dp), clip = false,
                         ambientColor = primary.copy(alpha = 0.22f),
                         spotColor = primary.copy(alpha = 0.16f))
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(continuousShape(18.dp))
                     .background(Brush.linearGradient(listOf(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
                         MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.92f))))
                     .background(Brush.verticalGradient(listOf(
                         Color.White.copy(alpha = 0.32f), Color.Transparent), endY = 170f))
-                    .border(1.dp, Color.White.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.72f), continuousShape(18.dp))
             )
             // 播放钮用主题色玻璃（不是 iOS 16 那种实色方块）：
             // 高光渐变 + 白色折射描边，缩略图中央才有「能点」的视觉锚点
@@ -779,7 +779,7 @@ private fun ConvertItemRow(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(continuousShape(18.dp))
                         .background(MaterialTheme.colorScheme.error)
                         .graphicsLayer { alpha = dismissState.progress },
                     contentAlignment = Alignment.CenterEnd
@@ -838,7 +838,7 @@ private fun ConvertItemRow(
                     Box(
                         Modifier
                             .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(continuousShape(12.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
                     ) {
                         // 待转换也必须显示清晰预览：选中后要能认出是哪张
@@ -997,7 +997,7 @@ private fun ConvertItemGridCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(continuousShape(16.dp))
             .background(
                 if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
                     MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)

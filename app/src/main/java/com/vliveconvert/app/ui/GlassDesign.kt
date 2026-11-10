@@ -170,20 +170,24 @@ fun Modifier.glassWallpaper(): Modifier {
 @Composable
 fun Modifier.glassSurface(radius: Dp = 26.dp): Modifier {
     val dark = isDarkGlass()
-    val shape = RoundedCornerShape(radius)
+    val shape = continuousShape(radius)
+    // 阴影与描边用圆角矩形凸轮廓：Generic Path 会让 Compose 把阴影/描边缓存成整卡
+    // 尺寸位图，超高卡片（整页许可证）直接 OOM；18dp 模糊/1dp 描边下与 squircle 视觉
+    // 无异。真正的圆角轮廓（裁剪）仍用 continuousShape，保证 squircle 剪影。
+    val shadowShape = RoundedCornerShape(radius)
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     val fillTop = base.copy(alpha = if (dark) 0.68f else 0.60f)
     val fillBottom = base.copy(alpha = if (dark) 0.42f else 0.30f)
     val edgeTop = Color.White.copy(alpha = if (dark) 0.26f else 0.95f)
     val edgeBottom = Color.White.copy(alpha = if (dark) 0.06f else 0.26f)
     return this
-        .shadow(18.dp, shape, clip = false,
+        .shadow(18.dp, shadowShape, clip = false,
             ambientColor = Color.Black.copy(alpha = if (dark) 0.45f else 0.16f),
             spotColor = Color.Black.copy(alpha = if (dark) 0.30f else 0.12f))
         .clip(shape)
         .background(Brush.verticalGradient(listOf(fillTop, fillBottom)))
         .border(1.dp, Brush.verticalGradient(
-            listOf(edgeTop, edgeBottom, Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shape)
+            listOf(edgeTop, edgeBottom, Color.White.copy(alpha = if (dark) 0.10f else 0.55f))), shadowShape)
 }
 
 /** 底部厚度阴影：玻璃下缘压暗一点，才有「一块玻璃」的体积感 */
@@ -285,7 +289,7 @@ fun HazeGlassCard(
     }
     val hazeEnabled = hazeAvailable()
     val dark = isDarkGlass()
-    val shape = RoundedCornerShape(radius)
+    val shape = continuousShape(radius)
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     // 有真实模糊时白膜必须更薄，否则会把背景糊成一块白板
     val fillTop = base.copy(alpha = if (hazeEnabled) {
@@ -357,7 +361,7 @@ private fun LensGlassCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val dark = isDarkGlass()
-    val shape = RoundedCornerShape(radius)
+    val shape = continuousShape(radius)
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     // 玻璃中心要留出显示背景的余量；文字密集的弹窗膜更厚
     val surfaceAlpha = glassSurfaceAlpha(dark, dense, liquid)
@@ -612,7 +616,7 @@ fun GlassCard(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(radius)
+    val shape = continuousShape(radius)
     Box(modifier.glassSurface(radius)) {
         Box(Modifier.matchParentSize().glassSheen())
         Box(Modifier.matchParentSize().glassBottomShade())
@@ -786,7 +790,7 @@ fun GlassTextField(
     singleLine: Boolean = true
 ) {
     val dark = isDarkGlass()
-    val shape = RoundedCornerShape(12.dp)
+    val shape = continuousShape(12.dp)
     val hintColor = MaterialTheme.colorScheme.onSurfaceVariant
     BasicTextField(
         value = value,
@@ -845,7 +849,7 @@ fun GlassIconTile(
     // 圆角并入全局体系：磁贴 = min(12dp, 34%)，与缩略图(12dp)同心于 24dp 卡片；
     // cornerFraction >= 0.5 表示显式要圆（播放角标等圆形语义）
     val shape = if (cornerFraction >= 0.5f) CircleShape
-                else RoundedCornerShape(minOf(12.dp, size * cornerFraction))
+                else continuousShape(minOf(12.dp, size * cornerFraction))
     val top = if (tint != null) tint.copy(alpha = if (dark) 0.34f else 0.26f)
               else Color.White.copy(alpha = if (dark) 0.16f else 0.72f)
     val bottom = if (tint != null) tint.copy(alpha = if (dark) 0.12f else 0.08f)
