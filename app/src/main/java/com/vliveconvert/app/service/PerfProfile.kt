@@ -19,6 +19,10 @@ internal data class PerfSettings(
     val scanThreads: Int = 4,
     /** 手动挡：缩略图加载并发 1..8 */
     val thumbThreads: Int = 4,
+    /** 玻璃画质：标准=当前观感（默认）；流畅=去折射保模糊 */
+    val glassQuality: GlassQuality = GlassQuality.Standard,
+    /** 滚动期间临时降低玻璃采样成本（保持玻璃观感，停手即恢复），默认关 */
+    val pauseGlassOnScroll: Boolean = false,
 ) {
     companion object {
         private const val MB = 1024L * 1024L
@@ -34,7 +38,8 @@ internal data class PerfSettings(
     }
 }
 
-/** 一键预设：只填充手动挡的四个值，不改变自动/手动开关 */
+/** 一键预设的四个旋钮值。注意：构造的是全新 PerfSettings（玻璃字段回落默认）——
+ *  在既有设置上应用预设必须走 [applyPreset]，否则会静默重置显示设置。 */
 internal enum class PerfPreset(val label: String) {
     Saver("省电"),
     Balanced("均衡"),
@@ -58,6 +63,14 @@ internal enum class PerfPreset(val label: String) {
     }
 }
 
+/** 在当前设置上应用预设：只覆盖转换四旋钮，保留玻璃画质/滚动降成本等显示设置。 */
+internal fun PerfSettings.applyPreset(preset: PerfPreset): PerfSettings {
+    val p = preset.apply()
+    return copy(manual = p.manual, concurrency = p.concurrency,
+        memoryLimitMb = p.memoryLimitMb, scanThreads = p.scanThreads,
+        thumbThreads = p.thumbThreads)
+}
+
 /** 自动挡 = v2.7 行为：大堆 2 路、小堆 1 路 */
 internal fun autoConcurrency(maxMemory: Long): Int =
     if (maxMemory >= 384L * 1024 * 1024) 2 else 1
@@ -76,6 +89,17 @@ internal fun PerfSettings.effectiveScanThreads(): Int = if (!manual) 4 else scan
 
 internal fun PerfSettings.effectiveThumbThreads(): Int = if (!manual) 4 else thumbThreads.coerceIn(1, 8)
 
+/** 玻璃画质档位：只缩放光学成本，不改变「是玻璃」这一事实（绝不退化为实色）。
+ *  标准=当前观感（默认，保证零回归）；流畅=去折射保模糊（对齐上游 Low 档语义）。 */
+internal enum class GlassQuality(val label: String, val blurScale: Float, val lensScale: Float, val chromatic: Boolean) {
+    Saver("流畅", 0.6f, 0f, false),
+    Standard("标准", 1.0f, 1.0f, true);
+
+    companion object {
+        fun fromKey(k: String?): GlassQuality = entries.firstOrNull { it.name == k } ?: Standard
+    }
+}
+
 /** SharedPreferences 持久化（键带 perf_ 前缀，损坏值一律夹回合法区间） */
 internal class PerfStore(context: Context) {
 
@@ -88,7 +112,9 @@ internal class PerfStore(context: Context) {
         memoryLimitMb = prefs.getInt("perf_memory_mb", PerfSettings.defaultMemoryMb())
             .coerceIn(128, PerfSettings.memoryUpperMb()),
         scanThreads = prefs.getInt("perf_scan_threads", 4).coerceIn(1, 8),
-        thumbThreads = prefs.getInt("perf_thumb_threads", 4).coerceIn(1, 8)
+        thumbThreads = prefs.getInt("perf_thumb_threads", 4).coerceIn(1, 8),
+        glassQuality = GlassQuality.fromKey(prefs.getString("perf_glass_quality", null)),
+        pauseGlassOnScroll = prefs.getBoolean("perf_pause_glass_scroll", false)
     )
 
     fun save(s: PerfSettings) {
@@ -98,6 +124,8 @@ internal class PerfStore(context: Context) {
             .putInt("perf_memory_mb", s.memoryLimitMb.coerceIn(128, PerfSettings.memoryUpperMb()))
             .putInt("perf_scan_threads", s.scanThreads.coerceIn(1, 8))
             .putInt("perf_thumb_threads", s.thumbThreads.coerceIn(1, 8))
+            .putString("perf_glass_quality", s.glassQuality.name)
+            .putBoolean("perf_pause_glass_scroll", s.pauseGlassOnScroll)
             .apply()
     }
 }

@@ -181,6 +181,9 @@ fun MainScreen(
     var listBottomPx by remember { mutableFloatStateOf(0f) }
     var dockTopPx by remember { mutableFloatStateOf(0f) }
 
+    // 滚动降成本（opt-in，默认关）：滚动期间临时降低玻璃采样，停手即恢复，观感不丢。
+    // 滚动状态在 GlassScrollPauseScope 内读取——MainScreen 不随滚动起停重组
+    GlassScrollPauseScope(listState, gridState) {
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -605,6 +608,7 @@ fun MainScreen(
                 }
             }
         }
+    }
     }
 }
 

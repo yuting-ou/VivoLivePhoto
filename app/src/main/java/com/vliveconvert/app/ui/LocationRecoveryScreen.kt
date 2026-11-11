@@ -233,6 +233,7 @@ fun LocationRecoveryScreen(
         } catch (_: Exception) {}
     }
 
+    GlassScrollPauseScope(gridState) {
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -655,6 +656,7 @@ fun LocationRecoveryScreen(
         ) {
             Text(msg + "\n\n可点底部「导出报告」把逐张判定与修复明细回传，便于定位问题。")
         }
+    }
     }
 }
 

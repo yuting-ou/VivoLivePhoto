@@ -115,6 +115,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.vliveconvert.app.ui.CircleTriCheckbox
 import com.vliveconvert.app.ui.GlassDivider
+import com.vliveconvert.app.ui.GlassScrollPauseScope
 import com.vliveconvert.app.ui.GlossyButton
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.HazeGlassCard
@@ -315,6 +316,7 @@ fun PickerScreen(
             .map { (key, items) -> PickerSection(key, items) }
     }
 
+    GlassScrollPauseScope(gridState) {
     Box(Modifier.fillMaxSize()) {
         // 壁纸 + 网格是 Haze 的采样源；浮动导航不在源里，
         // 否则玻璃会把自己也采进背景，形成反馈
@@ -664,6 +666,7 @@ fun PickerScreen(
                 onClose = { previewIndex = null }
             )
         }
+    }
     }
 }
 

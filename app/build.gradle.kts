@@ -4,6 +4,9 @@ import java.io.File
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // 环境性闪红复跑（NATIVE 图形 zipfs/native 加载竞态）：每次 attempt 全新测试实例，
+    // 真回归连挂两次仍然红；不能在 compose rule 内重放 Statement（runTest 只允许一次）
+    id("org.gradle.test-retry") version "1.6.2"
 }
 
 android {
@@ -19,8 +22,8 @@ android {
         applicationId = "com.yutingou.yingzhongying"
         minSdk = 34
         targetSdk = 37
-        versionCode = 125
-        versionName = "2.8.0-test4"
+        versionCode = 126
+        versionName = "2.8.0-test5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 只打 arm64（vivo 真机）与 x86_64（模拟器），减少 so 体积（对齐 ZLivePhoto）
@@ -144,6 +147,10 @@ tasks.withType<Test>().configureEach {
     // 实测 3G 堆时整套从 2 分钟劣化到 13 分钟没跑完一个测试类。
     maxHeapSize = "1024m"
     forkEvery = 3
+    retry {
+        maxRetries.set(1)
+        failOnPassedAfterRetry.set(false)
+    }
     val proxyHost = providers.gradleProperty("testProxyHost").orNull
     val proxyPort = providers.gradleProperty("testProxyPort").orNull
     if (!proxyHost.isNullOrBlank() && !proxyPort.isNullOrBlank()) {

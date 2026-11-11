@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.HazeState
+import com.vliveconvert.app.service.applyPreset
 
 @Composable
 internal fun SettingsScreen(
@@ -198,7 +199,7 @@ internal fun SettingsScreen(
                         perf.manual, true,
                         { on ->
                             onPerfChange(
-                                if (on) com.vliveconvert.app.service.PerfPreset.Balanced.apply()
+                                if (on) perf.applyPreset(com.vliveconvert.app.service.PerfPreset.Balanced)
                                 else perf.copy(manual = false))
                         },
                         Modifier
@@ -243,18 +244,21 @@ internal fun SettingsScreen(
                                 // 让「省电/均衡/性能」的字左缘与下方旋钮标题左缘对齐
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    modifier = Modifier // DEBUG: offset 已移除以定位点击失效
+                                    modifier = Modifier.offset(x = (-10).dp)
                                 ) {
                                     val view = LocalView.current
                                     com.vliveconvert.app.service.PerfPreset.entries.forEach { p ->
                                         InlineTextButton(
                                             text = p.label,
                                             contentColor = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.semantics {
+                                                contentDescription = "转换预设${p.label}"
+                                            },
                                             onClick = {
                                                 // 预设是「一键落定」：CONFIRM 触觉 + 旋钮弹簧滑移到新值
                                                 view.performHapticFeedback(
                                                     HapticFeedbackConstants.CONFIRM)
-                                                onPerfChange(p.apply())
+                                                onPerfChange(perf.applyPreset(p))
                                             },
                                             style = TextStyle(fontSize = 14.sp)
                                         )
@@ -292,6 +296,63 @@ internal fun SettingsScreen(
                                 )
                             }
                         }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    GlassDivider()
+                    Spacer(Modifier.height(12.dp))
+                    Text("玻璃画质", style = settingsCardTitleStyle(),
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(2.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.offset(x = (-10).dp)
+                    ) {
+                        val view = LocalView.current
+                        com.vliveconvert.app.service.GlassQuality.entries.forEach { q ->
+                            InlineTextButton(
+                                text = q.label,
+                                contentColor = if (perf.glassQuality == q)
+                                    MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "玻璃画质${q.label}"
+                                },
+                                onClick = {
+                                    // 与转换预设同一套「一键落定」反馈
+                                    view.performHapticFeedback(
+                                        HapticFeedbackConstants.CONFIRM)
+                                    onPerfChange(perf.copy(glassQuality = q))
+                                },
+                                style = TextStyle(fontSize = 14.sp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text("只降光学成本，不改变「是玻璃」；标准=当前观感。",
+                        style = settingsDescriptionStyle(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(12.dp))
+                    // 与本页其它开关同一约定：点标签整行即切换（toggleable 挂 Row，
+                    // Switch 只作显示，避免双触发）
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = perf.pauseGlassOnScroll,
+                                role = Role.Switch,
+                                onValueChange = { onPerfChange(perf.copy(pauseGlassOnScroll = it)) }),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("滚动时降低玻璃成本", style = settingsCardTitleStyle(),
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Text("滚动/惯性期间临时降采样，停手即恢复", style = settingsDescriptionStyle(),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = perf.pauseGlassOnScroll,
+                            onCheckedChange = null
+                        )
                     }
                 }
                 SettingsSection("外观")

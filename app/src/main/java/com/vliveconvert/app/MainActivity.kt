@@ -23,7 +23,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
@@ -129,6 +132,7 @@ import com.vliveconvert.app.ui.LocationRecoveryScreen
 import com.vliveconvert.app.ui.GlassIndeterminateBar
 import com.vliveconvert.app.ui.GlassTextField
 import com.vliveconvert.app.ui.LocalGlassBackdrop
+import com.vliveconvert.app.ui.LocalGlassQuality
 import com.vliveconvert.app.ui.LocalGlassSourceEnabled
 import com.vliveconvert.app.ui.LocalReduceMotion
 import com.vliveconvert.app.ui.MainScreen
@@ -222,6 +226,51 @@ internal fun backRevealScreen(
  *  系统回程手势的 progress 是线性的，直接用会觉得"跟手但生硬"；
  *  官方 platform-samples 用 PathInterpolator(0,0,0,1) 缓出——起点跟手、收尾加速入位 */
 internal val PredictiveEase = CubicBezierEasing(0f, 0f, 0f, 1f)
+
+/** 冷启动交棒的内容入场缩放（纯函数可单测）。减少动效时不缩放，只留淡入。 */
+internal fun revealScale(progress: Float, reduceMotion: Boolean): Float =
+    if (reduceMotion) 1f else 0.985f + 0.015f * progress
+
+/** 屏幕切换转场（纯函数可单测）。
+ *  手势提交的弹层：揭底层已经在原地，立即换层——若再滑一次 300ms，
+ *  同一页面会在自己身上重播入场（双重运动）。
+ *  v1.8.3：匀速 tween → 弹簧（苹果味的"到位"感），位移弹簧 + 短淡入淡出；
+ *  返回：预测性收场编排——旧页缩出+淡出+向手势侧位移，新页自 0.94 缩放就位。
+ *  转场是窗口内布局动画，任何 ROM 上都必然渲染（v1.8.6 诊断确认自驱动预动画
+ *  在 OriginOS 上被系统窗口动画接管而不可见）。 */
+internal fun screenContentTransform(
+    reduceMotion: Boolean,
+    predictiveCommit: Boolean,
+    returning: Boolean
+): ContentTransform {
+    val move = spring<IntOffset>(dampingRatio = 0.9f, stiffness = 520f)
+    val fadeInSpec = tween<Float>(180, easing = com.vliveconvert.app.ui.EaseOutStrong)
+    val fadeOutSpec = tween<Float>(130)
+    return if (predictiveCommit) {
+        EnterTransition.None togetherWith ExitTransition.None
+    } else if (reduceMotion) {
+        // 减少动效：去掉全部位移/缩放，只留短交叉淡入淡出保住「换页了」的感知；
+        // 容器尺寸也直切（默认 SizeTransform 是弹簧，会在纯淡入下继续动尺寸并裁剪）
+        ContentTransform(
+            targetContentEnter = fadeIn(tween(120)),
+            initialContentExit = fadeOut(tween(120)),
+            sizeTransform = SizeTransform(clip = false) { _, _ -> snap() }
+        )
+    } else if (returning) {
+        (scaleIn(initialScale = 0.94f,
+            animationSpec = tween(240, easing = PredictiveEase)) +
+                fadeIn(tween(240))) togetherWith
+                (scaleOut(targetScale = 0.86f,
+                    animationSpec = tween(220, easing = PredictiveEase)) +
+                        fadeOut(tween(200)) +
+                        slideOutHorizontally(tween(220)) { it / 5 })
+    } else {
+        (slideInHorizontally(move) { it } +
+                fadeIn(fadeInSpec)) togetherWith
+                (slideOutHorizontally(move) { -it / 4 } +
+                        fadeOut(fadeOutSpec))
+    }
+}
 
 /**
  * 修复时间的收尾汇总。半途警告必须聚合后一次说清——此前逐项覆盖 fixStatus，
@@ -906,7 +955,12 @@ class MainActivity : ComponentActivity() {
                 val appHazeState = rememberGlassHazeState()
                 // 折射采样层：页面内容录进 GraphicsLayer，所有玻璃卡按自身位置取背景做 SDF 折射
                 val appGlassBackdrop = rememberLayerBackdrop()
-                CompositionLocalProvider(LocalGlassBackdrop provides appGlassBackdrop) {
+                // derivedStateOf：滑杆每 tick 都改 perf，但只有档位真变才失效玻璃子树
+                val glassQuality by remember { derivedStateOf { perf.glassQuality } }
+                CompositionLocalProvider(
+                    LocalGlassBackdrop provides appGlassBackdrop,
+                    LocalGlassQuality provides glassQuality
+                ) {
                 // 前台期间批次结束、攒下待确认删除的原图时立即拉起回收站弹窗
                 // （onStart 只在前后台切换时触发，用户停留前台等完成时靠这里响应；
                 //   仅前台拉起——后台拉系统弹窗可能直接失败、被误判为用户取消）
@@ -1051,6 +1105,7 @@ class MainActivity : ComponentActivity() {
                 // 冷启动交棒：闪屏淡出放大的同一时刻，内容从 0.985 缩放淡入到位。
                 // 兜底 1.4s 自动放行——退场回调万一被 ROM 吞掉，内容也不能一直隐形
                 val contentReveal = remember { Animatable(0f) }
+                val revealReduceMotion = LocalReduceMotion.current
                 LaunchedEffect(Unit) {
                     snapshotFlow { contentRevealStarted }
                         .filter { it }
@@ -1069,7 +1124,7 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .graphicsLayer {
                             alpha = contentReveal.value
-                            val sc = 0.985f + 0.015f * contentReveal.value
+                            val sc = revealScale(contentReveal.value, revealReduceMotion)
                             scaleX = sc; scaleY = sc
                         }
                         .background(MaterialTheme.colorScheme.background)
@@ -1350,38 +1405,15 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                     ) {
+                        val reduceMotion = LocalReduceMotion.current
                         AnimatedContent(
                             targetState = targetScreen,
                             transitionSpec = {
-                                // 手势提交的弹层：揭底层已经在原地，立即换层——
-                                // 若再滑一次 300ms，同一页面会在自己身上重播入场（双重运动）
-                                //
-                                // v1.8.3：匀速 tween → 弹簧（苹果味的"到位"感），
-                                // 位移弹簧 + 短淡入淡出；稳态收敛 ~200ms
-                                val move = spring<IntOffset>(
-                                    dampingRatio = 0.9f, stiffness = 520f)
-                                val fadeInSpec = tween<Float>(180, easing = com.vliveconvert.app.ui.EaseOutStrong)
-                                val fadeOutSpec = tween<Float>(130)
-                                if (predictiveCommitArmed) {
-                                    EnterTransition.None togetherWith ExitTransition.None
-                                } else if (targetState == Screen.Main && initialState != Screen.Main) {
-                                    // 返回：预测性收场编排——旧页缩出+淡出+向手势侧位移，
-                                    // 新页自 0.94 缩放就位。转场是窗口内布局动画，
-                                    // 任何 ROM 上都必然渲染（v1.8.6 诊断确认自驱动预动画
-                                    // 在 OriginOS 上被系统窗口动画接管而不可见）
-                                    (scaleIn(initialScale = 0.94f,
-                                        animationSpec = tween(240, easing = PredictiveEase)) +
-                                            fadeIn(tween(240))) togetherWith
-                                            (scaleOut(targetScale = 0.86f,
-                                                animationSpec = tween(220, easing = PredictiveEase)) +
-                                                    fadeOut(tween(200)) +
-                                                    slideOutHorizontally(tween(220)) { it / 5 })
-                                } else {
-                                    (slideInHorizontally(move) { it } +
-                                            fadeIn(fadeInSpec)) togetherWith
-                                            (slideOutHorizontally(move) { -it / 4 } +
-                                                    fadeOut(fadeOutSpec))
-                                }
+                                screenContentTransform(
+                                    reduceMotion = reduceMotion,
+                                    predictiveCommit = predictiveCommitArmed,
+                                    returning = targetState == Screen.Main && initialState != Screen.Main
+                                )
                             },
                             label = "screenTransition"
                         ) { screen ->

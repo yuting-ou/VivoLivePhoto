@@ -5,6 +5,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
@@ -83,6 +86,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import android.os.Build
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -248,6 +252,39 @@ val LocalGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
  */
 val LocalGlassSourceEnabled = staticCompositionLocalOf { true }
 
+/** 玻璃画质档位（性能设置驱动）：只缩放光学成本，默认标准=当前观感，零回归。
+ *  compositionLocalOf：档位变化只失效真正读它的玻璃卡，不波及整棵子树。 */
+internal val LocalGlassQuality = compositionLocalOf { com.vliveconvert.app.service.GlassQuality.Standard }
+
+/** 滚动期间临时降成本信号（已由设置开关 gating）：停手即恢复，玻璃观感不丢。
+ *  compositionLocalOf：滚动起停是高频信号，static 版会让 provider 下整棵子树重组。 */
+val LocalGlassScrollPaused = compositionLocalOf { false }
+
+/** 滚动降成本作用域：任一滚动状态进行中即降档（设置键统一在此读取，各屏共用）。
+ *  滚动状态的读取限制在本函数内——外层重页面（主列表/选择器）不随滚动起停重组。 */
+@Composable
+fun GlassScrollPauseScope(
+    vararg scrollStates: ScrollableState,
+    content: @Composable () -> Unit
+) {
+    val enabled = LocalContext.current
+        .getSharedPreferences("vliveconvert", 0)
+        .getBoolean("perf_pause_glass_scroll", false)
+    val paused = enabled && scrollStates.any { it.isScrollInProgress }
+    CompositionLocalProvider(LocalGlassScrollPaused provides paused, content = content)
+}
+
+/** 当前光学成本系数：blur/lens 缩放 + 是否色散。默认(标准+不滚动)=(1,1,true)。 */
+@Composable
+internal fun glassOptics(): Triple<Float, Float, Boolean> {
+    val q = LocalGlassQuality.current
+    val paused = LocalGlassScrollPaused.current
+    val blur = q.blurScale * (if (paused) 0.5f else 1f)
+    val lens = q.lensScale * (if (paused) 0.8f else 1f)
+    val chromatic = q.chromatic && !paused
+    return Triple(blur, lens, chromatic)
+}
+
 /** 玻璃面底色透明度（稳态四种形态，不要在转场里改它） */
 internal fun glassSurfaceAlpha(dark: Boolean, dense: Boolean, liquid: Boolean): Float = when {
     dense && dark -> 0.78f
@@ -325,8 +362,9 @@ fun HazeGlassCard(
             .clip(shape)
     ) {
         if (hazeEnabled) {
+            val (hazeBlurScale, _, _) = glassOptics()
             Box(Modifier.matchParentSize().hazeEffect(hazeState) {
-                blurRadius = if (dense) 40.dp else 24.dp
+                blurRadius = (if (dense) 40.dp else 24.dp) * hazeBlurScale
                 noiseFactor = 0.05f
                 tints = listOf(HazeTint(base.copy(alpha = if (dark) 0.20f else 0.06f)))
                 fallbackTint = HazeTint(base.copy(alpha = if (dark) 0.72f else 0.62f))
@@ -365,22 +403,24 @@ private fun LensGlassCard(
     val base = if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
     // 玻璃中心要留出显示背景的余量；文字密集的弹窗膜更厚
     val surfaceAlpha = glassSurfaceAlpha(dark, dense, liquid)
+    // 画质档位/滚动降成本：只缩放光学强度，默认(1,1)与旧观感完全一致
+    val (blurScale, lensScale, chromaticOn) = glassOptics()
     // 液态 Dock：边缘透镜更深（折射高度/位移更大）、更清澈（模糊更少）、高光更锐
     val blurRadius = when {
         dense -> 18.dp
         liquid -> 14.dp
         else -> 18.dp
-    }
+    } * blurScale
     val refractionHeight = when {
         dense -> 24.dp
         liquid -> 28.dp
         else -> 22.dp
-    }
+    } * lensScale
     val refractionAmount = when {
         dense -> 44.dp
         liquid -> 52.dp
         else -> 40.dp
-    }
+    } * lensScale
     val highlight = if (dense) {
         Highlight.Plain.copy(width = 0.8.dp,
             alpha = if (dark) 0.28f else 0.36f)
@@ -406,12 +446,15 @@ private fun LensGlassCard(
             effects = {
                 vibrancy()
                 blur(blurRadius.toPx())
-                lens(
-                    refractionHeight = refractionHeight.toPx(),
-                    refractionAmount = refractionAmount.toPx(),
-                    depthEffect = true,
-                    chromaticAberration = !dense
-                )
+                // lensScale=0（流畅档）整体跳过折射：零高度 SDF 无意义且可能产生 NaN
+                if (lensScale > 0f) {
+                    lens(
+                        refractionHeight = refractionHeight.toPx(),
+                        refractionAmount = refractionAmount.toPx(),
+                        depthEffect = true,
+                        chromaticAberration = chromaticOn && !dense
+                    )
+                }
                 if (dense && !dark) {
                     colorControls(brightness = 0.06f, saturation = 1.15f)
                 }

@@ -19,7 +19,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
-/** 主队列 列表/网格 双模式对比截图（无断言，供人工过目；产物 build/ui-shots/）。 */
+/** 主队列 列表/网格 双模式对比截图（无断言，供人工过目；产物 build/ui-shots/）。
+ *  NATIVE 图形的 zipfs/native 加载竞态在全量 fork 顺序下偶发、单跑全绿——
+ *  环境性闪红由 Gradle test-retry 插件复跑一次兜底（每次 attempt 重建 rule，
+ *  不能在 rule 内重放 Statement：compose rule 的 runTest 只允许调一次）。 */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h792dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)

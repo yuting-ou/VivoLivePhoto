@@ -104,6 +104,7 @@ fun FixTimeScreen(
     var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
+    val gridState = rememberLazyGridState()
 
     // 修复完成后清空选择
     LaunchedEffect(selectionReset) {
@@ -157,6 +158,7 @@ fun FixTimeScreen(
         }
     }
 
+    GlassScrollPauseScope(gridState) {
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -272,7 +274,7 @@ fun FixTimeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyVerticalGrid(
-                    state = rememberLazyGridState(),
+                    state = gridState,
                     // 2 列（而非 3 列）：每格要放「文件名 + 现 + 目标」三行小字，
                     // 3 列时格宽仅约 136dp、文字被迫压到 9sp，偏小；2 列下约 204dp、可读性明显更好
                     columns = GridCells.Fixed(2),
@@ -378,6 +380,7 @@ fun FixTimeScreen(
                 )
             }
         }
+    }
     }
 }
 

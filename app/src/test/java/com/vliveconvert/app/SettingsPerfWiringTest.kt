@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -79,17 +80,24 @@ class SettingsPerfWiringTest {
 
     @Test
     fun presetTapEmitsPresetValues() {
-        setContent(PerfPreset.Balanced.apply().copy(manual = true))
-        scrollTo("省电")
-        compose.onNodeWithText("省电").performClick()
+        setContent(PerfPreset.Balanced.apply().copy(
+            manual = true,
+            glassQuality = com.vliveconvert.app.service.GlassQuality.Saver,
+            pauseGlassOnScroll = true))
+        // 用读屏描述精确锁定预设按钮节点（文本+描述双通道，不依赖文本唯一性）
+        scrollTo("转换并发")
+        compose.onNodeWithContentDescription("转换预设省电").performClick()
         compose.waitForIdle()
         val saver = changes.single()
         assertTrue(saver.manual)
         assertEquals(1, saver.concurrency)
         assertEquals(2, saver.scanThreads)
         assertEquals(2, saver.thumbThreads)
+        // 预设只动转换四旋钮：玻璃显示设置必须原样保留（防静默重置回归）
+        assertEquals(com.vliveconvert.app.service.GlassQuality.Saver, saver.glassQuality)
+        assertEquals(true, saver.pauseGlassOnScroll)
 
-        scrollTo("省电")
+        scrollTo("转换并发")
         // 「性能」同时命中分区标题与按钮，按钮才有 OnClick 动作
         compose.onNode(hasText("性能") and hasClickAction()).performClick()
         compose.waitForIdle()
