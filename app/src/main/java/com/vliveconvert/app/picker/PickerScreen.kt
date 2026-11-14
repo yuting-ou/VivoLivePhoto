@@ -7,6 +7,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.tween
@@ -54,11 +55,12 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -109,6 +111,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -131,6 +134,8 @@ import dev.chrisbanes.haze.HazeState
 import com.vliveconvert.app.ui.theme.DesignTokens
 import com.vliveconvert.app.ui.MediaThumbnail
 import com.vliveconvert.app.ui.clickableNoRipple
+import com.vliveconvert.app.ui.continuousShape
+import com.vliveconvert.app.ui.LocalReduceMotion
 import com.vliveconvert.app.ui.dateKey
 import com.vliveconvert.app.ui.dateLabel
 import kotlinx.coroutines.CoroutineScope
@@ -234,6 +239,8 @@ fun PickerScreen(
     var dateDays by remember(bucketId) { mutableIntStateOf(0) }
     var globalResults by remember(bucketId) { mutableStateOf<List<MediaItem>?>(null) }
     var globalSearching by remember(bucketId) { mutableStateOf(false) }
+    /** 全库搜索失败不冒充「没有匹配」：独立错误位，空态文案随之区分 */
+    var globalSearchError by remember(bucketId) { mutableStateOf(false) }
     val localContext = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -246,16 +253,26 @@ fun PickerScreen(
         if (!searchScopeAll || q.isEmpty()) {
             globalResults = null
             globalSearching = false
+            globalSearchError = false
             return@LaunchedEffect
         }
         delay(400) // 去抖：8.5k 全库投影 + 配对校验不在每次按键都跑
         globalSearching = true
-        val found = withContext(Dispatchers.IO) {
-            searchRepo.searchImages(q, dateDays)
-                .filter { isDualLivePhotoPath(it.path) }
+        try {
+            val found = withContext(Dispatchers.IO) {
+                searchRepo.searchImages(q, dateDays)
+                    .filter { isDualLivePhotoPath(it.path) }
+            }
+            globalResults = found
+            globalSearchError = false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            globalResults = null
+            globalSearchError = true
+        } finally {
+            globalSearching = false
         }
-        globalResults = found
-        globalSearching = false
     }
 
     val globalMode = searchScopeAll && searchQuery.isNotBlank()
@@ -333,11 +350,56 @@ fun PickerScreen(
                     .navigationBarsPadding()
             ) {
                 when {
-                    results == null -> Box(
+                    results == null -> Column(
                         Modifier.fillMaxSize().padding(top = headerHeight),
-                        contentAlignment = Alignment.Center
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("没有可用相册", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            Icons.Filled.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("没有可用相册", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text("返回后重新进入选择器重试；若反复出现，请检查存储权限是否完整",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    state?.error != null && !running && !globalMode -> Column(
+                        Modifier.fillMaxSize()
+                            .padding(top = headerHeight + 14.dp, bottom = 48.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("扫描相册失败", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text(state?.error ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            "重新扫描",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(continuousShape(8.dp))
+                                .clickable {
+                                    bucketId?.let { scanner.retry(it, scannerScope) }
+                                }
+                                .padding(horizontal = 24.dp, vertical = 12.dp)
+                        )
                     }
                     showsAlbumEmptyState(results.isEmpty(), running, globalMode) -> Column(
                         Modifier.fillMaxSize()
@@ -372,12 +434,17 @@ fun PickerScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(12.dp))
-                        Text("没有匹配的照片", style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            if (globalSearchError) "全库搜索失败" else "没有匹配的照片",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(Modifier.height(4.dp))
-                        Text("换个文件名关键词试试",
+                        Text(
+                            if (globalSearchError) "请重试或换个文件名关键词" else "换个文件名关键词试试",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     else -> AlbumGridPage(
                         sections = sections,
@@ -502,12 +569,15 @@ fun PickerScreen(
                         onValueChange = { searchQuery = it },
                         placeholder = "搜索文件名",
                         singleLine = true,
+                        contentDescription = "搜索文件名",
+                        imeAction = ImeAction.Search,
+                        keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
                         modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                     )
                     Spacer(Modifier.width(8.dp))
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(continuousShape(8.dp))
                             .heightIn(min = 48.dp)
                             .clickableNoRipple(onClick = { onlyUnconverted = !onlyUnconverted })
                             .padding(horizontal = 4.dp),
@@ -570,7 +640,7 @@ fun PickerScreen(
                     // 文字与圆圈都算作点击目标：只让圆圈可点会让人误以为点了没反应
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(continuousShape(8.dp))
                             .clickableNoRipple(onClick = { if (visible.isNotEmpty()) toggleGroup(visible) }),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -708,9 +778,10 @@ private fun AlbumSheet(
                         color = MaterialTheme.colorScheme.onSurface),
                     modifier = Modifier.weight(1f)
                 )
-                GlassIconTile(size = 28.dp, onClick = onDismiss) {
+                GlassIconTile(size = 28.dp, onClick = onDismiss,
+                    contentDescription = "关闭") {
                     Icon(
-                        Icons.Filled.Close, contentDescription = "关闭",
+                        Icons.Filled.Close, contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp)
                     )
@@ -747,14 +818,14 @@ private fun AlbumSheetRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(continuousShape(12.dp))
             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                         else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))) {
+        Box(Modifier.size(48.dp).clip(continuousShape(12.dp))) {
             val coverUri = android.net.Uri.parse(
                 android.provider.MediaStore.Images.Media.getContentUri(
                     android.provider.MediaStore.VOLUME_EXTERNAL).toString() + "/${album.coverId}"
@@ -861,7 +932,7 @@ private fun AlbumGridPage(
 private fun PickerChip(text: String, active: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(continuousShape(8.dp))
             .background(
                 if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 else Color.Transparent
@@ -927,7 +998,7 @@ private fun AlbumChip(
     val resolver = LocalContext.current.contentResolver
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = continuousShape(12.dp),
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
@@ -941,7 +1012,7 @@ private fun AlbumChip(
             Box(
                 Modifier
                     .size(36.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(continuousShape(12.dp))
             ) {
                 val coverUri = android.net.Uri.parse(
                     android.provider.MediaStore.Images.Media.getContentUri(
@@ -980,12 +1051,25 @@ private fun GridCell(
     onPreview: () -> Unit
 ) {
     val resolver = LocalContext.current.contentResolver
+    val reduceMotion = LocalReduceMotion.current
     val transition = updateTransition(selected, label = "cell")
 
-    // 选中时以几何中心为定点缩小
-    val scale by transition.animateFloat(label = "scale") { if (it) DesignTokens.CellScaleSelected else 1f }
+    // 选中时以几何中心为定点缩小；减少动效时直切到位（颜色过渡保留）
+    val scale by transition.animateFloat(
+        label = "scale",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) { if (it) DesignTokens.CellScaleSelected else 1f }
     // 圆角：未选 6dp、选中 16dp；以 0..1 分数动画映射 Dp
-    val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
+    val cornerFraction by transition.animateFloat(
+        label = "cornerF",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) { if (it) 1f else 0f }
     val cornerRadius = lerp(DesignTokens.CellRadius, DesignTokens.CellRadiusSelected, cornerFraction)
 
     // 徽章背景色：透明→primary（颜色平滑过渡）
@@ -996,7 +1080,8 @@ private fun GridCell(
     // 徽章以几何中心为基准的弹簧缩放
     val badgeScale by animateFloatAsState(
         targetValue = if (selected) 1f else 0.85f,
-        animationSpec = spring(
+        animationSpec = if (reduceMotion) snap()
+        else spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
@@ -1006,7 +1091,7 @@ private fun GridCell(
     Box(
         Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(continuousShape(12.dp))
             .clickable(onClick = onToggle)
     ) {
         // 内层图片：中心缩放 + 圆角/边框动画
@@ -1019,11 +1104,11 @@ private fun GridCell(
                     scaleY = scale
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .clip(RoundedCornerShape(cornerRadius))
+                .clip(continuousShape(cornerRadius))
                 .border(
                     width = if (selected) DesignTokens.CellBorderSelected else 0.dp,
                     color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    shape = RoundedCornerShape(cornerRadius)
+                    shape = continuousShape(cornerRadius)
                 )
         ) {
             MediaThumbnail(item.uri, resolver, Modifier.fillMaxSize())
@@ -1045,7 +1130,7 @@ private fun GridCell(
                 Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(continuousShape(6.dp))
                     .background(
                         if (added) MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
                         else Color.Black.copy(alpha = 0.55f)

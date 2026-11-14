@@ -78,6 +78,8 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
     var scanning by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableStateOf(0 to 0) }
     var candidates by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    /** 扫描失败不冒充空态：独立错误位，带重试入口 */
+    var scanError by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var fixing by remember { mutableStateOf(false) }
     var fixProgress by remember { mutableStateOf(0f) }
@@ -91,25 +93,29 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
         candidates = emptyList()
         selected = emptySet()
         summary = null
+        scanError = null
         scope.launch(Dispatchers.IO) {
-            val all = MediaRepo(context.contentResolver).queryAllImages()
-                .filter { it.path.lowercase().contains("/dcim/camera/") }
-            val accepted = mutableListOf<MediaItem>()
-            var done = 0
-            for (item in all) {
-                done++
-                val mp4 = VivoDual.siblingMp4(item.path)
-                if (mp4 != null && File(mp4).length() > 8L &&
-                    VivoDual.isBrokenDualFile(item.path)
-                ) accepted.add(item)
-                if (done % 200 == 0 || done == all.size) {
-                    val d = done
-                    withContext(Dispatchers.Main) { scanProgress = d to all.size }
+            try {
+                val all = MediaRepo(context.contentResolver).queryAllImages()
+                    .filter { it.path.lowercase().contains("/dcim/camera/") }
+                val accepted = mutableListOf<MediaItem>()
+                var done = 0
+                for (item in all) {
+                    done++
+                    val mp4 = VivoDual.siblingMp4(item.path)
+                    if (mp4 != null && File(mp4).length() > 8L &&
+                        VivoDual.isBrokenDualFile(item.path)
+                    ) accepted.add(item)
+                    if (done % 200 == 0 || done == all.size) {
+                        val d = done
+                        withContext(Dispatchers.Main) { scanProgress = d to all.size }
+                    }
                 }
-            }
-            withContext(Dispatchers.Main) {
-                candidates = accepted
-                scanning = false
+                withContext(Dispatchers.Main) { candidates = accepted }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { scanError = e.message ?: "扫描相册失败" }
+            } finally {
+                withContext(Dispatchers.Main) { scanning = false }
             }
         }
     }
@@ -181,7 +187,8 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                .padding(start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin,
+                    top = DesignTokens.TitleTop, bottom = DesignTokens.TitleBottom),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (fixing) {
@@ -234,6 +241,7 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 Text(
                     when {
                         scanning -> "扫描中 ${scanProgress.first}/${scanProgress.second}"
+                        scanError != null -> "扫描失败"
                         fixing -> "修复中…"
                         else -> "发现 ${candidates.size} 对破损实况"
                     },
@@ -263,7 +271,16 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
             }
 
             Spacer(Modifier.height(10.dp))
-            if (!scanning && candidates.isEmpty()) {
+            if (!scanning && scanError != null) {
+                GlassCard(radius = 24.dp, contentPadding = PaddingValues(16.dp)) {
+                    Text(
+                        "扫描相册失败：$scanError。\n\n请点底部「重新扫描」重试；若反复失败，" +
+                            "请检查存储权限是否完整（设置 → 应用权限）。",
+                        style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else if (!scanning && candidates.isEmpty()) {
                 GlassCard(radius = 24.dp, contentPadding = PaddingValues(16.dp)) {
                     Text(
                         "没有发现破损实况。\n\n只有「糊 JPG + 同名 MP4」的成对文件会出现在这里；" +
@@ -334,7 +351,7 @@ fun BrokenRepairScreen(onBack: () -> Unit, hazeState: HazeState = rememberGlassH
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .fillMaxWidth(),
             radius = 28.dp,
-            contentPadding = PaddingValues(10.dp)
+            contentPadding = PaddingValues(DesignTokens.DockPadding)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 GlassOutlineButton(

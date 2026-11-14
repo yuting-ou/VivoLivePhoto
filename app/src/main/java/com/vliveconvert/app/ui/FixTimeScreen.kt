@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -36,9 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -171,7 +170,8 @@ fun FixTimeScreen(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                .padding(start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin,
+                    top = DesignTokens.TitleTop, bottom = DesignTokens.TitleBottom),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlassIconButton(
@@ -356,7 +356,7 @@ fun FixTimeScreen(
                 hazeState = hazeState,
                 modifier = Modifier.fillMaxWidth(),
                 radius = 28.dp,
-                contentPadding = PaddingValues(10.dp)
+                contentPadding = PaddingValues(DesignTokens.DockPadding)
             ) {
                 if (isFixing) {
                     GlassProgressBar(
@@ -388,18 +388,20 @@ fun FixTimeScreen(
 private fun AlbumChip(album: AlbumInfo, selected: Boolean, onClick: () -> Unit) {
     val shape = CircleShape
     val primary = MaterialTheme.colorScheme.primary
+    // 未选中底/描边随玻璃明暗：深色下白色 0.72 渐变是刺眼亮胶囊（玻璃组件统一的双档 alpha）
+    val dark = isDarkGlass()
     val fill = if (selected) {
         Brush.verticalGradient(listOf(primary.copy(alpha = 0.28f), primary.copy(alpha = 0.12f)))
     } else {
-        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.72f),
-            Color.White.copy(alpha = 0.34f)))
+        Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) 0.16f else 0.72f),
+            Color.White.copy(alpha = if (dark) 0.07f else 0.34f)))
     }
     Box(
         Modifier
             .height(48.dp)
             .clip(shape)
             .background(fill)
-            .border(1.dp, Color.White.copy(alpha = 0.65f), shape)
+            .border(1.dp, Color.White.copy(alpha = if (dark) 0.28f else 0.65f), shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
@@ -418,6 +420,9 @@ private fun AlbumChip(album: AlbumInfo, selected: Boolean, onClick: () -> Unit) 
 /** 目标「拍摄时间」：文件名内嵌时间 → 拍摄时间；两者都没有返回 0 */
 private fun targetTime(item: MediaItem): Long =
     PhotoTime.parseFromName(item.name) ?: (if (item.dateTaken > 0) item.dateTaken else 0L)
+
+/** 遮罩上警示色（= DarkStatusColors.warning）：黑遮罩不随主题，警示文字也不随主题 */
+private val OnScrimWarning = Color(0xFFFFD08A)
 
 /** 底部显示目标时间 */
 private fun targetTimeText(item: MediaItem): String {
@@ -450,9 +455,22 @@ private fun FixCell(
     onToggle: () -> Unit
 ) {
     val resolver = LocalContext.current.contentResolver
+    val reduceMotion = LocalReduceMotion.current
     val transition = updateTransition(selected, label = "fixCell")
-    val scale by transition.animateFloat(label = "scale") { if (it) 0.88f else 1f }
-    val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
+    val scale by transition.animateFloat(
+        label = "scale",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) { if (it) 0.88f else 1f }
+    val cornerFraction by transition.animateFloat(
+        label = "cornerF",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) { if (it) 1f else 0f }
     val cornerRadius = lerp(12.dp, 16.dp, cornerFraction)
     val badgeBg by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary
@@ -461,7 +479,8 @@ private fun FixCell(
     )
     val badgeScale by animateFloatAsState(
         targetValue = if (selected) 1f else 0.85f,
-        animationSpec = spring(
+        animationSpec = if (reduceMotion) snap()
+        else spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
@@ -523,7 +542,9 @@ private fun FixCell(
                 )
                 Text(
                     "→ $targetText",
-                    color = if (targetText == "无时间") Color(0xFFFFCDD2) else Color.White,
+                    // 徽章压在固定黑遮罩上（不随主题），主题化的 error/statusColors 在浅色下会不可读；
+                    // 取深色档警告色作「遮罩上警示」的固定值，与全局警告语言同族
+                    color = if (targetText == "无时间") OnScrimWarning else Color.White,
                     fontSize = 10.sp,
                     maxLines = 1
                 )

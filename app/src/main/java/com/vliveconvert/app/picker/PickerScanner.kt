@@ -69,6 +69,8 @@ class PickerScanner(
         @Volatile var running = false
         /** 本次会话内已完成全量扫描（关闭选择器前不再触发重扫） */
         @Volatile var completed = false
+        /** 扫描失败原因（非空 = 本次会话失败）：UI 据此显示失败态而非冒充空态 */
+        @Volatile var error: String? = null
         /**
          * 本相册唯一的扫描 job：覆盖 reset → diff → workers 全流程。
          * workers 作为它的子协程启动，cancel 它即可连带取消所有扫描线程。
@@ -91,6 +93,7 @@ class PickerScanner(
             // 上一次扫描被取消时不会走到收尾分支，running 会残留为 true——
             // 若不在此复位，切回后进度条会一直显示「扫描中」
             running = false
+            error = null
         }
     }
 
@@ -119,34 +122,54 @@ class PickerScanner(
         st.job = scope.launch(Dispatchers.IO) {
             val self = currentCoroutineContext()[Job]
             // SnapshotStateList 的 clear 必须在 Main 线程（与网格迭代并发会 CME 崩溃）
-            withContext(Dispatchers.Main) { st.resetProgress() }
-            if (!isActive) return@launch
-            val hasWork = diffRefresh(st, bucketId)
-            if (hasWork) {
-                st.running = true
-                // workers 作为本 job 的子协程启动，随父协程取消而终止
-                val threads = scanThreadsProvider().coerceIn(1, 8)
-                val workers = (1..threads).map {
-                    launch { scanWorker(st) }
+            try {
+                withContext(Dispatchers.Main) { st.resetProgress() }
+                if (!isActive) return@launch
+                val hasWork = diffRefresh(st, bucketId)
+                if (hasWork) {
+                    st.running = true
+                    // workers 作为本 job 的子协程启动，随父协程取消而终止
+                    val threads = scanThreadsProvider().coerceIn(1, 8)
+                    val workers = (1..threads).map {
+                        launch { scanWorker(st) }
+                    }
+                    workers.forEach { it.join() }
                 }
-                workers.forEach { it.join() }
-            }
-            // 收敛点（必须无条件到达）：空相册 / 查询无结果时若直接跳过，
-            // UI 的完成轮询（每 200ms）永不终止 → 空转耗电，且进度条永久停在「扫描中」。
-            // 先置 completed 再清 running，避免「已读到 running=true、随后读到 completed=true」
-            // 的撕裂读把 spinner 锁死（UI 侧同时按 running && !completed 判定，双保险）。
-            // 身份守卫：join() 之后到此处没有挂起点，被 cancel 的旧 job 仍可能执行到这里；
-            // 若它已被新 job 取代（st.job 变了），就绝不能替新扫描写下「已完成」。
-            if (st.job === self) {
-                st.completed = true
-                st.running = false
-                // 落盘本次判定（Main 取快照 → IO 写；失败静默）
-                cache?.let { c ->
-                    val snapshot = withContext(Dispatchers.Main) { st.results.toList() }
-                    withContext(Dispatchers.IO) { c.save(bucketId, snapshot) }
+                // 收敛点（必须无条件到达）：空相册 / 查询无结果时若直接跳过，
+                // UI 的完成轮询（每 200ms）永不终止 → 空转耗电，且进度条永久停在「扫描中」。
+                // 先置 completed 再清 running，避免「已读到 running=true、随后读到 completed=true」
+                // 的撕裂读把 spinner 锁死（UI 侧同时按 running && !completed 判定，双保险）。
+                // 身份守卫：join() 之后到此处没有挂起点，被 cancel 的旧 job 仍可能执行到这里；
+                // 若它已被新 job 取代（st.job 变了），就绝不能替新扫描写下「已完成」。
+                if (st.job === self) {
+                    st.completed = true
+                    st.running = false
+                    // 落盘本次判定（Main 取快照 → IO 写；失败静默）
+                    cache?.let { c ->
+                        val snapshot = withContext(Dispatchers.Main) { st.results.toList() }
+                        withContext(Dispatchers.IO) { c.save(bucketId, snapshot) }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 扫描失败不冒充空态：落错误位并终止进度轮询，UI 给重试入口；
+                // 身份守卫同上，被取代的旧 job 不得污染新扫描的错误位
+                if (st.job === self) {
+                    st.error = e.message ?: "扫描相册失败"
+                    st.running = false
+                    st.completed = true
                 }
             }
         }
+    }
+
+    /** 扫描失败后的重试：清完成位与错误位，enter 走完整重扫流程 */
+    fun retry(bucketId: Long, scope: CoroutineScope) {
+        val st = states[bucketId] ?: return
+        st.completed = false
+        st.error = null
+        enter(bucketId, scope)
     }
 
     /** 离开相册：立即中断扫描（进度保留在内存，切回时由 enter 重扫） */

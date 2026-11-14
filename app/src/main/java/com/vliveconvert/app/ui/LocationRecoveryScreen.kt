@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
@@ -42,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +59,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -104,9 +108,13 @@ fun LocationRecoveryScreen(
     var outcome by remember {
         mutableStateOf<LocationDisplayRepair.ScanOutcome?>(null)
     }
+    /** 扫描失败不冒充空态：独立错误位，带重试入口 */
+    var scanError by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var confirm by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
+    /** 分享面板打开失败不静默：弹窗告知 */
+    var exportError by remember { mutableStateOf<String?>(null) }
     var showUnknown by remember { mutableStateOf(false) }
     /** 导出诊断报告默认脱敏坐标；勾选后才带精确坐标（主动选择） */
     var reportWithCoords by remember { mutableStateOf(false) }
@@ -124,19 +132,27 @@ fun LocationRecoveryScreen(
             selected = emptySet()
             showUnknown = false
             showOk = false
+            scanError = null
             scope.launch(Dispatchers.IO) {
-                val found = LocationDisplayRepair.scanProducts(
-                    context,
-                    onProgress = { done, total, foundN ->
-                        scanProgress = Triple(done, total, foundN)
-                    })
-                withContext(Dispatchers.Main) {
-                    outcome = found
-                    // 默认只勾选「需修复」——它们才是用户要修的那几张
-                    selected = found.rows
-                        .filter { it.classification == LocationHealth.Classification.REPAIR_NEEDED }
-                        .map { it.uri.toString() }.toSet()
-                    scanning = false
+                try {
+                    val found = LocationDisplayRepair.scanProducts(
+                        context,
+                        onProgress = { done, total, foundN ->
+                            scanProgress = Triple(done, total, foundN)
+                        })
+                    withContext(Dispatchers.Main) {
+                        outcome = found
+                        // 默认只勾选「需修复」——它们才是用户要修的那几张
+                        selected = found.rows
+                            .filter { it.classification == LocationHealth.Classification.REPAIR_NEEDED }
+                            .map { it.uri.toString() }.toSet()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        scanError = e.message ?: "体检扫描失败"
+                    }
+                } finally {
+                    withContext(Dispatchers.Main) { scanning = false }
                 }
             }
         }
@@ -230,7 +246,9 @@ fun LocationRecoveryScreen(
                 putExtra(Intent.EXTRA_TEXT, report)
             }
             context.startActivity(Intent.createChooser(intent, "导出诊断报告"))
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            exportError = "分享面板无法打开，诊断报告未能送出。\n\n可尝试截图保存，或重启后再导出。"
+        }
     }
 
     GlassScrollPauseScope(gridState) {
@@ -306,26 +324,31 @@ fun LocationRecoveryScreen(
                     .padding(start = DesignTokens.ScreenHMargin, end = 12.dp, top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    when {
-                        scanning -> "体检中 ${scanProgress.first}/${scanProgress.second}"
-                        repairing -> "重建中 ${repairProgress.first}/${repairProgress.second}"
-                        rows.isEmpty() -> "没有发现本工具产物"
-                        else -> "需修复 ${repairNeeded.size}" +
-                            (if (unknown.isNotEmpty()) " · 待确认 ${unknown.size}" else "") +
-                            (if (noLocation.isNotEmpty()) " · 无位置 ${noLocation.size}" else "") +
-                            (if (unreadable.isNotEmpty()) " · 读失败 ${unreadable.size}" else "") +
-                            " · 已正常 ${okRows.size}"
-                    },
-                    style = glassSubtitleStyle(),
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .weight(1f)
+                        .minimumInteractiveComponentSize()
                         .clip(continuousShape(8.dp))
                         .clickable(enabled = !scanning && okRows.isNotEmpty()) {
                             showOk = !showOk
-                        }
-                        .padding(vertical = 8.dp)
-                )
+                        },
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        when {
+                            scanning -> "体检中 ${scanProgress.first}/${scanProgress.second}"
+                            repairing -> "重建中 ${repairProgress.first}/${repairProgress.second}"
+                            scanError != null -> "体检失败"
+                            rows.isEmpty() -> "没有发现本工具产物"
+                            else -> "需修复 ${repairNeeded.size}" +
+                                (if (unknown.isNotEmpty()) " · 待确认 ${unknown.size}" else "") +
+                                (if (noLocation.isNotEmpty()) " · 无位置 ${noLocation.size}" else "") +
+                                (if (unreadable.isNotEmpty()) " · 读失败 ${unreadable.size}" else "") +
+                                " · 已正常 ${okRows.size}"
+                        },
+                        style = glassSubtitleStyle()
+                    )
+                }
                 if (!scanning && selectable.isNotEmpty()) {
                     Text(
                         "已选 ${selected.size} 张",
@@ -333,17 +356,14 @@ fun LocationRecoveryScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text(
-                        if (allSelected) "取消全选" else "全选",
-                        fontSize = DesignTokens.ToolRowText,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clip(continuousShape(8.dp))
-                            .clickable {
-                                selected = if (allSelected) emptySet()
-                                else selectable.map { it.uri.toString() }.toSet()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                    InlineTextButton(
+                        text = if (allSelected) "取消全选" else "全选",
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        style = TextStyle(fontSize = DesignTokens.ToolRowText),
+                        onClick = {
+                            selected = if (allSelected) emptySet()
+                            else selectable.map { it.uri.toString() }.toSet()
+                        }
                     )
                 }
             }
@@ -370,6 +390,25 @@ fun LocationRecoveryScreen(
                             )
                         }
                     }
+                    scanError != null -> Box(
+                        Modifier.fillMaxSize(), contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "体检扫描失败：$scanError",
+                                style = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            InlineTextButton(
+                                text = "重试",
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                style = TextStyle(fontSize = DesignTokens.ToolRowText),
+                                onClick = { startScan() }
+                            )
+                        }
+                    }
                     repairNeeded.isEmpty() && noLocation.isEmpty() && unknown.isEmpty() &&
                         unreadable.isEmpty() -> Box(
                         Modifier.fillMaxSize(), contentAlignment = Alignment.Center
@@ -387,14 +426,11 @@ fun LocationRecoveryScreen(
                             )
                             if (okRows.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
-                                Text(
-                                    if (showOk) "收起已正常列表" else "查看已正常列表",
-                                    fontSize = DesignTokens.ToolRowText,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .clip(continuousShape(8.dp))
-                                        .clickable { showOk = !showOk }
-                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                InlineTextButton(
+                                    text = if (showOk) "收起已正常列表" else "查看已正常列表",
+                                    contentColor = MaterialTheme.colorScheme.primary,
+                                    style = TextStyle(fontSize = DesignTokens.ToolRowText),
+                                    onClick = { showOk = !showOk }
                                 )
                             }
                         }
@@ -657,8 +693,22 @@ fun LocationRecoveryScreen(
             Text(msg + "\n\n可点底部「导出报告」把逐张判定与修复明细回传，便于定位问题。")
         }
     }
+    exportError?.let { msg ->
+        GlassDialog(
+            hazeState = hazeState,
+            onDismissRequest = { exportError = null },
+            title = "导出失败",
+            confirmLabel = "知道了",
+            onConfirm = { exportError = null }
+        ) {
+            Text(msg)
+        }
+    }
     }
 }
+
+/** 分类角标的底/字配对（bg 必须配 onXxx 级别的文字色，防止深色下亮底白字不可读） */
+private data class BadgeSpec(val text: String, val bg: Color, val fg: Color)
 
 /** 分类分段头（选择器日期分段同款）：主标题 + 副文本 + 可选组全选圈（支持半选态） */
 @Composable
@@ -679,7 +729,8 @@ private fun ClassificationHeader(
                 title,
                 fontSize = DesignTokens.SectionTitle,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.semantics { heading() }
             )
             Text(
                 subtitle,
@@ -720,11 +771,24 @@ private fun RecoveryGridCell(
         row.classification == LocationHealth.Classification.UNKNOWN
     val transition = updateTransition(selected, label = "recoveryCell")
 
-    // 选中时以几何中心为定点缩小（选择器同款动效，未退化）
-    val scale by transition.animateFloat(label = "scale") {
+    // 选中时以几何中心为定点缩小（选择器同款动效，未退化）；减少动效时直切
+    val reduceMotion = LocalReduceMotion.current
+    val scale by transition.animateFloat(
+        label = "scale",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) {
         if (it) DesignTokens.CellScaleSelected else 1f
     }
-    val cornerFraction by transition.animateFloat(label = "cornerF") { if (it) 1f else 0f }
+    val cornerFraction by transition.animateFloat(
+        label = "cornerF",
+        transitionSpec = {
+            if (reduceMotion) snap()
+            else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.01f)
+        }
+    ) { if (it) 1f else 0f }
     val cornerRadius = lerp(DesignTokens.CellRadius, DesignTokens.CellRadiusSelected, cornerFraction)
 
     val badgeBg by animateColorAsState(
@@ -733,7 +797,8 @@ private fun RecoveryGridCell(
     )
     val badgeScale by animateFloatAsState(
         targetValue = if (selected) 1f else 0.85f,
-        animationSpec = spring(
+        animationSpec = if (reduceMotion) snap()
+        else spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
@@ -777,34 +842,37 @@ private fun RecoveryGridCell(
 
         // 分类角标（右下角，「已添加/已转」同槽位同规格）：
         // 需修复=琥珀（与主界面丢位置警告同语义色）；无位置/待确认=中性黑；
-        // 读取失败=error；已正常=不显示（干净格子）
-        val (badgeText, badgeBgColor) = when (row.classification) {
+        // 读取失败=error；已正常=不显示（干净格子）。
+        // 文字用各自的 onXxx 配对色：深色下 warning/error 都是亮色底，白字对比不达标
+        val badge = when (row.classification) {
             LocationHealth.Classification.REPAIR_NEEDED ->
-                "需修复" to statusColors.warning
+                BadgeSpec("需修复", statusColors.warning, statusColors.onWarning)
             LocationHealth.Classification.UNKNOWN ->
-                "待确认" to Color.Black.copy(alpha = 0.55f)
+                BadgeSpec("待确认", Color.Black.copy(alpha = 0.55f), Color.White)
             LocationHealth.Classification.NO_LOCATION ->
-                "无位置" to Color.Black.copy(alpha = 0.55f)
+                BadgeSpec("无位置", Color.Black.copy(alpha = 0.55f), Color.White)
             LocationHealth.Classification.UNREADABLE ->
-                "读失败" to MaterialTheme.colorScheme.error
-            LocationHealth.Classification.OK -> "" to Color.Transparent
+                BadgeSpec("读失败", MaterialTheme.colorScheme.error,
+                    MaterialTheme.colorScheme.onError)
+            LocationHealth.Classification.OK ->
+                BadgeSpec("", Color.Transparent, Color.Transparent)
         }
-        if (badgeText.isNotEmpty()) {
+        if (badge.text.isNotEmpty()) {
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
                     .clip(continuousShape(DesignTokens.CornerBadgeRadius))
-                    .background(badgeBgColor.copy(alpha = 0.88f))
+                    .background(badge.bg.copy(alpha = 0.88f))
                     .padding(
                         horizontal = DesignTokens.CornerBadgeHPadding,
                         vertical = DesignTokens.CornerBadgeVPadding)
             ) {
                 Text(
-                    badgeText,
+                    badge.text,
                     fontSize = DesignTokens.CornerBadgeFontSize,
                     lineHeight = DesignTokens.CornerBadgeLineHeight,
-                    color = Color.White
+                    color = badge.fg
                 )
             }
         }

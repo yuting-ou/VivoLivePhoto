@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -66,11 +67,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.roundToInt
 import androidx.compose.ui.text.SpanStyle
@@ -83,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.HazeState
 import com.vliveconvert.app.service.applyPreset
+import com.vliveconvert.app.ui.theme.DesignTokens
 
 @Composable
 internal fun SettingsScreen(
@@ -121,7 +125,8 @@ internal fun SettingsScreen(
     Column(Modifier.fillMaxSize().glassWallpaper().glassBackdropSource(hazeState)) {
         Row(
             Modifier.fillMaxWidth().statusBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
+                .padding(start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin,
+                    top = DesignTokens.TitleTop, bottom = DesignTokens.TitleBottom),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlassIconButton(
@@ -131,8 +136,8 @@ internal fun SettingsScreen(
             Spacer(Modifier.width(12.dp))
             Text(
                 "设置",
-                style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp),
+                style = TextStyle(fontSize = DesignTokens.TitleSubpage, fontWeight = FontWeight.Bold,
+                    letterSpacing = DesignTokens.TitleSubpageTracking),
                 color = MaterialTheme.colorScheme.onBackground
             )
         }
@@ -365,6 +370,7 @@ internal fun SettingsScreen(
                     },
                     second = { modifier ->
                         SettingsToggleCard(
+                            // core 图标集无「暂停/动效」类图标；图标仅装饰，语义由文字承担
                             Icons.Filled.PlayArrow, "减少动效", "减少高光与弹窗动画",
                             reduceMotion, true, onToggleReduceMotion, modifier
                         )
@@ -444,7 +450,9 @@ internal fun SettingsScreen(
 private fun SettingsSection(title: String) {
     Spacer(Modifier.height(24.dp))
     Text(title, style = glassSectionLabelStyle(),
-        modifier = Modifier.padding(start = 12.dp, bottom = 8.dp))
+        modifier = Modifier
+            .semantics { heading() }
+            .padding(start = 12.dp, bottom = 8.dp))
 }
 
 @Composable
@@ -497,7 +505,13 @@ private fun SettingsToolCard(
         else -> MaterialTheme.colorScheme.primary
     }
     // 忙时仍交由业务回调解释原因，不把操作卡变成无反馈的死区。
-    SettingsCard(modifier.clip(continuousShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale by rememberPressScale(interaction)
+    SettingsCard(modifier
+        .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+        .clip(continuousShape(24.dp))
+        .clickable(interactionSource = interaction, indication = LocalIndication.current,
+            role = Role.Button, onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SettingsGlyph(icon, accent)
             Spacer(Modifier.weight(1f))
@@ -525,8 +539,14 @@ private fun SettingsToggleCard(
     val primary = MaterialTheme.colorScheme.primary
     val track = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
         MaterialTheme.colorScheme.primaryContainer else primary
-    SettingsCard(modifier.clip(continuousShape(24.dp))
-        .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onToggle)) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale by rememberPressScale(interaction)
+    SettingsCard(modifier
+        .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+        .clip(continuousShape(24.dp))
+        .toggleable(value = checked, enabled = enabled, role = Role.Switch,
+            interactionSource = interaction, indication = LocalIndication.current,
+            onValueChange = onToggle)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SettingsGlyph(icon, if (enabled) primary else MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
@@ -555,7 +575,13 @@ private fun SettingsToggleCard(
 
 @Composable
 private fun SettingsLinkCard(title: String, description: String, onClick: () -> Unit) {
-    SettingsCard(Modifier.clip(continuousShape(24.dp)).clickable(role = Role.Button, onClick = onClick)) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale by rememberPressScale(interaction)
+    SettingsCard(Modifier
+        .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+        .clip(continuousShape(24.dp))
+        .clickable(interactionSource = interaction, indication = LocalIndication.current,
+            role = Role.Button, onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = settingsCardTitleStyle(), color = MaterialTheme.colorScheme.onSurface)

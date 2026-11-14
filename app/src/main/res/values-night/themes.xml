@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- 深色模式窗口主题：冷启动首帧窗口底随系统走暗色，避免亮色白闪。
+         SplashScreen 背景保持品牌蓝（两种模式同一品牌认知）。 -->
+    <style name="Theme.VLiveConvert" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenBackground">#415FFF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
+    </style>
+</resources>

@@ -1,6 +1,7 @@
 package com.vliveconvert.app
 
 import androidx.test.core.app.ApplicationProvider
+import com.vliveconvert.app.picker.MediaItem
 import com.vliveconvert.app.picker.MediaRepo
 import com.vliveconvert.app.picker.PickerScanner
 import kotlinx.coroutines.CoroutineScope
@@ -82,5 +83,45 @@ class PickerScannerTest {
         st.resetProgress()
         assertFalse("resetProgress 应收敛 running（中断路径不会走收尾分支）", st.running)
         assertTrue("results 应被清空", st.results.isEmpty())
+    }
+
+    /** 扫描失败不冒充空态：错误位落位、完成位收敛（轮询终止）、running 归位 */
+    @Test
+    fun scanFailureSetsErrorAndConverges() {
+        val failingRepo = object : MediaRepo(app.contentResolver) {
+            override fun queryAlbumImages(bucketId: Long): List<MediaItem> {
+                throw IllegalStateException("media store boom")
+            }
+        }
+        val scanner = PickerScanner(failingRepo)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val bucket = 123_456L
+
+        scanner.enter(bucket, scope)
+        val st = scanner.stateOf(bucket)
+
+        val deadline = System.currentTimeMillis() + 5_000
+        while (!st.completed && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+
+        assertTrue(
+            "失败也必须收敛 completed，否则 UI 进度轮询永不终止",
+            st.completed)
+        assertFalse("失败后 running 必须归位", st.running)
+        assertTrue(
+            "失败必须落错误位，UI 才能区分「扫描失败」与「确实没有」",
+            st.error != null)
+        assertTrue("失败后不得显示任何结果", st.results.isEmpty())
+        scope.cancel()
+    }
+
+    /** 失败位契约：resetProgress 必须清错误位（切回重扫不残留旧失败提示） */
+    @Test
+    fun resetProgressClearsErrorFlag() {
+        val st = PickerScanner.ScanState()
+        st.error = "boom"
+        st.resetProgress()
+        assertTrue("resetProgress 应清错误位", st.error == null)
     }
 }

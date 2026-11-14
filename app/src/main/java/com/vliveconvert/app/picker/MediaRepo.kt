@@ -38,8 +38,8 @@ data class MediaItem(
     val sortTime: Long get() = if (dateTaken > 0) dateTaken else dateModified * 1000L
 }
 
-/** MediaStore 图片库查询（内置选择器数据源） */
-class MediaRepo(private val resolver: ContentResolver) {
+/** MediaStore 图片库查询（内置选择器数据源）；open 仅为扫描失败注入测试 */
+open class MediaRepo(private val resolver: ContentResolver) {
 
     /** 查询全部图片并按相册（bucket）分组；DCIM/Camera 置顶，其余按最新照片时间降序 */
     fun queryAlbums(): List<AlbumInfo> {
@@ -100,7 +100,7 @@ class MediaRepo(private val resolver: ContentResolver) {
     }
 
     /** 查询指定相册的全部图片，按拍摄时间降序 */
-    fun queryAlbumImages(bucketId: Long): List<MediaItem> {
+    open fun queryAlbumImages(bucketId: Long): List<MediaItem> {
         val result = mutableListOf<MediaItem>()
         try {
             resolver.query(

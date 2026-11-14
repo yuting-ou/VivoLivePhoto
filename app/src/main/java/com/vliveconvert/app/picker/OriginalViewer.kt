@@ -82,6 +82,7 @@ import com.vliveconvert.app.ui.GlassIconButton
 import com.vliveconvert.app.ui.GlossyButton
 import com.vliveconvert.app.ui.HazeGlassCard
 import com.vliveconvert.app.ui.MediaThumbnail
+import com.vliveconvert.app.ui.theme.DesignTokens
 import com.vliveconvert.app.ui.glassBackdropSource
 import com.vliveconvert.app.ui.rememberGlassHazeState
 import kotlinx.coroutines.Dispatchers
@@ -341,7 +342,7 @@ internal fun OriginalViewer(
                 .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             radius = 28.dp,
-            contentPadding = PaddingValues(10.dp)
+            contentPadding = PaddingValues(DesignTokens.DockPadding)
         ) {
             Column {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

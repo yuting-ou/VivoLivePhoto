@@ -54,10 +54,13 @@ fun PermissionScreen(
             .navigationBarsPadding()
     ) {
         val viewportHeight = maxHeight
-        // 首启入场：品牌名 → 标语 → 权限卡 → 按钮 逐个淡入上移（强 ease-out）
+        // 首启入场：品牌名 → 标语 → 权限卡 → 按钮 逐个淡入上移（强 ease-out）；
+        // 减少动效：整段入场直接就位（reveal 全部为 1，无位移）
         val appear = remember { Animatable(0f) }
+        val reduceMotion = LocalReduceMotion.current
         LaunchedEffect(Unit) {
-            appear.animateTo(1f, tween(620, easing = EaseOutStrong))
+            if (reduceMotion) appear.snapTo(1f)
+            else appear.animateTo(1f, tween(620, easing = EaseOutStrong))
         }
         fun reveal(i: Int): Float =
             ((appear.value - i * 0.16f) / 0.34f).coerceIn(0f, 1f)

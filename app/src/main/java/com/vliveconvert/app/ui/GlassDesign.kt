@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +50,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -76,12 +79,16 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -141,7 +148,8 @@ private fun Modifier.touchFollowGlow(): Modifier {
 }
 
 @Composable
-private fun isDarkGlass(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+/** 玻璃层明暗判定（surface 亮度）；供玻璃系组件与需要双档 alpha 的自绘元素共用 */
+internal fun isDarkGlass(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
 /** 整屏壁纸：由主题容器色推出来的柔光斑，玻璃层透过去就是「折射」的观感 */
 @Composable
@@ -830,7 +838,11 @@ fun GlassTextField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     placeholder: String = "",
-    singleLine: Boolean = true
+    singleLine: Boolean = true,
+    /** 读屏声明（如「搜索照片」「输出目录」）：placeholder 是独立 Text，读屏得不到字段语义 */
+    contentDescription: String? = null,
+    imeAction: ImeAction = ImeAction.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default
 ) {
     val dark = isDarkGlass()
     val shape = continuousShape(12.dp)
@@ -839,6 +851,8 @@ fun GlassTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = singleLine,
+        keyboardOptions = KeyboardOptions(imeAction = imeAction),
+        keyboardActions = keyboardActions,
         textStyle = TextStyle(fontSize = 15.sp,
             color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -848,7 +862,8 @@ fun GlassTextField(
             .background(MaterialTheme.colorScheme.onSurface.copy(
                 alpha = if (dark) 0.08f else 0.05f))
             .border(1.dp, Color.White.copy(alpha = if (dark) 0.14f else 0.60f), shape)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+            .semantics { contentDescription?.let { this.contentDescription = it } },
         decorationBox = { inner ->
             Box {
                 if (value.isEmpty()) {
@@ -883,6 +898,8 @@ fun GlassIconTile(
     tint: Color? = null,
     modifier: Modifier = Modifier,
     cornerFraction: Float = 0.26f,
+    /** 点击语义挂到 48dp 触控代理上（传入后内层图标应传 null，避免读屏重复播报） */
+    contentDescription: String? = null,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -899,7 +916,7 @@ fun GlassIconTile(
                  else Color.White.copy(alpha = if (dark) 0.08f else 0.34f)
     val edgeTop = Color.White.copy(alpha = if (dark) 0.28f else 0.95f)
     val edgeBottom = Color.White.copy(alpha = if (dark) 0.06f else 0.30f)
-    val base = modifier
+    val tile = Modifier
         .size(size)
         .graphicsLayer {
             scaleX = scale
@@ -911,24 +928,34 @@ fun GlassIconTile(
         .clip(shape)
         .background(Brush.verticalGradient(listOf(top, bottom)))
         .border(1.dp, Brush.verticalGradient(listOf(edgeTop, edgeBottom)), shape)
-    Box(
+    // 外层占位 = 视觉尺寸（布局不因热区扩张而移动）；点击命中走居中的 48dp
+    // 透明代理，溢出部分仍可命中（祖先无 clip）。按压缩放经同一 interactionSource。
+    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(tile, contentAlignment = Alignment.Center) {
+            Box(Modifier.matchParentSize().background(Brush.verticalGradient(
+                listOf(Color.White.copy(alpha = if (dark) 0.06f else 0.22f),
+                    Color.Transparent), endY = 70f)))
+            Box(Modifier.matchParentSize().background(Brush.verticalGradient(
+                listOf(Color.Transparent,
+                    Color.Black.copy(alpha = if (dark) 0.10f else 0.04f)),
+                startY = 40f)))
+            content()
+        }
         if (onClick != null) {
-            base.clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                onClick = onClick
+            Box(
+                Modifier
+                    .requiredSize(48.dp.coerceAtLeast(size))
+                    .clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onClick = onClick
+                    )
+                    .semantics {
+                        role = Role.Button
+                        contentDescription?.let { this.contentDescription = it }
+                    }
             )
-        } else base,
-        contentAlignment = Alignment.Center
-    ) {
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(
-            listOf(Color.White.copy(alpha = if (dark) 0.06f else 0.22f),
-                Color.Transparent), endY = 70f)))
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(
-            listOf(Color.Transparent,
-                Color.Black.copy(alpha = if (dark) 0.10f else 0.04f)),
-            startY = 40f)))
-        content()
+        }
     }
 }
 
@@ -958,8 +985,12 @@ fun GlassIconButton(
     size: Dp = 40.dp,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
-    GlassIconTile(size = size, modifier = modifier, onClick = onClick) {
-        Icon(icon, contentDescription = contentDescription, tint = tint,
+    GlassIconTile(
+        size = size, modifier = modifier, onClick = onClick,
+        contentDescription = contentDescription
+    ) {
+        // 描述挂在 48dp 触控代理上，内层图标置 null 避免读屏重复播报
+        Icon(icon, contentDescription = null, tint = tint,
             modifier = Modifier.size(size * 0.45f))
     }
 }

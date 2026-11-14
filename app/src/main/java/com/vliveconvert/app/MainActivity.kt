@@ -60,17 +60,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.HorizontalDivider
+import com.vliveconvert.app.ui.continuousShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -379,6 +379,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var scanner: PickerScanner
     private var showPicker by mutableStateOf(false)
     private var pickerAlbums by mutableStateOf<List<AlbumInfo>>(emptyList())
+    /** 进程被杀后恢复的待转换条数：驱动主界面 Notice 卡 */
+    private var recoveredQueueCount by mutableStateOf(0)
 
     // 权限
     private var showSettingsDialog by mutableStateOf(false)
@@ -904,7 +906,8 @@ class MainActivity : ComponentActivity() {
             cleanupSharedImportCache()
             if (pending > 0) {
                 withContext(Dispatchers.Main) {
-                    ConvertCenter.statusText = "上次转换被中断，$pending 张待转换可继续（直接点「开始转换」）"
+                    // 恢复提示走主界面 Notice 卡（顶栏一行小字用户注意不到）
+                    recoveredQueueCount = pending
                 }
             }
         }
@@ -1322,6 +1325,7 @@ class MainActivity : ComponentActivity() {
                                     it.done && it.lostGps && !it.failed
                                 },
                                 onReconvertLostGps = { reconvertLostGpsItems() },
+                                recoveredQueueCount = recoveredQueueCount,
                                 onReconvertItem = { ci -> reconvertOneItem(ci) },
                                 outputRelPath = outputRelPath,
                                 moveToCamera = moveToCamera,
@@ -1341,14 +1345,18 @@ class MainActivity : ComponentActivity() {
                                 onShareItem = { ci ->
                                     val uriStr = ci.outUri
                                     if (uriStr == null) {
-                                        ConvertCenter.statusText = "该条目没有可分享的产物"
+                                        lifecycleScope.launch {
+                                            snackbarHostState.showSnackbar("该条目没有可分享的产物")
+                                        }
                                     } else try {
                                         startActivity(
                                             Intent.createChooser(
                                                 ShareIntents.forLivePhoto(Uri.parse(uriStr)),
                                                 "分享实况照片"))
                                     } catch (_: Exception) {
-                                        ConvertCenter.statusText = "无法分享（找不到可处理的应用）"
+                                        lifecycleScope.launch {
+                                            snackbarHostState.showSnackbar("无法分享（找不到可处理的应用）")
+                                        }
                                     }
                                 },
                                 onRemove = { ci -> removeItemWithUndo(ci) },
@@ -1400,7 +1408,7 @@ class MainActivity : ComponentActivity() {
                                         outgoing.shiftFraction * size.width
                                     translationY = -outgoing.liftFraction * size.height
                                     shadowElevation = 24.dp.toPx() * outgoing.cornerFraction
-                                    shape = RoundedCornerShape(32.dp * outgoing.cornerFraction)
+                                    shape = continuousShape(32.dp * outgoing.cornerFraction)
                                     clip = true
                                 }
                             }
@@ -1679,7 +1687,9 @@ class MainActivity : ComponentActivity() {
                                 outputPathInput = it
                                 outputPathError = outputPathErrorMessage(it)
                             },
-                            placeholder = "Pictures/VLiveConvert"
+                            placeholder = "Pictures/VLiveConvert",
+                            contentDescription = "输出目录相对路径",
+                            imeAction = ImeAction.Done
                         )
                         outputPathError?.let { error ->
                             Spacer(Modifier.height(6.dp))
@@ -1717,15 +1727,13 @@ class MainActivity : ComponentActivity() {
                                             try {
                                                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
                                             } catch (_: Exception) {
-                                                ConvertCenter.statusText = "无法打开产物"
+                                                lifecycleScope.launch {
+                                                    snackbarHostState.showSnackbar("无法打开产物")
+                                                }
                                             }
                                         }
                                     )
-                                    HorizontalDivider(
-                                        Modifier.padding(vertical = 8.dp),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                            .copy(alpha = 0.08f)
-                                    )
+                                    Box(Modifier.padding(vertical = 8.dp)) { GlassDivider() }
                                 }
                             }
                         }
@@ -2857,7 +2865,7 @@ internal fun PreflightWarnPanel(text: String) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(continuousShape(12.dp))
             .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {

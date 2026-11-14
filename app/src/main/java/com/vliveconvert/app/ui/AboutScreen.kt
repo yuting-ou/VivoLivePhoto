@@ -3,6 +3,7 @@ package com.vliveconvert.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -87,7 +89,8 @@ fun AboutScreen(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                .padding(start = DesignTokens.ScreenHMargin, end = DesignTokens.ScreenHMargin,
+                    top = DesignTokens.TitleTop, bottom = DesignTokens.TitleBottom),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlassIconButton(
@@ -99,8 +102,8 @@ fun AboutScreen(
             Spacer(Modifier.size(12.dp))
             Text(
                 "关于与开源许可",
-                style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp,
+                style = TextStyle(fontSize = DesignTokens.TitleSubpage, fontWeight = FontWeight.Bold,
+                    letterSpacing = DesignTokens.TitleSubpageTracking,
                     color = MaterialTheme.colorScheme.onBackground)
             )
         }
@@ -255,13 +258,20 @@ fun AboutScreen(
 
 @Composable
 private fun LicenseLink(url: String, onClick: () -> Unit) {
-    Text(
-        url,
-        style = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.primary,
-            textDecoration = TextDecoration.Underline),
-        modifier = Modifier
+    // 整行 48dp 可点：外链是低频但重要的动作，31dp 纯文字热区容易点偏
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(continuousShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp)
-    )
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            url,
+            style = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline)
+        )
+    }
 }

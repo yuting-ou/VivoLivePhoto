@@ -58,12 +58,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -93,6 +90,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -144,6 +142,8 @@ fun MainScreen(
     /** 已完成但丢了位置的可重转条数：>0 时显示「重新转换找回位置」入口 */
     reconvertCount: Int,
     onReconvertLostGps: () -> Unit,
+    /** 进程被杀后恢复的待转换条数：>0 时提示卡给「开始转换」入口（不再塞顶栏小字） */
+    recoveredQueueCount: Int = 0,
     /** 单个条目行内「重转」 */
     onReconvertItem: (ConvertItem) -> Unit,
     outputRelPath: String,
@@ -224,6 +224,10 @@ fun MainScreen(
         // 语义色只落在「圆点 + 动作文字」上、底色统一为中性容器色：
         // 这样三条同现时是「一组提示」，而不是三条不同颜色的色带横贯屏幕
         val notices = buildList {
+            if (recoveredQueueCount > 0 && !isConverting) add(
+                Notice("上次转换被中断，$recoveredQueueCount 张待转换可继续",
+                    "开始转换", MaterialTheme.colorScheme.primary,
+                    Icons.Filled.PlayArrow, onStartConvert))
             if (locationMissing) add(
                 Notice("未授予「位置」权限，转换会丢失 GPS 地点信息",
                     "去授权", statusColors.warning, Icons.Filled.LocationOn, onGrantLocation))
@@ -275,12 +279,17 @@ fun MainScreen(
 
         // ── 状态摘要（长文案折叠，点击看详情） ──
         // 文案更新（如一次转换结束的「转换完成：…」）时柔和淡入上移，而非硬切
+        val reduceMotion = LocalReduceMotion.current
         AnimatedContent(
             targetState = statusText,
             transitionSpec = {
-                (fadeIn(tween(200, easing = EaseOutStrong)) +
-                    slideInVertically(tween(200, easing = EaseOutStrong)) { it / 3 })
-                    .togetherWith(fadeOut(tween(130)))
+                if (reduceMotion) {
+                    fadeIn(snap()) togetherWith fadeOut(snap())
+                } else {
+                    (fadeIn(tween(200, easing = EaseOutStrong)) +
+                        slideInVertically(tween(200, easing = EaseOutStrong)) { it / 3 })
+                        .togetherWith(fadeOut(tween(130)))
+                }
             },
             label = "statusSummary"
         ) { text ->
@@ -371,11 +380,15 @@ fun MainScreen(
             AnimatedContent(
                 targetState = items.isEmpty(),
                 transitionSpec = {
-                    (fadeIn(tween(240, easing = EaseOutStrong)) + scaleIn(
-                        initialScale = 0.96f,
-                        animationSpec = tween(240, easing = EaseOutStrong))) togetherWith
-                        (fadeOut(tween(160)) + scaleOut(
-                            targetScale = 0.96f, animationSpec = tween(160)))
+                    if (reduceMotion) {
+                        fadeIn(snap()) togetherWith fadeOut(snap())
+                    } else {
+                        (fadeIn(tween(240, easing = EaseOutStrong)) + scaleIn(
+                            initialScale = 0.96f,
+                            animationSpec = tween(240, easing = EaseOutStrong))) togetherWith
+                            (fadeOut(tween(160)) + scaleOut(
+                                targetScale = 0.96f, animationSpec = tween(160)))
+                    }
                 },
                 label = "emptyListSwitch"
             ) { empty ->
@@ -500,7 +513,7 @@ fun MainScreen(
                         dockTopPx = it.positionInRoot().y
                     },
                 radius = 28.dp,
-                contentPadding = PaddingValues(10.dp),
+                contentPadding = PaddingValues(DesignTokens.DockPadding),
                 liquid = true
             ) {
                 // 三态：2 转换中 / 1 完成节拍 / 0 空闲；尺寸由 SizeTransform 平滑过渡
@@ -511,11 +524,16 @@ fun MainScreen(
                     animationSpec = tween(160, easing = LinearOutSlowInEasing),
                     label = "shownProgress"
                 )
+                val reduceMotion = LocalReduceMotion.current
                 AnimatedContent(
                     targetState = if (isConverting) 2 else if (finishedBeat) 1 else 0,
                     transitionSpec = {
-                        (fadeIn(tween(200, easing = EaseOutStrong)) togetherWith fadeOut(tween(150))) using
-                            SizeTransform(clip = false)
+                        val crossfade = if (reduceMotion) {
+                            fadeIn(snap()) togetherWith fadeOut(snap())
+                        } else {
+                            fadeIn(tween(200, easing = EaseOutStrong)) togetherWith fadeOut(tween(150))
+                        }
+                        crossfade using SizeTransform(clip = false)
                     },
                     label = "bottomBar"
                 ) { barState ->
@@ -745,16 +763,19 @@ private fun ConvertItemRow(
     // 转换中 → 完成 / 失败的状态切换用颜色缓动，避免文字颜色硬跳
     val statusColor by animateColorAsState(statusColorTarget, tween(240), label = "statusColor")
 
-    // 失败抖动 + 同帧触觉（逻辑与 v2.0.9 一致）
+    // 失败抖动 + 同帧触觉（逻辑与 v2.0.9 一致）；减少动效时保留触觉、去掉位移
     val hapticView = LocalView.current
+    val reduceMotion = LocalReduceMotion.current
     var prevFailed by remember(ci.item.key) { mutableStateOf(ci.failed) }
     val shakeX = remember { Animatable(0f) }
     LaunchedEffect(ci.failed) {
         if (ci.failed && !prevFailed) {
             hapticView.performHapticFeedback(android.view.HapticFeedbackConstants.REJECT)
-            for (d in listOf(-10f, 10f, -7f, 7f, -3f, 0f)) {
-                shakeX.snapTo(d)
-                delay(45)
+            if (!reduceMotion) {
+                for (d in listOf(-10f, 10f, -7f, 7f, -3f, 0f)) {
+                    shakeX.snapTo(d)
+                    delay(45)
+                }
             }
         }
         prevFailed = ci.failed
@@ -937,27 +958,23 @@ private fun ConvertItemRow(
                 }
 
                 if (lostGps) {
-                    Box(
-                        Modifier
-                            .height(30.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.16f))
-                            .clickableNoRipple(onReconvert)
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("重转", style = TextStyle(fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.tertiary))
-                    }
+                    InlineTextButton(
+                        text = "重转",
+                        contentColor = MaterialTheme.colorScheme.tertiary,
+                        background = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.16f),
+                        shape = CircleShape,
+                        style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                        onClick = onReconvert
+                    )
                     Spacer(Modifier.width(4.dp))
                 }
                 // 分享产物（已完成且有导出 URI 的行才出现）
                 if (ci.done && !ci.failed && ci.outUri != null) {
-                    GlassIconTile(size = 28.dp, onClick = onShare) {
+                    GlassIconTile(size = 28.dp, onClick = onShare,
+                        contentDescription = "分享实况照片") {
                         Icon(
                             Icons.Filled.Share,
-                            contentDescription = "分享实况照片",
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
@@ -965,10 +982,11 @@ private fun ConvertItemRow(
                     Spacer(Modifier.width(4.dp))
                 }
                 if (!busy) {
-                    GlassIconTile(size = 28.dp, onClick = onRemove) {
+                    GlassIconTile(size = 28.dp, onClick = onRemove,
+                        contentDescription = "移除") {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "移除",
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
