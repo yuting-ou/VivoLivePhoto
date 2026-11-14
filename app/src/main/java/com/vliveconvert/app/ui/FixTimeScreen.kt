@@ -100,7 +100,9 @@ fun FixTimeScreen(
     onFix: (List<MediaItem>) -> Unit,
     hazeState: HazeState = rememberGlassHazeState()
 ) {
-    var currentBucketId by remember { mutableStateOf(albums.firstOrNull()?.bucketId) }
+    // 挂 albums key：openFixTime 先进页后异步查相册，首帧 albums 为空——
+    // 不挂 key 会把 bucketId 锁死在 null，出现「有相册胶囊却显示没有可用相册」的矛盾态
+    var currentBucketId by remember(albums) { mutableStateOf(albums.firstOrNull()?.bucketId) }
     val bucketId = currentBucketId
     val selected = remember { mutableStateListOf<MediaItem>() }
     val gridState = rememberLazyGridState()
